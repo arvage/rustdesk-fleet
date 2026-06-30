@@ -8,4 +8,9 @@ def _get_flash(request):
     return request.session.pop("flash", None)
 
 
+def _get_new_user_pw(request):
+    return request.session.pop("new_user_pw", None)
+
+
 templates.env.globals["get_flash"] = _get_flash
+templates.env.globals["get_new_user_pw"] = _get_new_user_pw

@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Users — RustDesk Fleet{% endblock %}
+{% block page_title %}Users{% endblock %}
+{% block topbar_actions %}
+  <button onclick="document.getElementById('create-modal').style.display='flex'" class="btn btn-primary btn-sm">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    Add User
+  </button>
+{% endblock %}
+
+{% block content %}
+
+{# One-time new-user password reveal #}
+{% set new_pw = get_new_user_pw(request) %}
+{% if new_pw %}
+<div class="flash success" style="flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:20px">
+  <strong>Account ready — share these credentials once, they won't be shown again:</strong>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:4px">
+    <span>Email: <code>{{ new_pw.email }}</code></span>
+    <span>Password: <code style="background:#D1FAE5;padding:3px 8px;border-radius:4px">{{ new_pw.password }}</code></span>
+  </div>
+</div>
+{% endif %}
+
+{% if users %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Email</th><th>Role</th><th>Group Access</th><th>Created</th><th></th></tr>
+      </thead>
+      <tbody>
+      {% for u in users %}
+        <tr>
+          <td style="font-weight:500">{{ u.display_name or '—' }}</td>
+          <td class="text-muted">{{ u.email }}</td>
+          <td>
+            {% if u.id == current_user.id %}
+              <span class="badge badge-active">{{ u.role }}</span>
+            {% else %}
+            <form method="post" action="/users/{{ u.id }}/role" style="margin:0;display:inline">
+              <select name="role" onchange="this.form.submit()"
+                      style="padding:3px 8px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:12px;background:var(--surface);cursor:pointer">
+                <option value="tech"  {% if u.role == 'tech'  %}selected{% endif %}>tech</option>
+                <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>admin</option>
+              </select>
+            </form>
+            {% endif %}
+          </td>
+          <td>
+            {% if u.role == 'admin' %}
+              <span class="text-muted text-sm">All groups</span>
+            {% else %}
+            <form method="post" action="/users/{{ u.id }}/access" style="margin:0;display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap">
+              {% for g in groups %}
+              <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+                <input type="checkbox" name="group_ids" value="{{ g.id }}"
+                       {% if g.id in u.group_ids %}checked{% endif %}
+                       onchange="this.closest('form').submit()">
+                {{ g.display_name }}
+              </label>
+              {% endfor %}
+            </form>
+            {% endif %}
+          </td>
+          <td class="text-muted text-sm">{{ u.created_at[:10] }}</td>
+          <td>
+            <div style="display:flex;gap:6px">
+              <form method="post" action="/users/{{ u.id }}/reset-password" style="margin:0"
+                    onsubmit="return confirm('Reset password for {{ u.email }}?')">
+                <button type="submit" class="btn btn-ghost btn-sm">Reset pw</button>
+              </form>
+              {% if u.id != current_user.id %}
+              <form method="post" action="/users/{{ u.id }}/delete" style="margin:0"
+                    onsubmit="return confirm('Delete {{ u.email }}? This cannot be undone.')">
+                <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Delete</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card"><div class="card-body">
+  <div class="empty">
+    <div class="empty-icon">👤</div>
+    <p>No users yet.</p>
+  </div>
+</div></div>
+{% endif %}
+
+<!-- Create user modal -->
+<div id="create-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:14px;padding:28px 28px 24px;width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h2 style="font-size:16px;font-weight:700">Add User</h2>
+      <button onclick="document.getElementById('create-modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">✕</button>
+    </div>
+    <p class="text-muted text-sm" style="margin-bottom:16px">A temporary password will be generated. Share it once — it won't be shown again.</p>
+    <form method="post" action="/users">
+      <div class="field" style="margin-bottom:12px">
+        <label for="new-name">Full name</label>
+        <input type="text" id="new-name" name="display_name" placeholder="Jane Smith" required style="width:100%">
+      </div>
+      <div class="field" style="margin-bottom:12px">
+        <label for="new-email">Email</label>
+        <input type="email" id="new-email" name="email" placeholder="jane@example.com" required style="width:100%">
+      </div>
+      <div class="field" style="margin-bottom:20px">
+        <label for="new-role">Role</label>
+        <select id="new-role" name="role" style="padding:7px 11px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;width:100%;background:var(--surface)">
+          <option value="tech">tech</option>
+          <option value="admin">admin</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" onclick="document.getElementById('create-modal').style.display='none'" class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create user</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

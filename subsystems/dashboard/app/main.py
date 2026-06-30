@@ -11,6 +11,7 @@ from app.routes.home import router as home_router
 from app.routes.groups import router as groups_router
 from app.routes.audit import router as audit_router
 from app.routes.devices import router as devices_router
+from app.routes.users import router as users_router
 from app.deps import run_migrations
 
 app = FastAPI(docs_url=None, redoc_url=None)
@@ -42,8 +43,15 @@ async def setup_redirect_handler(request: Request, _exc: _SetupRedirect):
     return RedirectResponse("/setup", status_code=303)
 
 
+@app.exception_handler(PermissionError)
+async def permission_error_handler(request: Request, exc: PermissionError):
+    request.session["flash"] = {"type": "error", "msg": str(exc)}
+    return RedirectResponse("/", status_code=303)
+
+
 app.include_router(auth_router)
 app.include_router(home_router)
 app.include_router(devices_router)
 app.include_router(groups_router)
 app.include_router(audit_router)
+app.include_router(users_router)

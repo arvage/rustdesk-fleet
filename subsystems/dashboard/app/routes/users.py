@@ -1,0 +1,241 @@
+import secrets
+import string
+
+import bcrypt
+from fastapi import APIRouter, Depends, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+
+from app.auth import require_auth
+from app.deps import get_db
+from app.templates_config import templates
+
+router = APIRouter()
+
+
+def _set_flash(request: Request, type_: str, msg: str) -> None:
+    request.session["flash"] = {"type": type_, "msg": msg}
+
+
+def _require_admin(current_user: dict) -> None:
+    if current_user["role"] != "admin":
+        raise PermissionError("Admin access required.")
+
+
+def _gen_password(length: int = 16) -> str:
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+@router.get("/users", response_class=HTMLResponse)
+async def users_list(request: Request, current_user: dict = Depends(require_auth)):
+    _require_admin(current_user)
+    conn = get_db()
+    users = conn.execute(
+        "SELECT id, email, display_name, role, created_at FROM users ORDER BY created_at"
+    ).fetchall()
+    groups = conn.execute(
+        "SELECT id, slug, display_name FROM client_groups ORDER BY display_name"
+    ).fetchall()
+
+    # Fetch group access per user
+    access_rows = conn.execute(
+        "SELECT user_id, group_id FROM user_group_access"
+    ).fetchall()
+    conn.close()
+
+    access_by_user: dict[int, set[int]] = {}
+    for row in access_rows:
+        access_by_user.setdefault(row["user_id"], set()).add(row["group_id"])
+
+    users_with_access = [
+        {**dict(u), "group_ids": access_by_user.get(u["id"], set())}
+        for u in users
+    ]
+
+    return templates.TemplateResponse(
+        request,
+        "users.html",
+        {
+            "users": users_with_access,
+            "groups": groups,
+            "current_user": current_user,
+        },
+    )
+
+
+@router.post("/users")
+async def user_create(
+    request: Request,
+    email: str = Form(...),
+    display_name: str = Form(...),
+    role: str = Form("tech"),
+    current_user: dict = Depends(require_auth),
+):
+    _require_admin(current_user)
+    email = email.lower().strip()
+    display_name = display_name.strip()
+
+    if role not in ("tech", "admin"):
+        _set_flash(request, "error", "Invalid role.")
+        return RedirectResponse("/users", status_code=303)
+
+    temp_password = _gen_password()
+    pw_hash = bcrypt.hashpw(temp_password.encode(), bcrypt.gensalt(rounds=12)).decode()
+
+    conn = get_db()
+    existing = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+    if existing:
+        conn.close()
+        _set_flash(request, "error", f"A user with email {email} already exists.")
+        return RedirectResponse("/users", status_code=303)
+
+    conn.execute(
+        "INSERT INTO users (email, display_name, role, password_hash) VALUES (?, ?, ?, ?)",
+        (email, display_name, role, pw_hash),
+    )
+    conn.commit()
+    conn.close()
+
+    # Store the temp password in the session flash so admin can copy it once
+    request.session["new_user_pw"] = {"email": email, "password": temp_password}
+    return RedirectResponse("/users", status_code=303)
+
+
+@router.post("/users/{user_id}/role")
+async def user_set_role(
+    request: Request,
+    user_id: int,
+    role: str = Form(...),
+    current_user: dict = Depends(require_auth),
+):
+    _require_admin(current_user)
+    if role not in ("tech", "admin"):
+        _set_flash(request, "error", "Invalid role.")
+        return RedirectResponse("/users", status_code=303)
+    if user_id == current_user["id"]:
+        _set_flash(request, "error", "You cannot change your own role.")
+        return RedirectResponse("/users", status_code=303)
+
+    conn = get_db()
+    conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+    conn.commit()
+    conn.close()
+    _set_flash(request, "success", "Role updated.")
+    return RedirectResponse("/users", status_code=303)
+
+
+@router.post("/users/{user_id}/access")
+async def user_set_access(
+    request: Request,
+    user_id: int,
+    group_ids: list[int] = Form(default=[]),
+    current_user: dict = Depends(require_auth),
+):
+    _require_admin(current_user)
+    conn = get_db()
+    conn.execute("DELETE FROM user_group_access WHERE user_id = ?", (user_id,))
+    for gid in group_ids:
+        conn.execute(
+            "INSERT OR IGNORE INTO user_group_access (user_id, group_id) VALUES (?, ?)",
+            (user_id, gid),
+        )
+    conn.commit()
+    conn.close()
+    _set_flash(request, "success", "Group access updated.")
+    return RedirectResponse("/users", status_code=303)
+
+
+@router.post("/users/{user_id}/reset-password")
+async def user_reset_password(
+    request: Request,
+    user_id: int,
+    current_user: dict = Depends(require_auth),
+):
+    _require_admin(current_user)
+    temp_password = _gen_password()
+    pw_hash = bcrypt.hashpw(temp_password.encode(), bcrypt.gensalt(rounds=12)).decode()
+
+    conn = get_db()
+    user = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        conn.close()
+        _set_flash(request, "error", "User not found.")
+        return RedirectResponse("/users", status_code=303)
+    conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pw_hash, user_id))
+    conn.commit()
+    conn.close()
+
+    request.session["new_user_pw"] = {"email": user["email"], "password": temp_password}
+    return RedirectResponse("/users", status_code=303)
+
+
+@router.post("/users/{user_id}/delete")
+async def user_delete(
+    request: Request,
+    user_id: int,
+    current_user: dict = Depends(require_auth),
+):
+    _require_admin(current_user)
+    if user_id == current_user["id"]:
+        _set_flash(request, "error", "You cannot delete your own account.")
+        return RedirectResponse("/users", status_code=303)
+
+    conn = get_db()
+    conn.execute("DELETE FROM user_group_access WHERE user_id = ?", (user_id,))
+    conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+    _set_flash(request, "success", "User deleted.")
+    return RedirectResponse("/users", status_code=303)
+
+
+@router.get("/account", response_class=HTMLResponse)
+async def account_get(request: Request, current_user: dict = Depends(require_auth)):
+    return templates.TemplateResponse(
+        request, "account.html", {"current_user": current_user, "error": None, "success": False}
+    )
+
+
+@router.post("/account/password")
+async def account_change_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    new_password2: str = Form(...),
+    current_user: dict = Depends(require_auth),
+):
+    conn = get_db()
+    user = conn.execute(
+        "SELECT password_hash FROM users WHERE id = ?", (current_user["id"],)
+    ).fetchone()
+    conn.close()
+
+    if not user or not bcrypt.checkpw(current_password.encode(), user["password_hash"].encode()):
+        return templates.TemplateResponse(
+            request, "account.html",
+            {"current_user": current_user, "error": "Current password is incorrect.", "success": False},
+            status_code=400,
+        )
+    if len(new_password) < 10:
+        return templates.TemplateResponse(
+            request, "account.html",
+            {"current_user": current_user, "error": "New password must be at least 10 characters.", "success": False},
+            status_code=400,
+        )
+    if new_password != new_password2:
+        return templates.TemplateResponse(
+            request, "account.html",
+            {"current_user": current_user, "error": "New passwords do not match.", "success": False},
+            status_code=400,
+        )
+
+    pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode()
+    conn = get_db()
+    conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pw_hash, current_user["id"]))
+    conn.commit()
+    conn.close()
+
+    return templates.TemplateResponse(
+        request, "account.html",
+        {"current_user": current_user, "error": None, "success": True},
+    )
