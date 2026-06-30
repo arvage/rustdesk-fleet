@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Audit Log — RustDesk Fleet{% endblock %}
+{% block page_title %}Audit Log{% endblock %}
+
+{% block content %}
+{% if events %}
+<div class="card">
+  <div class="card-header">
+    <h2>Recent Events</h2>
+    <span class="text-muted text-sm">Last {{ events|length }}</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Time (UTC)</th><th>Event</th><th>Detail</th></tr>
+      </thead>
+      <tbody>
+      {% for e in events %}
+        <tr>
+          <td class="text-muted text-sm mono" style="white-space:nowrap">{{ e.created_at }}</td>
+          <td><code>{{ e.event }}</code></td>
+          <td class="text-sm" style="color:#475569;max-width:500px;word-break:break-all">{{ e.detail or '' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card"><div class="card-body">
+  <div class="empty">
+    <div class="empty-icon">📋</div>
+    <p>No events recorded yet.</p>
+  </div>
+</div></div>
+{% endif %}
+{% endblock %}

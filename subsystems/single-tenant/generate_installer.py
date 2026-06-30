@@ -1,0 +1,207 @@
+"""
+generate_installer.py — build a pre-configured RustDesk Windows installer.
+
+Reads server config (host, pubkey) from the fleet DB, renders the NSIS
+template, and compiles it with makensis. Output is a single .exe that
+installs RustDesk and drops a pre-configured RustDesk2.toml pointing at
+our server, tagged by client group.
+
+Usage:
+    python3 generate_installer.py build --group govirtual365-internal
+    python3 generate_installer.py list
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+FLEET_ROOT    = Path("/opt/rustdesk-fleet")
+DB_PATH       = FLEET_ROOT / "fleet.sqlite3"
+SCHEMA_PATH   = Path(__file__).parent / "schema.sql"
+NSI_TEMPLATE  = Path(__file__).parent / "installer.nsi.tmpl"
+ASSETS_DIR    = FLEET_ROOT / "installer-assets"
+OUTPUT_DIR    = FLEET_ROOT / "installers"
+
+RUSTDESK_VERSION  = "1.4.8"
+RUSTDESK_EXE_NAME = f"rustdesk-{RUSTDESK_VERSION}-x86_64.exe"
+PLATFORM          = "windows-x64"
+
+
+class InstallerError(RuntimeError):
+    pass
+
+
+def get_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(SCHEMA_PATH.read_text())
+    conn.commit()
+
+
+def log_event(conn: sqlite3.Connection, event: str, detail: str = "") -> None:
+    conn.execute(
+        "INSERT INTO provisioning_events (event, detail) VALUES (?, ?)", (event, detail)
+    )
+    conn.commit()
+
+
+def build_installer(group_slug: str) -> dict:
+    conn = get_db()
+    ensure_schema(conn)
+
+    server = conn.execute("SELECT * FROM server_config WHERE id = 1").fetchone()
+    if server is None or server["status"] != "active":
+        raise InstallerError("Server not active. Run setup_server.py init first.")
+
+    group = conn.execute(
+        "SELECT * FROM client_groups WHERE slug = ?", (group_slug,)
+    ).fetchone()
+    if group is None:
+        raise InstallerError(f"Client group '{group_slug}' not found.")
+
+    existing = conn.execute(
+        """SELECT * FROM installers
+           WHERE group_id = ? AND platform = ? AND rustdesk_version = ? AND status = 'built'""",
+        (group["id"], PLATFORM, RUSTDESK_VERSION),
+    ).fetchone()
+    if existing:
+        print(f"Already built: {existing['unsigned_path']}")
+        return dict(existing)
+
+    if not shutil.which("makensis"):
+        raise InstallerError("makensis not found — install nsis: sudo apt install nsis")
+
+    rustdesk_exe_src = ASSETS_DIR / RUSTDESK_EXE_NAME
+    if not rustdesk_exe_src.exists():
+        raise InstallerError(
+            f"RustDesk source binary not found: {rustdesk_exe_src}\n"
+            f"Download it from https://github.com/rustdesk/rustdesk/releases/tag/{RUSTDESK_VERSION}"
+        )
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_filename = f"RemoteSupport-{group_slug}-{RUSTDESK_VERSION}-x64.exe"
+    output_path = OUTPUT_DIR / output_filename
+
+    cur = conn.execute(
+        """INSERT INTO installers (group_id, platform, rustdesk_version, status)
+           VALUES (?, ?, ?, 'pending')""",
+        (group["id"], PLATFORM, RUSTDESK_VERSION),
+    )
+    installer_id = cur.lastrowid
+    conn.commit()
+    log_event(conn, "installer_build_start", f"group={group_slug} installer_id={installer_id}")
+
+    try:
+        nsi_script = NSI_TEMPLATE.read_text()
+        for marker, value in {
+            "@@DISPLAY_NAME@@":    group["display_name"],
+            "@@OUTPUT_PATH@@":     str(output_path),
+            "@@RUSTDESK_EXE_SRC@@": str(rustdesk_exe_src),
+            "@@RUSTDESK_EXE_NAME@@": RUSTDESK_EXE_NAME,
+            "@@HOST@@":            server["host"],
+            "@@PUBKEY@@":          server["pubkey"],
+        }.items():
+            nsi_script = nsi_script.replace(marker, value)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nsi_path = Path(tmpdir) / "installer.nsi"
+            nsi_path.write_text(nsi_script)
+
+            result = subprocess.run(
+                ["makensis", str(nsi_path)],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                raise InstallerError(
+                    f"makensis failed (exit {result.returncode}):\n"
+                    f"{result.stdout}\n{result.stderr}"
+                )
+
+        if not output_path.exists():
+            raise InstallerError(
+                f"makensis exited 0 but output file not found: {output_path}"
+            )
+
+        sha256 = hashlib.sha256(output_path.read_bytes()).hexdigest()
+
+        conn.execute(
+            """UPDATE installers
+               SET status='built', unsigned_path=?, sha256_unsigned=?
+               WHERE id=?""",
+            (str(output_path), sha256, installer_id),
+        )
+        conn.commit()
+        log_event(conn, "installer_built", f"installer_id={installer_id} sha256={sha256[:16]}...")
+
+    except Exception as e:
+        conn.execute(
+            "UPDATE installers SET status='failed', error_message=? WHERE id=?",
+            (str(e), installer_id),
+        )
+        conn.commit()
+        log_event(conn, "installer_build_failed", str(e)[:500])
+        raise
+
+    return dict(conn.execute("SELECT * FROM installers WHERE id=?", (installer_id,)).fetchone())
+
+
+def list_installers() -> list:
+    conn = get_db()
+    ensure_schema(conn)
+    return conn.execute(
+        """SELECT i.*, cg.slug AS group_slug, cg.display_name
+           FROM installers i
+           JOIN client_groups cg ON i.group_id = cg.id
+           ORDER BY i.created_at DESC"""
+    ).fetchall()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="RustDesk installer generator")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_build = sub.add_parser("build", help="Build a pre-configured installer for a client group")
+    p_build.add_argument("--group", required=True, help="Client group slug")
+
+    sub.add_parser("list", help="List all generated installers")
+
+    args = parser.parse_args()
+
+    if args.cmd == "build":
+        try:
+            result = build_installer(args.group)
+        except InstallerError as e:
+            sys.exit(f"Build failed: {e}")
+        print(f"Installer {result['status']}.")
+        print(f"  group:    {args.group}")
+        print(f"  platform: {result['platform']}")
+        print(f"  version:  {result['rustdesk_version']}")
+        print(f"  path:     {result['unsigned_path']}")
+        print(f"  sha256:   {result['sha256_unsigned']}")
+
+    elif args.cmd == "list":
+        rows = list_installers()
+        if not rows:
+            print("No installers built yet.")
+        for r in rows:
+            print(
+                f"{r['group_slug']:<28} {r['platform']:<14} "
+                f"v{r['rustdesk_version']:<8} {r['status']:<10} "
+                f"{r['unsigned_path'] or '-'}"
+            )
+
+
+if __name__ == "__main__":
+    main()

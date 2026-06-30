@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Server Status — RustDesk Fleet{% endblock %}
+{% block page_title %}Server Status{% endblock %}
+
+{% block content %}
+{% if server %}
+<div class="stats">
+  <div class="stat-card">
+    <div class="stat-label">Status</div>
+    <div style="margin-top:6px"><span class="badge badge-{{ server.status }}">{{ server.status }}</span></div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Host</div>
+    <div class="stat-value" style="font-size:16px;margin-top:6px">{{ server.host }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">hbbs Port</div>
+    <div class="stat-value">{{ server.hbbs_port }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">hbbr Port</div>
+    <div class="stat-value">{{ server.hbbr_port }}</div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Public Key</h2></div>
+  <div class="card">
+    <div class="card-body">
+      <p class="text-sm text-muted" style="margin-bottom:10px">
+        Share this key with every client device when configuring RustDesk. It is not secret.
+      </p>
+      <div class="pubkey-box">{{ server.pubkey }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Configuration Details</h2></div>
+  <div class="card">
+    <div class="kv-grid">
+      <div class="kv-row"><div class="kv-key">Data directory</div><div class="kv-val"><code>{{ server.data_dir }}</code></div></div>
+      <div class="kv-row"><div class="kv-key">Compose file</div><div class="kv-val"><code>{{ server.compose_path }}</code></div></div>
+      <div class="kv-row"><div class="kv-key">Initialised</div><div class="kv-val text-muted">{{ server.created_at }}</div></div>
+      <div class="kv-row"><div class="kv-key">Last updated</div><div class="kv-val text-muted">{{ server.updated_at }}</div></div>
+    </div>
+  </div>
+</div>
+
+{% else %}
+<div class="card"><div class="card-body">
+  <div class="empty">
+    <div class="empty-icon">⚙️</div>
+    <p>Server not initialised.</p>
+    <p>Run <code>python3 setup_server.py init --host &lt;your-host&gt;</code> on the box.</p>
+  </div>
+</div></div>
+{% endif %}
+{% endblock %}

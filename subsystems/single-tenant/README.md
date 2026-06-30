@@ -59,30 +59,121 @@ the repo for now as historical reference (the security tradeoff reasoning
 in its README is still valid context for why this isn't a security-first
 design), but new work happens here.
 
-## Tested so far (mocked Docker, no real infra access in this sandbox)
+## Verified on real hardware (rds.pacificmit.com, 2026-06-30)
 
-- `init` brings up the server and captures its pubkey
-- `init` is idempotent — re-running it doesn't fail or duplicate the
-  `server_config` row, returns the same pubkey
-- `status` reflects current state
-- `group create`/`group list` work; duplicate and invalid slugs rejected
-- `docker-compose.yml` is valid YAML with `network_mode: host` on both
-  services
+Deployed on a fresh AWS Lightsail Ubuntu 24.04 instance (911MB RAM + 2GB
+swap already present). Docker 29.1.3, Docker Compose 2.40.3, Python 3.12.3.
 
-**Not yet tested**: real `docker compose up` against actual Docker on the
-Lightsail box (same caveat as the original provisioning subsystem before
-it). Run `init` for real and confirm against `docker ps` / `docker logs
-hbbs` before trusting the happy path.
+`python3 setup_server.py init --host rds.pacificmit.com` ran cleanly first
+try. No bugs in the script — worked exactly as designed.
+
+**Actual port bindings** (confirmed via `ss -tlnup`):
+| Port  | Proto    | Process |
+|-------|----------|---------|
+| 21115 | TCP      | hbbs (NAT test) |
+| 21116 | TCP+UDP  | hbbs (rendezvous / heartbeat) |
+| 21117 | TCP      | hbbr (relay) |
+| 21118 | TCP      | hbbs (WebSocket) |
+| 21119 | TCP      | hbbr (WebSocket) |
+
+**Pubkey** (share with every client device — not secret):
+```
+HpZma9OkRoGQEdD4gXC8kXkgMJTdaf8ZVj5KzacLfFM=
+```
+
+**Ownership**: `/opt/rustdesk-fleet` is ubuntu-owned (created before
+running the script to avoid root ownership from `sudo`). The `ubuntu` user
+is in the `docker` group; use `sg docker -c "python3 setup_server.py ..."`
+until the next login, then plain `python3 setup_server.py ...` works.
+
+**ufw**: inactive on this box — no OS firewall to configure. Only the
+Lightsail networking tab needs the ports opened (see Firewall section below).
+
+**Image tag note**: `rustdesk/rustdesk-server:1.1.14` pulled and ran fine.
+hbbs logged "new version is available: 1.1.15" at startup — the tag in
+`docker-compose.yml` is pinned to 1.1.14 deliberately; upgrade when ready.
+
+- `init` is idempotent — re-running returns same pubkey, no duplicate row
+- `status` reflects `active` with pubkey after successful init
+- `group create`/`group list` work; `govirtual365-internal` created and confirmed
+- `docker-compose.yml` valid with `network_mode: host` on both services
+
+## Firewall — Lightsail networking tab (open these manually in AWS console)
+
+ufw is inactive, so only the Lightsail tab needs updating. Open:
+
+| Port  | Protocol | Service |
+|-------|----------|---------|
+| 21115 | TCP      | hbbs NAT test |
+| 21116 | TCP      | hbbs rendezvous |
+| 21116 | UDP      | hbbs heartbeat |
+| 21117 | TCP      | hbbr relay |
+| 21118 | TCP      | hbbs WebSocket |
+| 21119 | TCP      | hbbr WebSocket |
+
+To test reachability from outside the box:
+```bash
+nc -zv rds.pacificmit.com 21115
+nc -zv rds.pacificmit.com 21116
+nc -zv rds.pacificmit.com 21117
+```
+
+## Installer generation — built and verified (2026-06-30)
+
+**Approach**: NSIS wrapper installer (built with `makensis` on Linux) that
+bundles the official RustDesk binary and drops a pre-configured
+`RustDesk2.toml` after install, pointing at our server.
+
+**Why not rdgen-cli**: investigated — it's a remote-build service client
+(POSTs to rdgen.crayoneater.org, 30-45 min build time, external
+dependency). The config-bundling approach is fully local, ~seconds to
+build, no external services.
+
+```bash
+cd ~/rustdesk-fleet/subsystems/single-tenant
+python3 generate_installer.py build --group govirtual365-internal
+python3 generate_installer.py list
+```
+
+Output goes to `/opt/rustdesk-fleet/installers/`. Each build is recorded
+in the `installers` table with `sha256_unsigned` for later signing
+verification.
+
+**First real build** (`govirtual365-internal`, windows-x64, v1.4.8):
+- Output: `RemoteSupport-govirtual365-internal-1.4.8-x64.exe` (24MB)
+- SHA256: `1b43687cd72969fa267c537b040678fe94d8c67c39359190cd14ca1dae4780e7`
+- Verified as valid PE32 / NSIS installer via `file`
+
+**What the installer does on the end-user's Windows machine:**
+1. Runs `rustdesk-1.4.8-x86_64.exe --silent-install` (no UI)
+2. Kills any RustDesk process that auto-started during install
+3. Writes `%APPDATA%\RustDesk\config\RustDesk2.toml` with our server/key
+4. On first launch, RustDesk reads our config and connects to `rds.pacificmit.com`
+
+**Config written to client machine:**
+```toml
+rendezvous_server = "rds.pacificmit.com"
+
+[options]
+custom-rendezvous-server = "rds.pacificmit.com"
+relay-server = "rds.pacificmit.com"
+key = "HpZma9OkRoGQEdD4gXC8kXkgMJTdaf8ZVj5KzacLfFM="
+```
+
+**Known limitation**: config writes to the *running user's* `%APPDATA%`.
+If an admin deploys this remotely under a different account, the config
+lands in the admin's profile, not the end-user's. Direct user-run
+installs (the expected flow) are fine.
+
+**Prerequisites on the build box** (all already installed):
+- `nsis` (makensis) — `sudo apt install nsis`
+- `rustdesk-1.4.8-x86_64.exe` in `/opt/rustdesk-fleet/installer-assets/`
 
 ## Not yet built
 
-- Installer generation tagging a build with a `group_id` (was scoped for
-  the old per-tenant `rdgen-cli` work; needs adapting — same tool, just
-  every installer now points at the same single server, differentiated
-  only by which group it's tagged under in the DB)
-- Dashboard reading `client_groups`/`devices`/`users` for filtering and
-  RBAC
-- Signing subsystem (unchanged by this architecture shift)
+- Signing subsystem (unchanged by this architecture shift) — needs Azure
+  Trusted Signing + GitHub Actions Windows runner
+- Dashboard reading `client_groups`/`devices`/`users` for filtering and RBAC
 
 ## Security note, stated plainly
 

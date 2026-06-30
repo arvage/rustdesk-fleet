@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Client Groups — RustDesk Fleet{% endblock %}
+{% block page_title %}Client Groups{% endblock %}
+{% block topbar_actions %}
+  <button onclick="document.getElementById('create-modal').style.display='flex'" class="btn btn-primary btn-sm">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    New Group
+  </button>
+{% endblock %}
+
+{% block content %}
+{% if groups %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Slug</th>
+          <th>Display Name</th>
+          <th>Status</th>
+          <th>Devices</th>
+          <th>Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for g in groups %}
+        <tr>
+          <td><code>{{ g.slug }}</code></td>
+          <td style="font-weight:500">{{ g.display_name }}</td>
+          <td><span class="badge badge-{{ g.status }}">{{ g.status }}</span></td>
+          <td>
+            <span style="font-weight:600">{{ g.device_count }}</span>
+            <span class="text-muted text-sm"> device{{ 's' if g.device_count != 1 }}</span>
+          </td>
+          <td class="text-muted text-sm">{{ g.created_at[:10] }}</td>
+          <td><a href="/groups/{{ g.slug }}" class="btn btn-ghost btn-sm">View →</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card"><div class="card-body">
+  <div class="empty">
+    <div class="empty-icon">👥</div>
+    <p>No client groups yet.</p>
+    <p>Create one to start building installers.</p>
+  </div>
+</div></div>
+{% endif %}
+
+<!-- Create group modal -->
+<div id="create-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:14px;padding:28px 28px 24px;width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h2 style="font-size:16px;font-weight:700">Create Client Group</h2>
+      <button onclick="document.getElementById('create-modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">✕</button>
+    </div>
+    <form method="post" action="/groups">
+      <div class="field" style="margin-bottom:14px">
+        <label for="slug">Slug</label>
+        <input type="text" id="slug" name="slug" placeholder="acme-corp"
+               pattern="[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]" required style="width:100%">
+        <span class="hint">Lowercase letters, digits, hyphens · 3–50 chars</span>
+      </div>
+      <div class="field" style="margin-bottom:20px">
+        <label for="display_name">Display Name</label>
+        <input type="text" id="display_name" name="display_name" placeholder="Acme Corp" required style="width:100%">
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" onclick="document.getElementById('create-modal').style.display='none'" class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Group</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

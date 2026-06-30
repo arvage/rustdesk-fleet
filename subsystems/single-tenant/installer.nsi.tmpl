@@ -1,0 +1,47 @@
+; RustDesk pre-configured installer — built by generate_installer.py.
+; @@PLACEHOLDER@@ markers are substituted at build time; do not edit them here.
+;
+; What this does:
+;   1. Runs the official RustDesk installer silently (no UI)
+;   2. Kills any RustDesk process that auto-started during install
+;   3. Writes RustDesk2.toml to %APPDATA%\RustDesk\config\ pointing at our server
+;
+; Limitation: config is written to the *running user's* AppData. If an admin
+; deploys this remotely under a different account, the config lands in the
+; admin's profile, not the end-user's. For direct user-run installs this is fine.
+
+Unicode True
+RequestExecutionLevel admin
+SetCompressor /SOLID lzma
+ShowInstDetails nevershow
+AutoCloseWindow true
+
+Name "@@DISPLAY_NAME@@ Remote Support"
+OutFile "@@OUTPUT_PATH@@"
+
+Section "Install"
+  ; Embed and run the official RustDesk installer silently
+  SetOutPath "$TEMP"
+  File "@@RUSTDESK_EXE_SRC@@"
+  ExecWait '"$TEMP\@@RUSTDESK_EXE_NAME@@" --silent-install'
+
+  ; Kill any RustDesk process that auto-started during install, so it
+  ; doesn't hold the config file open when we write it. Ignore errors
+  ; (exit code is non-zero if no process found, which is fine).
+  nsExec::ExecToLog 'taskkill /F /IM rustdesk.exe'
+  Pop $0
+
+  ; Write our server config. This overwrites whatever the RustDesk installer
+  ; wrote, so the user's first real launch connects to our server.
+  CreateDirectory "$APPDATA\RustDesk\config"
+  FileOpen $0 "$APPDATA\RustDesk\config\RustDesk2.toml" w
+  FileWrite $0 'rendezvous_server = "@@HOST@@"$\r$\n'
+  FileWrite $0 '$\r$\n'
+  FileWrite $0 '[options]$\r$\n'
+  FileWrite $0 'custom-rendezvous-server = "@@HOST@@"$\r$\n'
+  FileWrite $0 'relay-server = "@@HOST@@"$\r$\n'
+  FileWrite $0 'key = "@@PUBKEY@@"$\r$\n'
+  FileClose $0
+
+  Delete "$TEMP\@@RUSTDESK_EXE_NAME@@"
+SectionEnd

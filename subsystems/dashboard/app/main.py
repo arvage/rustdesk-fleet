@@ -1,0 +1,36 @@
+import os
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
+
+from app.auth import router as auth_router, _AuthRedirect
+from app.routes.home import router as home_router
+from app.routes.groups import router as groups_router
+from app.routes.audit import router as audit_router
+
+app = FastAPI(docs_url=None, redoc_url=None)
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("SESSION_SECRET", "change-me-in-production"),
+    session_cookie="rdf_session",
+    https_only=True,
+    same_site="lax",
+)
+
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.exception_handler(_AuthRedirect)
+async def auth_redirect_handler(request: Request, _exc: _AuthRedirect):
+    return RedirectResponse("/login", status_code=303)
+
+
+app.include_router(auth_router)
+app.include_router(home_router)
+app.include_router(groups_router)
+app.include_router(audit_router)

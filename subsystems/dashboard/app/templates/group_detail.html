@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}{{ group.display_name }} — RustDesk Fleet{% endblock %}
+{% block page_title %}{{ group.display_name }}{% endblock %}
+{% block topbar_actions %}
+  <span class="badge badge-{{ group.status }}">{{ group.status }}</span>
+  <span class="text-muted text-sm">Created {{ group.created_at[:10] }}</span>
+{% endblock %}
+
+{% block content %}
+<p class="text-muted text-sm" style="margin-bottom:20px">
+  <a href="/groups" style="color:inherit">Client Groups</a> / <code>{{ group.slug }}</code>
+</p>
+
+<!-- Devices -->
+<div class="section">
+  <div class="section-head">
+    <h2>Devices
+      <span class="text-muted text-sm" style="font-weight:400;margin-left:6px">{{ devices|length }} registered</span>
+    </h2>
+  </div>
+  {% if devices %}
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>RustDesk ID</th><th>Hostname</th><th>OS</th><th>Status</th><th>Last Seen</th></tr>
+        </thead>
+        <tbody>
+        {% for d in devices %}
+          <tr>
+            <td><code>{{ d.rustdesk_id or '—' }}</code></td>
+            <td>{{ d.hostname or '<span class="text-muted">—</span>' }}</td>
+            <td class="text-muted">{{ d.os or '—' }}</td>
+            <td><span class="badge badge-{{ d.status or 'unknown' }}">{{ d.status or 'unknown' }}</span></td>
+            <td class="text-muted text-sm">{{ d.last_seen or '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="card"><div class="card-body">
+    <div class="empty">
+      <div class="empty-icon">💻</div>
+      <p>No devices registered yet.</p>
+      <p>Install the client on a machine to see it appear here.</p>
+    </div>
+  </div></div>
+  {% endif %}
+</div>
+
+<!-- Installers -->
+<div class="section">
+  <div class="section-head">
+    <h2>Installers</h2>
+    <form method="post" action="/groups/{{ group.slug }}/build">
+      <button type="submit" class="btn btn-primary btn-sm">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Build Windows x64
+      </button>
+    </form>
+  </div>
+  {% if installers %}
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Platform</th><th>Version</th><th>Status</th><th>SHA256</th><th>Built</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for i in installers %}
+          <tr>
+            <td style="font-weight:500">{{ i.platform }}</td>
+            <td><code>v{{ i.rustdesk_version }}</code></td>
+            <td><span class="badge badge-{{ i.status }}">{{ i.status }}</span></td>
+            <td>
+              {% if i.sha256_unsigned %}
+              <span class="mono text-sm" title="{{ i.sha256_unsigned }}">{{ i.sha256_unsigned[:16] }}…</span>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td class="text-muted text-sm">{{ i.created_at[:10] }}</td>
+            <td>
+              {% if i.status == 'built' and i.filename %}
+              <a href="/download/{{ i.filename }}" class="btn btn-ghost btn-sm">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download
+              </a>
+              {% elif i.error_message %}
+              <span class="text-muted text-sm" title="{{ i.error_message }}">See audit log</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="card"><div class="card-body">
+    <div class="empty">
+      <div class="empty-icon">📦</div>
+      <p>No installers built yet.</p>
+      <p>Click <strong>Build Windows x64</strong> above to generate one.</p>
+    </div>
+  </div></div>
+  {% endif %}
+</div>
+{% endblock %}
