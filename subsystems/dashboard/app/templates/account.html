@@ -4,14 +4,44 @@
 
 {% block content %}
 <div style="max-width:440px">
+
+  <div class="section">
+    <div class="section-head"><h2>Profile</h2></div>
+    <div class="card">
+      <div class="card-body">
+        {% if profile_success %}
+        <div class="flash success" style="margin-bottom:16px">Profile updated.</div>
+        {% endif %}
+        {% if error and not pw_success %}
+        <div class="flash error" style="margin-bottom:16px">{{ error }}</div>
+        {% endif %}
+        <form method="post" action="/account/profile">
+          <div class="field" style="margin-bottom:12px">
+            <label for="display_name">Full name</label>
+            <input type="text" id="display_name" name="display_name"
+                   value="{{ user.display_name or '' }}" style="width:100%"
+                   autocomplete="name">
+          </div>
+          <div class="field" style="margin-bottom:20px">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email"
+                   value="{{ user.email }}" required style="width:100%"
+                   autocomplete="email">
+          </div>
+          <button type="submit" class="btn btn-primary">Update profile</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <div class="section">
     <div class="section-head"><h2>Change Password</h2></div>
     <div class="card">
       <div class="card-body">
-        {% if success %}
+        {% if pw_success %}
         <div class="flash success" style="margin-bottom:16px">Password updated.</div>
         {% endif %}
-        {% if error %}
+        {% if error and not profile_success %}
         <div class="flash error" style="margin-bottom:16px">{{ error }}</div>
         {% endif %}
         <form method="post" action="/account/password">
@@ -35,5 +65,6 @@
       </div>
     </div>
   </div>
+
 </div>
 {% endblock %}

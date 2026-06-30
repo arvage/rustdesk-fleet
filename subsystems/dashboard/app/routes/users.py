@@ -169,6 +169,45 @@ async def user_reset_password(
     return RedirectResponse("/users", status_code=303)
 
 
+@router.post("/users/{user_id}/edit")
+async def user_edit(
+    request: Request,
+    user_id: int,
+    email: str = Form(...),
+    display_name: str = Form(...),
+    current_user: dict = Depends(require_auth),
+):
+    _require_admin(current_user)
+    email = email.lower().strip()
+    display_name = display_name.strip()
+
+    if not email or "@" not in email:
+        _set_flash(request, "error", "Enter a valid email address.")
+        return RedirectResponse("/users", status_code=303)
+
+    conn = get_db()
+    conflict = conn.execute(
+        "SELECT id FROM users WHERE email = ? AND id != ?", (email, user_id)
+    ).fetchone()
+    if conflict:
+        conn.close()
+        _set_flash(request, "error", f"Email {email} is already in use by another account.")
+        return RedirectResponse("/users", status_code=303)
+
+    conn.execute(
+        "UPDATE users SET email = ?, display_name = ? WHERE id = ?",
+        (email, display_name, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+    if user_id == current_user["id"]:
+        request.session["user_name"] = display_name or email
+
+    _set_flash(request, "success", "User updated.")
+    return RedirectResponse("/users", status_code=303)
+
+
 @router.post("/users/{user_id}/delete")
 async def user_delete(
     request: Request,
@@ -191,8 +230,62 @@ async def user_delete(
 
 @router.get("/account", response_class=HTMLResponse)
 async def account_get(request: Request, current_user: dict = Depends(require_auth)):
+    conn = get_db()
+    user = conn.execute(
+        "SELECT email, display_name FROM users WHERE id = ?", (current_user["id"],)
+    ).fetchone()
+    conn.close()
     return templates.TemplateResponse(
-        request, "account.html", {"current_user": current_user, "error": None, "success": False}
+        request, "account.html",
+        {"current_user": current_user, "user": user, "error": None, "pw_success": False, "profile_success": False},
+    )
+
+
+@router.post("/account/profile")
+async def account_update_profile(
+    request: Request,
+    email: str = Form(...),
+    display_name: str = Form(...),
+    current_user: dict = Depends(require_auth),
+):
+    email = email.lower().strip()
+    display_name = display_name.strip()
+
+    if not email or "@" not in email:
+        conn = get_db()
+        user = conn.execute("SELECT email, display_name FROM users WHERE id = ?", (current_user["id"],)).fetchone()
+        conn.close()
+        return templates.TemplateResponse(
+            request, "account.html",
+            {"current_user": current_user, "user": user, "error": "Enter a valid email address.", "pw_success": False, "profile_success": False},
+            status_code=400,
+        )
+
+    conn = get_db()
+    conflict = conn.execute(
+        "SELECT id FROM users WHERE email = ? AND id != ?", (email, current_user["id"])
+    ).fetchone()
+    if conflict:
+        user = conn.execute("SELECT email, display_name FROM users WHERE id = ?", (current_user["id"],)).fetchone()
+        conn.close()
+        return templates.TemplateResponse(
+            request, "account.html",
+            {"current_user": current_user, "user": user, "error": "That email is already in use.", "pw_success": False, "profile_success": False},
+            status_code=400,
+        )
+
+    conn.execute(
+        "UPDATE users SET email = ?, display_name = ? WHERE id = ?",
+        (email, display_name, current_user["id"]),
+    )
+    conn.commit()
+    user = conn.execute("SELECT email, display_name FROM users WHERE id = ?", (current_user["id"],)).fetchone()
+    conn.close()
+
+    request.session["user_name"] = display_name or email
+    return templates.TemplateResponse(
+        request, "account.html",
+        {"current_user": {**current_user, "name": display_name or email}, "user": user, "error": None, "pw_success": False, "profile_success": True},
     )
 
 
@@ -205,29 +298,24 @@ async def account_change_password(
     current_user: dict = Depends(require_auth),
 ):
     conn = get_db()
-    user = conn.execute(
-        "SELECT password_hash FROM users WHERE id = ?", (current_user["id"],)
+    db_user = conn.execute(
+        "SELECT email, display_name, password_hash FROM users WHERE id = ?", (current_user["id"],)
     ).fetchone()
     conn.close()
 
-    if not user or not bcrypt.checkpw(current_password.encode(), user["password_hash"].encode()):
+    def _pw_error(msg: str):
         return templates.TemplateResponse(
             request, "account.html",
-            {"current_user": current_user, "error": "Current password is incorrect.", "success": False},
+            {"current_user": current_user, "user": db_user, "error": msg, "pw_success": False, "profile_success": False},
             status_code=400,
         )
+
+    if not db_user or not bcrypt.checkpw(current_password.encode(), db_user["password_hash"].encode()):
+        return _pw_error("Current password is incorrect.")
     if len(new_password) < 10:
-        return templates.TemplateResponse(
-            request, "account.html",
-            {"current_user": current_user, "error": "New password must be at least 10 characters.", "success": False},
-            status_code=400,
-        )
+        return _pw_error("New password must be at least 10 characters.")
     if new_password != new_password2:
-        return templates.TemplateResponse(
-            request, "account.html",
-            {"current_user": current_user, "error": "New passwords do not match.", "success": False},
-            status_code=400,
-        )
+        return _pw_error("New passwords do not match.")
 
     pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode()
     conn = get_db()
@@ -237,5 +325,5 @@ async def account_change_password(
 
     return templates.TemplateResponse(
         request, "account.html",
-        {"current_user": current_user, "error": None, "success": True},
+        {"current_user": current_user, "user": db_user, "error": None, "pw_success": True, "profile_success": False},
     )

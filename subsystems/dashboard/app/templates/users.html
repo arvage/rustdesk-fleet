@@ -66,6 +66,8 @@
           <td class="text-muted text-sm">{{ u.created_at[:10] }}</td>
           <td>
             <div style="display:flex;gap:6px">
+              <button onclick="document.getElementById('edit-{{ u.id }}').style.display='table-row'"
+                      class="btn btn-ghost btn-sm">Edit</button>
               <form method="post" action="/users/{{ u.id }}/reset-password" style="margin:0"
                     onsubmit="return confirm('Reset password for {{ u.email }}?')">
                 <button type="submit" class="btn btn-ghost btn-sm">Reset pw</button>
@@ -77,6 +79,27 @@
               </form>
               {% endif %}
             </div>
+          </td>
+        </tr>
+        <tr id="edit-{{ u.id }}" style="display:none;background:#F8FAFC">
+          <td colspan="6" style="padding:12px 16px">
+            <form method="post" action="/users/{{ u.id }}/edit"
+                  style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+              <div class="field">
+                <label>Full name</label>
+                <input type="text" name="display_name" value="{{ u.display_name or '' }}" style="min-width:160px">
+              </div>
+              <div class="field">
+                <label>Email</label>
+                <input type="email" name="email" value="{{ u.email }}" required style="min-width:200px">
+              </div>
+              <div style="display:flex;gap:6px">
+                <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                <button type="button"
+                        onclick="document.getElementById('edit-{{ u.id }}').style.display='none'"
+                        class="btn btn-ghost btn-sm">Cancel</button>
+              </div>
+            </form>
           </td>
         </tr>
       {% endfor %}

@@ -4,6 +4,8 @@
 {% block topbar_actions %}
   <span class="badge badge-{{ group.status }}">{{ group.status }}</span>
   <span class="text-muted text-sm">Created {{ group.created_at[:10] }}</span>
+  <button onclick="document.getElementById('edit-group-modal').style.display='flex'"
+          class="btn btn-ghost btn-sm">Edit</button>
 {% endblock %}
 
 {% block content %}
@@ -105,5 +107,33 @@
     </div>
   </div></div>
   {% endif %}
+</div>
+
+<!-- Edit group modal -->
+<div id="edit-group-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:14px;padding:28px 28px 24px;width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h2 style="font-size:16px;font-weight:700">Edit Group</h2>
+      <button onclick="document.getElementById('edit-group-modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">✕</button>
+    </div>
+    <form method="post" action="/groups/{{ group.slug }}/edit">
+      <div class="field" style="margin-bottom:14px">
+        <label for="edit-slug">Slug</label>
+        <input type="text" id="edit-slug" name="new_slug" value="{{ group.slug }}" required
+               pattern="[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]" style="width:100%">
+        <span class="hint">Lowercase letters, digits, hyphens · 3–50 chars</span>
+      </div>
+      <div class="field" style="margin-bottom:20px">
+        <label for="edit-name">Display Name</label>
+        <input type="text" id="edit-name" name="display_name" value="{{ group.display_name }}" required style="width:100%">
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" onclick="document.getElementById('edit-group-modal').style.display='none'"
+                class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save changes</button>
+      </div>
+    </form>
+  </div>
 </div>
 {% endblock %}

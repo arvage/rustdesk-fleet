@@ -1,6 +1,9 @@
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
+
+SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]$')
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
@@ -87,6 +90,50 @@ async def group_detail(
             "current_user": current_user,
         },
     )
+
+
+@router.post("/groups/{slug}/edit")
+async def group_edit(
+    request: Request,
+    slug: str,
+    new_slug: str = Form(...),
+    display_name: str = Form(...),
+    current_user: dict = Depends(require_auth),
+):
+    new_slug = new_slug.strip().lower()
+    display_name = display_name.strip()
+
+    if not SLUG_RE.match(new_slug):
+        _set_flash(request, "error", "Invalid slug — lowercase letters, digits, hyphens, 3–50 chars.")
+        return RedirectResponse(f"/groups/{slug}", status_code=303)
+    if not display_name:
+        _set_flash(request, "error", "Display name cannot be empty.")
+        return RedirectResponse(f"/groups/{slug}", status_code=303)
+
+    conn = get_db()
+    group = conn.execute("SELECT id FROM client_groups WHERE slug = ?", (slug,)).fetchone()
+    if group is None:
+        conn.close()
+        _set_flash(request, "error", "Group not found.")
+        return RedirectResponse("/groups", status_code=303)
+
+    if new_slug != slug:
+        conflict = conn.execute(
+            "SELECT id FROM client_groups WHERE slug = ? AND id != ?", (new_slug, group["id"])
+        ).fetchone()
+        if conflict:
+            conn.close()
+            _set_flash(request, "error", f"Slug '{new_slug}' is already taken.")
+            return RedirectResponse(f"/groups/{slug}", status_code=303)
+
+    conn.execute(
+        "UPDATE client_groups SET slug = ?, display_name = ? WHERE id = ?",
+        (new_slug, display_name, group["id"]),
+    )
+    conn.commit()
+    conn.close()
+    _set_flash(request, "success", "Group updated.")
+    return RedirectResponse(f"/groups/{new_slug}", status_code=303)
 
 
 @router.post("/groups/{slug}/build")
