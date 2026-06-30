@@ -41,7 +41,7 @@ Section "Install"
   FileWrite $0 'custom-rendezvous-server = "@@HOST@@"$\r$\n'
   FileWrite $0 'relay-server = "@@HOST@@"$\r$\n'
   FileWrite $0 'key = "@@PUBKEY@@"$\r$\n'
-  FileClose $0
+@@PASSWORD_LINE@@  FileClose $0
 
   Delete "$TEMP\@@RUSTDESK_EXE_NAME@@"
 SectionEnd

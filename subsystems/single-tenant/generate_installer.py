@@ -71,15 +71,6 @@ def build_installer(group_slug: str) -> dict:
     if group is None:
         raise InstallerError(f"Client group '{group_slug}' not found.")
 
-    existing = conn.execute(
-        """SELECT * FROM installers
-           WHERE group_id = ? AND platform = ? AND rustdesk_version = ? AND status = 'built'""",
-        (group["id"], PLATFORM, RUSTDESK_VERSION),
-    ).fetchone()
-    if existing:
-        print(f"Already built: {existing['unsigned_path']}")
-        return dict(existing)
-
     if not shutil.which("makensis"):
         raise InstallerError("makensis not found — install nsis: sudo apt install nsis")
 
@@ -105,6 +96,11 @@ def build_installer(group_slug: str) -> dict:
 
     try:
         nsi_script = NSI_TEMPLATE.read_text()
+        pw = group["unattended_password"] if "unattended_password" in group.keys() else None
+        if pw:
+            password_line = f'  FileWrite $0 \'permanent-password = "{pw}"$\\r$\\n\'\n'
+        else:
+            password_line = ""
         for marker, value in {
             "@@DISPLAY_NAME@@":    group["display_name"],
             "@@OUTPUT_PATH@@":     str(output_path),
@@ -112,6 +108,7 @@ def build_installer(group_slug: str) -> dict:
             "@@RUSTDESK_EXE_NAME@@": RUSTDESK_EXE_NAME,
             "@@HOST@@":            server["host"],
             "@@PUBKEY@@":          server["pubkey"],
+            "@@PASSWORD_LINE@@":   password_line,
         }.items():
             nsi_script = nsi_script.replace(marker, value)
 

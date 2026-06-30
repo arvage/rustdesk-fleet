@@ -34,8 +34,15 @@ def get_hbbs_peers() -> dict[str, dict]:
 
 def run_migrations() -> None:
     conn = get_db()
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
-    if "password_hash" not in existing:
+
+    users_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "password_hash" not in users_cols:
         conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
         conn.commit()
+
+    groups_cols = {row[1] for row in conn.execute("PRAGMA table_info(client_groups)").fetchall()}
+    if "unattended_password" not in groups_cols:
+        conn.execute("ALTER TABLE client_groups ADD COLUMN unattended_password TEXT")
+        conn.commit()
+
     conn.close()

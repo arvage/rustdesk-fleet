@@ -99,6 +99,7 @@ async def group_detail(
             "devices": devices,
             "installers": installer_rows,
             "current_user": current_user,
+            "has_password": bool(group["unattended_password"]),
         },
     )
 
@@ -109,10 +110,13 @@ async def group_edit(
     slug: str,
     new_slug: str = Form(...),
     display_name: str = Form(...),
+    unattended_password: str = Form(""),
+    clear_password: str = Form(""),
     current_user: dict = Depends(require_auth),
 ):
     new_slug = new_slug.strip().lower()
     display_name = display_name.strip()
+    unattended_password = unattended_password.strip()
 
     if not SLUG_RE.match(new_slug):
         _set_flash(request, "error", "Invalid slug — lowercase letters, digits, hyphens, 3–50 chars.")
@@ -137,9 +141,18 @@ async def group_edit(
             _set_flash(request, "error", f"Slug '{new_slug}' is already taken.")
             return RedirectResponse(f"/groups/{slug}", status_code=303)
 
+    if clear_password == "1":
+        new_pw = None
+    elif unattended_password:
+        new_pw = unattended_password
+    else:
+        new_pw = conn.execute(
+            "SELECT unattended_password FROM client_groups WHERE id = ?", (group["id"],)
+        ).fetchone()["unattended_password"]
+
     conn.execute(
-        "UPDATE client_groups SET slug = ?, display_name = ? WHERE id = ?",
-        (new_slug, display_name, group["id"]),
+        "UPDATE client_groups SET slug = ?, display_name = ?, unattended_password = ? WHERE id = ?",
+        (new_slug, display_name, new_pw, group["id"]),
     )
     conn.commit()
     conn.close()
