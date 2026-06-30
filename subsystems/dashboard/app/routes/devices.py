@@ -48,6 +48,7 @@ async def devices_list(
 
         devices.append({
             "rustdesk_id": rid,
+            "label": fleet.get("label") or "",
             "ip": peer.get("ip") or "—",
             "status": "registered" if rid in peers else (fleet.get("status") or "unknown"),
             "registered_at": (peer.get("registered_at") or "")[:10] or "—",
@@ -107,6 +108,33 @@ async def devices_sync(request: Request, current_user: dict = Depends(require_au
     if new_count:
         msg += f" — {new_count} new"
     _set_flash(request, "success", msg)
+    return RedirectResponse("/devices", status_code=303)
+
+
+@router.post("/devices/{rustdesk_id}/label")
+async def device_label(
+    request: Request,
+    rustdesk_id: str,
+    label: str = Form(""),
+    current_user: dict = Depends(require_auth),
+):
+    label = label.strip()
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT id FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE devices SET label = ? WHERE rustdesk_id = ?",
+            (label or None, rustdesk_id),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO devices (rustdesk_id, label, status, last_seen) VALUES (?, ?, 'registered', ?)",
+            (rustdesk_id, label or None, _now_utc()),
+        )
+    conn.commit()
+    conn.close()
     return RedirectResponse("/devices", status_code=303)
 
 

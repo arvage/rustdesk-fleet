@@ -36,7 +36,7 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>RustDesk ID</th><th>IP</th><th>Status</th><th>Registered</th><th>Last Seen</th></tr>
+          <tr><th>RustDesk ID</th><th>Label</th><th>IP</th><th>Status</th><th>Registered</th><th>Last Seen</th></tr>
         </thead>
         <tbody>
         {% for d in devices %}
@@ -49,6 +49,7 @@
             </button>
             {% endif %}
           </td>
+            <td style="font-weight:{{ '500' if d.label else 'normal' }}">{{ d.label or '—' }}</td>
             <td class="text-muted text-sm mono">{{ d.ip or '—' }}</td>
             <td><span class="badge badge-{{ d.status or 'unknown' }}">{{ d.status or 'unknown' }}</span></td>
             <td class="text-muted text-sm">{{ d.registered_at or '—' }}</td>

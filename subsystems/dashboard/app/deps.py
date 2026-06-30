@@ -45,4 +45,9 @@ def run_migrations() -> None:
         conn.execute("ALTER TABLE client_groups ADD COLUMN unattended_password TEXT")
         conn.commit()
 
+    devices_cols = {row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()}
+    if "label" not in devices_cols:
+        conn.execute("ALTER TABLE devices ADD COLUMN label TEXT")
+        conn.commit()
+
     conn.close()
