@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -12,30 +13,28 @@ from app.auth import require_auth
 HBBS_DB_PATH = Path("/opt/rustdesk-fleet/data/db_v2.sqlite3")
 HBBS_PORTS = {"21115", "21116", "21117", "21118", "21119"}
 
-# Grace period: keep a device online for this many seconds after the last
-# time we saw its IP in an established TCP connection.  RustDesk drops and
-# re-establishes the hbbs TCP connection during heartbeat cycles; without
-# a grace period a 10-second poll catches the gap and flickers to offline.
-_ONLINE_GRACE_S = 60
+# How long to keep a device marked online after its IP was last seen in an
+# established TCP connection.  RustDesk reconnects every ~12-30 s; 90 s
+# gives a comfortable margin without marking genuinely-offline devices online.
+_ONLINE_GRACE_S = 90
 
-# {ip: last_seen_epoch}  — module-level so it persists across requests
+# {ip: last_seen monotonic timestamp} — written by background thread,
+# read by the API handler.  Lock guards concurrent access.
 _ip_last_seen: dict[str, float] = {}
+_lock = threading.Lock()
 
-router = APIRouter(prefix="/api")
 
-
-def _online_ips() -> set[str]:
-    """Return IPs that are currently connected OR were seen within the grace period."""
+def _poll_once() -> None:
+    """Run ss and update _ip_last_seen for every hbbs-connected remote IP."""
     try:
         result = subprocess.run(
             ["ss", "-tn", "state", "established"],
-            capture_output=True, text=True, timeout=3,
+            capture_output=True, text=True, timeout=2,
         )
     except Exception:
-        return set()
-
+        return
     now = time.monotonic()
-    for line in result.stdout.splitlines()[1:]:  # skip header row
+    for line in result.stdout.splitlines()[1:]:
         parts = line.split()
         if len(parts) < 4:
             continue
@@ -45,10 +44,29 @@ def _online_ips() -> set[str]:
         remote_addr = parts[3].rsplit(":", 1)[0].strip("[]")
         if remote_addr.startswith("::ffff:"):
             remote_addr = remote_addr[7:]
-        _ip_last_seen[remote_addr] = now
+        with _lock:
+            _ip_last_seen[remote_addr] = now
 
-    cutoff = now - _ONLINE_GRACE_S
-    return {ip for ip, ts in _ip_last_seen.items() if ts >= cutoff}
+
+def _bg_poll_loop() -> None:
+    """Background daemon thread — polls ss every second so we catch even
+    sub-second TCP connection windows that a 10-second frontend poll would miss."""
+    while True:
+        _poll_once()
+        time.sleep(1)
+
+
+# Start background polling immediately when the module is imported.
+threading.Thread(target=_bg_poll_loop, daemon=True, name="hbbs-ss-poll").start()
+
+router = APIRouter(prefix="/api")
+
+
+def _online_ips() -> set[str]:
+    """Return IPs seen connected to an hbbs port within the grace period."""
+    cutoff = time.monotonic() - _ONLINE_GRACE_S
+    with _lock:
+        return {ip for ip, ts in _ip_last_seen.items() if ts >= cutoff}
 
 
 @router.get("/devices/status")
