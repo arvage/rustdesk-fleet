@@ -78,9 +78,19 @@
           </td>
           <td data-val="{{ d.registered_at or '' }}" class="text-muted text-sm">{{ d.registered_at or '—' }}</td>
           <td data-val="{{ d.last_seen or '' }}" class="text-muted text-sm">{{ d.last_seen }}</td>
-          <td>
+          <td style="white-space:nowrap">
+            <a href="rustdesk://{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm"
+               title="Launch RustDesk on this machine and connect (requires RustDesk installed locally)"
+               style="color:#2563EB">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                   style="width:14px;height:14px">
+                <path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.82v6.36a1 1 0 0 1-1.447.894L15 14"/>
+                <rect x="1" y="6" width="15" height="12" rx="2"/>
+              </svg>
+              Connect
+            </a>
             <button onclick="document.getElementById('assign-{{ d.rustdesk_id }}').style.display='flex'"
-                    class="btn btn-ghost btn-sm">Assign →</button>
+                    class="btn btn-ghost btn-sm">Edit</button>
           </td>
         </tr>
         <tr id="assign-{{ d.rustdesk_id }}" style="display:none;background:#F8FAFC">
