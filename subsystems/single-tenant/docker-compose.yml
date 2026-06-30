@@ -1,0 +1,31 @@
+# RustDesk fleet — single-tenant server.
+#
+# One hbbs/hbbr pair for the entire fleet. All clients (internal staff,
+# all external client groups) register against this one server and share
+# one Ed25519 keypair. Client/group separation is handled entirely at the
+# application layer (dashboard, client_groups table) — NOT by this stack.
+#
+# Using network_mode: host since there's exactly one instance on this
+# box — no port collision risk, and it's the configuration RustDesk's own
+# docs recommend as simplest when you're not running multiple tenants.
+
+services:
+  hbbs:
+    image: rustdesk/rustdesk-server:1.1.14
+    container_name: hbbs
+    command: hbbs
+    network_mode: host
+    volumes:
+      - ./data:/root
+    restart: unless-stopped
+    depends_on:
+      - hbbr
+
+  hbbr:
+    image: rustdesk/rustdesk-server:1.1.14
+    container_name: hbbr
+    command: hbbr
+    network_mode: host
+    volumes:
+      - ./data:/root
+    restart: unless-stopped
