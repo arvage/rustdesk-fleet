@@ -30,7 +30,7 @@
     &nbsp;·&nbsp; {{ peer_count }} registered with server
   </span>
   {% if devices %}
-  <input id="device-filter" type="search" placeholder="Filter by ID, hostname, IP, group…"
+  <input id="device-filter" type="search" placeholder="Filter by ID, IP, group…"
          oninput="filterDevices()"
          style="padding:7px 11px;border:1px solid var(--border-md);border-radius:var(--radius-sm);
                 font-size:13px;width:280px;outline:none;background:var(--surface)">
@@ -44,27 +44,24 @@
       <thead>
         <tr>
           <th class="sortable" onclick="sortDevices(0)">RustDesk ID <span class="sort-icon">↕</span></th>
-          <th class="sortable" onclick="sortDevices(1)">Hostname <span class="sort-icon">↕</span></th>
-          <th class="sortable" onclick="sortDevices(2)">OS <span class="sort-icon">↕</span></th>
-          <th class="sortable" onclick="sortDevices(3)">IP <span class="sort-icon">↕</span></th>
-          <th class="sortable" onclick="sortDevices(4)">Status <span class="sort-icon">↕</span></th>
-          <th class="sortable" onclick="sortDevices(5)">Client Group <span class="sort-icon">↕</span></th>
-          <th class="sortable" onclick="sortDevices(6)">Last Seen <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(1)">IP <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(2)">Status <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(3)">Client Group <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(4)">Registered <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(5)">Last Seen <span class="sort-icon">↕</span></th>
           <th></th>
         </tr>
       </thead>
       <tbody id="devices-tbody">
       {% for d in devices %}
         <tr data-rid="{{ d.rustdesk_id }}"
-            data-search="{{ d.rustdesk_id }} {{ d.hostname }} {{ d.ip }} {{ d.group_name or '' }} {{ d.os }}">
+            data-search="{{ d.rustdesk_id }} {{ d.ip }} {{ d.group_name or '' }}">
           <td data-val="{{ d.rustdesk_id }}" style="white-space:nowrap">
             <code>{{ d.rustdesk_id }}</code>
             <button class="btn-copy" onclick="copyText('{{ d.rustdesk_id }}', this)" title="Copy ID">
               <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
           </td>
-          <td data-val="{{ d.hostname | lower }}" style="font-weight:500">{{ d.hostname }}</td>
-          <td data-val="{{ d.os | lower }}" class="text-muted text-sm">{{ d.os }}</td>
           <td data-val="{{ d.ip }}" class="text-muted text-sm mono">{{ d.ip }}</td>
           <td data-val="{{ d.status or 'unknown' }}">
             <span id="status-{{ d.rustdesk_id }}"
@@ -77,6 +74,7 @@
             <a href="/groups/{{ d.group_slug }}" style="color:var(--accent);text-decoration:none;font-size:13px">{{ d.group_name }}</a>
             {% else %}<span class="text-muted text-sm">Unassigned</span>{% endif %}
           </td>
+          <td data-val="{{ d.registered_at or '' }}" class="text-muted text-sm">{{ d.registered_at or '—' }}</td>
           <td data-val="{{ d.last_seen or '' }}" class="text-muted text-sm">{{ d.last_seen }}</td>
           <td>
             <button onclick="document.getElementById('assign-{{ d.rustdesk_id }}').style.display='flex'"
@@ -84,7 +82,7 @@
           </td>
         </tr>
         <tr id="assign-{{ d.rustdesk_id }}" style="display:none;background:#F8FAFC">
-          <td colspan="8" style="padding:12px 16px">
+          <td colspan="7" style="padding:12px 16px">
             <form method="post" action="/devices/{{ d.rustdesk_id }}/assign"
                   style="display:flex;align-items:center;gap:10px">
               <span class="text-sm" style="font-weight:500;color:var(--text-2)">Assign <code>{{ d.rustdesk_id }}</code> to:</span>

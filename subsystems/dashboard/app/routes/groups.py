@@ -7,7 +7,7 @@ SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]$')
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
-from app.deps import get_db
+from app.deps import get_db, get_hbbs_peers
 from app.templates_config import templates
 
 OUTPUT_DIR = Path("/opt/rustdesk-fleet/installers")
@@ -65,7 +65,7 @@ async def group_detail(
         _set_flash(request, "error", f"Group '{slug}' not found.")
         return RedirectResponse("/groups", status_code=303)
 
-    devices = conn.execute(
+    fleet_devices = conn.execute(
         "SELECT * FROM devices WHERE group_id = ? ORDER BY last_seen DESC", (group["id"],)
     ).fetchall()
 
@@ -74,6 +74,17 @@ async def group_detail(
         (group["id"],),
     ).fetchall()
     conn.close()
+
+    peers = get_hbbs_peers()
+    devices = []
+    for d in fleet_devices:
+        rid = d["rustdesk_id"]
+        peer = peers.get(rid, {})
+        devices.append({
+            **dict(d),
+            "ip": peer.get("ip") or "—",
+            "registered_at": (peer.get("registered_at") or "")[:10] or "—",
+        })
 
     installer_rows = [
         {**dict(r), "filename": Path(r["unsigned_path"]).name if r["unsigned_path"] else None}

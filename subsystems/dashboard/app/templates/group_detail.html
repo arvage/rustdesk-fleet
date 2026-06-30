@@ -25,7 +25,7 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>RustDesk ID</th><th>Hostname</th><th>OS</th><th>Status</th><th>Last Seen</th></tr>
+          <tr><th>RustDesk ID</th><th>IP</th><th>Status</th><th>Registered</th><th>Last Seen</th></tr>
         </thead>
         <tbody>
         {% for d in devices %}
@@ -38,9 +38,9 @@
             </button>
             {% endif %}
           </td>
-            <td>{{ d.hostname or '<span class="text-muted">—</span>' }}</td>
-            <td class="text-muted">{{ d.os or '—' }}</td>
+            <td class="text-muted text-sm mono">{{ d.ip or '—' }}</td>
             <td><span class="badge badge-{{ d.status or 'unknown' }}">{{ d.status or 'unknown' }}</span></td>
+            <td class="text-muted text-sm">{{ d.registered_at or '—' }}</td>
             <td class="text-muted text-sm">{{ d.last_seen or '—' }}</td>
           </tr>
         {% endfor %}
