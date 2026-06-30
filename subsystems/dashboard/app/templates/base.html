@@ -85,5 +85,15 @@
   </div>
 
 </div>
+<script>
+function copyText(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    const prev = btn.innerHTML;
+    btn.innerHTML = 'Copied!';
+    btn.style.color = '#10B981';
+    setTimeout(() => { btn.innerHTML = prev; btn.style.color = ''; }, 1500);
+  });
+}
+</script>
 </body>
 </html>

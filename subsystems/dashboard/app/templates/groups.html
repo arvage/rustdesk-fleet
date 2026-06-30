@@ -15,8 +15,7 @@
     <table>
       <thead>
         <tr>
-          <th>Slug</th>
-          <th>Display Name</th>
+          <th>Name</th>
           <th>Status</th>
           <th>Devices</th>
           <th>Created</th>
@@ -26,7 +25,6 @@
       <tbody>
       {% for g in groups %}
         <tr>
-          <td><code>{{ g.slug }}</code></td>
           <td style="font-weight:500">{{ g.display_name }}</td>
           <td><span class="badge badge-{{ g.status }}">{{ g.status }}</span></td>
           <td>

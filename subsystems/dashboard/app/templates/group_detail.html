@@ -30,7 +30,14 @@
         <tbody>
         {% for d in devices %}
           <tr>
-            <td><code>{{ d.rustdesk_id or '—' }}</code></td>
+          <td style="white-space:nowrap">
+            <code>{{ d.rustdesk_id or '—' }}</code>
+            {% if d.rustdesk_id %}
+            <button class="btn-copy" onclick="copyText('{{ d.rustdesk_id }}', this)" title="Copy ID">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+            {% endif %}
+          </td>
             <td>{{ d.hostname or '<span class="text-muted">—</span>' }}</td>
             <td class="text-muted">{{ d.os or '—' }}</td>
             <td><span class="badge badge-{{ d.status or 'unknown' }}">{{ d.status or 'unknown' }}</span></td>

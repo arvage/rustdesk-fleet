@@ -79,15 +79,4 @@
 </div></div>
 {% endif %}
 
-<script>
-function copyText(text, btn) {
-  navigator.clipboard.writeText(text).then(() => {
-    const svg = btn.querySelector('svg');
-    const prev = btn.innerHTML;
-    btn.innerHTML = (svg ? '' : '') + 'Copied!';
-    btn.style.color = '#10B981';
-    setTimeout(() => { btn.innerHTML = prev; btn.style.color = ''; }, 1500);
-  });
-}
-</script>
 {% endblock %}
