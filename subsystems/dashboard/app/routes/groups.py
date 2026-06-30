@@ -161,6 +161,37 @@ async def group_edit(
     return RedirectResponse(f"/groups/{new_slug}", status_code=303)
 
 
+@router.post("/groups/{slug}/installers/{installer_id}/delete")
+async def installer_delete(
+    request: Request,
+    slug: str,
+    installer_id: int,
+    current_user: dict = Depends(require_auth),
+):
+    conn = get_db()
+    row = conn.execute(
+        """SELECT i.id, i.unsigned_path FROM installers i
+           JOIN client_groups cg ON cg.id = i.group_id
+           WHERE i.id = ? AND cg.slug = ?""",
+        (installer_id, slug),
+    ).fetchone()
+    if row is None:
+        conn.close()
+        _set_flash(request, "error", "Installer not found.")
+        return RedirectResponse(f"/groups/{slug}", status_code=303)
+
+    if row["unsigned_path"]:
+        candidate = Path(row["unsigned_path"]).resolve()
+        if candidate.parent == OUTPUT_DIR.resolve() and candidate.exists():
+            candidate.unlink()
+
+    conn.execute("DELETE FROM installers WHERE id = ?", (installer_id,))
+    conn.commit()
+    conn.close()
+    _set_flash(request, "success", "Installer deleted.")
+    return RedirectResponse(f"/groups/{slug}", status_code=303)
+
+
 @router.post("/groups/{slug}/build")
 async def group_build(
     request: Request, slug: str, current_user: dict = Depends(require_auth)
