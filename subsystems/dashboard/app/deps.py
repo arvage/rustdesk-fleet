@@ -49,5 +49,8 @@ def run_migrations() -> None:
     if "label" not in devices_cols:
         conn.execute("ALTER TABLE devices ADD COLUMN label TEXT")
         conn.commit()
+    if "hidden" not in devices_cols:
+        conn.execute("ALTER TABLE devices ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
 
     conn.close()

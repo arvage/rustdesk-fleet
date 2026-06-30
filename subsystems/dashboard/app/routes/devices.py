@@ -1,4 +1,6 @@
+import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -6,6 +8,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.auth import require_auth
 from app.deps import get_db, get_hbbs_peers
 from app.templates_config import templates
+
+HBBS_DB_PATH = Path("/opt/rustdesk-fleet/data/db_v2.sqlite3")
 
 router = APIRouter()
 
@@ -38,9 +42,15 @@ async def devices_list(
     ).fetchall()
     conn.close()
 
-    fleet_by_id = {r["rustdesk_id"]: dict(r) for r in fleet_rows if r["rustdesk_id"]}
+    # hidden=1 devices are suppressed even if they're still in hbbs peers
+    hidden_ids = {r["rustdesk_id"] for r in fleet_rows if r["hidden"]}
+    fleet_by_id = {
+        r["rustdesk_id"]: dict(r)
+        for r in fleet_rows
+        if r["rustdesk_id"] and not r["hidden"]
+    }
 
-    all_ids = set(peers) | set(fleet_by_id)
+    all_ids = (set(peers) | set(fleet_by_id)) - hidden_ids
     devices = []
     for rid in all_ids:
         peer = peers.get(rid, {})
@@ -76,6 +86,75 @@ async def devices_list(
     )
 
 
+@router.post("/devices/{rustdesk_id}/edit")
+async def device_edit(
+    request: Request,
+    rustdesk_id: str,
+    label: str = Form(""),
+    group_id: str = Form(""),
+    current_user: dict = Depends(require_auth),
+):
+    label = label.strip() or None
+    gid = int(group_id) if group_id else None
+
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT id FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE devices SET label = ?, group_id = ? WHERE rustdesk_id = ?",
+            (label, gid, rustdesk_id),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO devices (rustdesk_id, label, group_id, status, last_seen) VALUES (?, ?, ?, 'registered', ?)",
+            (rustdesk_id, label, gid, _now_utc()),
+        )
+    conn.commit()
+    conn.close()
+    _set_flash(request, "success", "Device updated.")
+    return RedirectResponse("/devices", status_code=303)
+
+
+@router.post("/devices/{rustdesk_id}/delete")
+async def device_delete(
+    request: Request,
+    rustdesk_id: str,
+    current_user: dict = Depends(require_auth),
+):
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT id FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
+    ).fetchone()
+    if existing:
+        # Mark hidden so the device is suppressed even if it reappears in hbbs peers
+        conn.execute(
+            "UPDATE devices SET hidden = 1 WHERE rustdesk_id = ?", (rustdesk_id,)
+        )
+    else:
+        # Device only exists in hbbs — insert a hidden tombstone so it stays hidden
+        conn.execute(
+            "INSERT INTO devices (rustdesk_id, hidden, status, last_seen) VALUES (?, 1, 'deleted', ?)",
+            (rustdesk_id, _now_utc()),
+        )
+    conn.commit()
+    conn.close()
+
+    # Best-effort removal from hbbs peer DB (may fail if daemon has a write lock)
+    if HBBS_DB_PATH.exists():
+        try:
+            hconn = sqlite3.connect(HBBS_DB_PATH, timeout=2)
+            hconn.execute("DELETE FROM peer WHERE id = ?", (rustdesk_id,))
+            hconn.commit()
+            hconn.close()
+        except Exception:
+            pass
+
+    _set_flash(request, "success", f"Device {rustdesk_id} removed.")
+    return RedirectResponse("/devices", status_code=303)
+
+
 @router.post("/devices/sync")
 async def devices_sync(request: Request, current_user: dict = Depends(require_auth)):
     peers = get_hbbs_peers()
@@ -88,13 +167,14 @@ async def devices_sync(request: Request, current_user: dict = Depends(require_au
     new_count = 0
     for rustdesk_id in peers:
         existing = conn.execute(
-            "SELECT id FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
+            "SELECT id, hidden FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
         ).fetchone()
         if existing:
-            conn.execute(
-                "UPDATE devices SET last_seen = ? WHERE rustdesk_id = ?",
-                (now, rustdesk_id),
-            )
+            if not existing["hidden"]:
+                conn.execute(
+                    "UPDATE devices SET last_seen = ? WHERE rustdesk_id = ?",
+                    (now, rustdesk_id),
+                )
         else:
             conn.execute(
                 "INSERT INTO devices (rustdesk_id, status, last_seen) VALUES (?, 'registered', ?)",
@@ -108,58 +188,4 @@ async def devices_sync(request: Request, current_user: dict = Depends(require_au
     if new_count:
         msg += f" — {new_count} new"
     _set_flash(request, "success", msg)
-    return RedirectResponse("/devices", status_code=303)
-
-
-@router.post("/devices/{rustdesk_id}/label")
-async def device_label(
-    request: Request,
-    rustdesk_id: str,
-    label: str = Form(""),
-    current_user: dict = Depends(require_auth),
-):
-    label = label.strip()
-    conn = get_db()
-    existing = conn.execute(
-        "SELECT id FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
-    ).fetchone()
-    if existing:
-        conn.execute(
-            "UPDATE devices SET label = ? WHERE rustdesk_id = ?",
-            (label or None, rustdesk_id),
-        )
-    else:
-        conn.execute(
-            "INSERT INTO devices (rustdesk_id, label, status, last_seen) VALUES (?, ?, 'registered', ?)",
-            (rustdesk_id, label or None, _now_utc()),
-        )
-    conn.commit()
-    conn.close()
-    return RedirectResponse("/devices", status_code=303)
-
-
-@router.post("/devices/{rustdesk_id}/assign")
-async def device_assign(
-    request: Request,
-    rustdesk_id: str,
-    group_id: str = Form(""),
-    current_user: dict = Depends(require_auth),
-):
-    conn = get_db()
-    gid = int(group_id) if group_id else None
-    existing = conn.execute(
-        "SELECT id FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
-    ).fetchone()
-    if existing:
-        conn.execute(
-            "UPDATE devices SET group_id = ? WHERE rustdesk_id = ?", (gid, rustdesk_id)
-        )
-    else:
-        conn.execute(
-            "INSERT INTO devices (rustdesk_id, group_id, status, last_seen) VALUES (?, ?, 'registered', ?)",
-            (rustdesk_id, gid, _now_utc()),
-        )
-    conn.commit()
-    conn.close()
-    _set_flash(request, "success", "Device updated.")
     return RedirectResponse("/devices", status_code=303)

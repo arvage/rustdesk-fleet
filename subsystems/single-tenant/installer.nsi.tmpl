@@ -2,16 +2,19 @@
 ; @@PLACEHOLDER@@ markers are substituted at build time; do not edit them here.
 ;
 ; Install sequence:
-;   1. Pre-write RustDesk2.toml to both config locations BEFORE launching
-;      the RustDesk installer.  This covers the race where the RustDesk
-;      service starts during installation before we get a chance to write.
+;   1. Pre-write RustDesk2.toml to all config locations BEFORE launching
+;      the RustDesk installer, so the service reads the right server on first start.
 ;   2. Run the official RustDesk installer with --silent-install and wait.
-;      Note: the binary spawns a background child process to do the real
-;      work and then the parent exits, so ExecWait returns early.  We poll
-;      for the EXE to appear in Program Files (up to 30 s) rather than
-;      sleeping a fixed amount.
-;   3. Stop the service and tray app, then re-write config (the installer
-;      may have overwritten it during startup), then restart.
+;      The binary spawns a background child and exits early, so we poll for
+;      the installed EXE rather than sleeping a fixed amount.
+;   3. Stop the service and tray app, re-write config everywhere (the installer
+;      may have overwritten our settings during startup), then restart.
+;
+; WOW64 note: this is a 32-bit NSIS installer running on 64-bit Windows.
+;   Writing $WINDIR\System32 from a 32-bit process is silently redirected
+;   to SysWOW64.  We disable that redirection around the System32 write so
+;   the file lands where the 64-bit RustDesk service actually reads it.
+;   ProgramData ($APPDATA with SetShellVarContext all) has no such redirection.
 
 Unicode True
 RequestExecutionLevel admin
@@ -19,10 +22,12 @@ SetCompressor /SOLID lzma
 ShowInstDetails nevershow
 AutoCloseWindow true
 
+!include "x64.nsh"
+
 Name "@@DISPLAY_NAME@@ Remote Support"
 OutFile "@@OUTPUT_PATH@@"
 
-; Macro to write RustDesk2.toml — used twice (pre- and post-install)
+; Write RustDesk2.toml to the given directory (caller sets shell var context)
 !macro WriteConfig path
   CreateDirectory "${path}"
   FileOpen $0 "${path}\RustDesk2.toml" w
@@ -37,11 +42,25 @@ OutFile "@@OUTPUT_PATH@@"
 
 Section "Install"
 
-  ; ── Step 1: pre-write config so it is in place when the service first starts ──
-  !insertmacro WriteConfig "$APPDATA\RustDesk\config"
-  !insertmacro WriteConfig "$WINDIR\System32\config\systemprofile\AppData\Roaming\RustDesk\config"
+  ; ── Step 1: pre-write config ───────────────────────────────────────────────
 
-  ; ── Step 2: run the RustDesk installer ────────────────────────────────────────
+  ; Current user's Roaming AppData
+  SetShellVarContext current
+  !insertmacro WriteConfig "$APPDATA\RustDesk\config"
+
+  ; ProgramData (All Users AppData) — accessible to the service, no WOW64 issues
+  SetShellVarContext all
+  !insertmacro WriteConfig "$APPDATA\RustDesk\config"
+  SetShellVarContext current
+
+  ; SYSTEM account profile inside the real 64-bit System32.
+  ; A 32-bit NSIS process gets silently redirected to SysWOW64 for System32
+  ; writes — disable that so our file reaches the path the service reads.
+  ${DisableX64FSRedirection}
+  !insertmacro WriteConfig "$WINDIR\System32\config\systemprofile\AppData\Roaming\RustDesk\config"
+  ${EnableX64FSRedirection}
+
+  ; ── Step 2: run the RustDesk installer ────────────────────────────────────
   SetOutPath "$TEMP"
   File "@@RUSTDESK_EXE_SRC@@"
   ExecWait '"$TEMP\@@RUSTDESK_EXE_NAME@@" --silent-install'
@@ -64,15 +83,24 @@ Section "Install"
 
   install_ok:
 
-  ; ── Step 3: stop everything, re-write config, restart ─────────────────────────
+  ; ── Step 3: stop, re-write config, restart ────────────────────────────────
+  ; The RustDesk installer may have started the service with defaults and
+  ; written its own config.  Kill processes, overwrite with ours, then restart.
   nsExec::ExecToLog 'taskkill /F /IM rustdesk.exe'
   Pop $0
   nsExec::ExecToLog 'net stop RustDesk'
   Pop $0
 
-  ; Re-write config — installer may have created default config during startup
+  SetShellVarContext current
   !insertmacro WriteConfig "$APPDATA\RustDesk\config"
+
+  SetShellVarContext all
+  !insertmacro WriteConfig "$APPDATA\RustDesk\config"
+  SetShellVarContext current
+
+  ${DisableX64FSRedirection}
   !insertmacro WriteConfig "$WINDIR\System32\config\systemprofile\AppData\Roaming\RustDesk\config"
+  ${EnableX64FSRedirection}
 
   ; Restart the service then launch the tray app
   nsExec::ExecToLog 'net start RustDesk'
