@@ -196,6 +196,7 @@ tbody tr:hover td { background: #F8FAFC; }
 .badge-signed  { background: #EFF6FF; color: #1D4ED8; } .badge-signed::before  { background: #3B82F6; }
 .badge-pending { background: #FFFBEB; color: #92400E; } .badge-pending::before { background: #F59E0B; animation: pulse 1.5s infinite; }
 .badge-failed  { background: #FEF2F2; color: #991B1B; } .badge-failed::before  { background: #EF4444; }
+.badge-offline { background: #F1F5F9; color: #64748B; } .badge-offline::before { background: #94A3B8; }
 .badge-unknown { background: #F1F5F9; color: #475569; } .badge-unknown::before { background: #94A3B8; }
 
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
@@ -290,6 +291,18 @@ code {
 .login-field label { display: block; margin-bottom: 6px; }
 .login-field input { width: 100%; }
 .login-card .btn { width: 100%; justify-content: center; padding: 9px; margin-top: 6px; }
+
+/* ── Copy button ──────────────────────────────────────────────── */
+.btn-copy {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 8px; border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 500; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-3); transition: color .12s, border-color .12s, background .12s;
+  line-height: 1; white-space: nowrap;
+}
+.btn-copy:hover { color: var(--text-1); border-color: var(--border-md); background: var(--bg); }
+.btn-copy svg { width: 13px; height: 13px; flex-shrink: 0; }
 
 /* ── Key-value detail ─────────────────────────────────────────── */
 .kv-grid { display: grid; grid-template-columns: auto 1fr; gap: 0; }

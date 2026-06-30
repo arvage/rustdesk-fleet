@@ -3,6 +3,10 @@
 {% block page_title %}Devices{% endblock %}
 {% block topbar_actions %}
   <div style="display:flex;align-items:center;gap:8px">
+    <span id="status-indicator" class="text-muted text-sm" style="display:flex;align-items:center;gap:5px">
+      <span id="status-dot" style="width:7px;height:7px;border-radius:50%;background:#94A3B8;flex-shrink:0;display:inline-block"></span>
+      <span id="status-label">Checking…</span>
+    </span>
     <select onchange="window.location='/devices'+(this.value?'?group='+this.value:'')"
             style="padding:5px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);color:var(--text-1);cursor:pointer">
       <option value="" {% if not active_group %}selected{% endif %}>All groups</option>
@@ -20,7 +24,7 @@
 {% endblock %}
 
 {% block content %}
-<div style="margin-bottom:16px;display:flex;align-items:center;gap:16px">
+<div style="margin-bottom:16px">
   <span class="text-muted text-sm">
     {{ devices|length }} device{{ 's' if devices|length != 1 }}{% if active_group %} in <strong>{{ active_group }}</strong>{% endif %}
     &nbsp;·&nbsp; {{ peer_count }} registered with server
@@ -50,7 +54,12 @@
           <td style="font-weight:500">{{ d.hostname }}</td>
           <td class="text-muted text-sm">{{ d.os }}</td>
           <td class="text-muted text-sm mono">{{ d.ip }}</td>
-          <td><span class="badge badge-{{ 'active' if d.status == 'registered' else (d.status or 'unknown') }}">{{ d.status or 'unknown' }}</span></td>
+          <td>
+            <span id="status-{{ d.rustdesk_id }}"
+                  class="badge badge-{{ 'active' if d.status == 'registered' else (d.status or 'unknown') }}">
+              {{ d.status or 'unknown' }}
+            </span>
+          </td>
           <td>
             {% if d.group_name %}
             <a href="/groups/{{ d.group_slug }}" style="color:var(--accent);text-decoration:none;font-size:13px">{{ d.group_name }}</a>
@@ -62,7 +71,6 @@
                     class="btn btn-ghost btn-sm">Assign →</button>
           </td>
         </tr>
-        <!-- Assign-to-group inline panel -->
         <tr id="assign-{{ d.rustdesk_id }}" style="display:none;background:#F8FAFC">
           <td colspan="8" style="padding:12px 16px">
             <form method="post" action="/devices/{{ d.rustdesk_id }}/assign"
@@ -95,4 +103,42 @@
   </div>
 </div></div>
 {% endif %}
+
+<script>
+const POLL_MS = 10000;
+
+const statusClasses = {
+  online:  { cls: 'badge badge-active',   label: 'online' },
+  offline: { cls: 'badge badge-offline',  label: 'offline' },
+};
+
+async function refreshStatus() {
+  try {
+    const res = await fetch('/api/devices/status');
+    if (!res.ok) return;
+    const { devices } = await res.json();
+
+    let online = 0, total = 0;
+    for (const [id, st] of Object.entries(devices)) {
+      total++;
+      if (st === 'online') online++;
+      const el = document.getElementById('status-' + id);
+      if (!el) continue;
+      const s = statusClasses[st] || { cls: 'badge badge-unknown', label: st };
+      el.className = s.cls;
+      el.textContent = s.label;
+    }
+
+    const dot = document.getElementById('status-dot');
+    const lbl = document.getElementById('status-label');
+    if (dot && lbl) {
+      dot.style.background = online > 0 ? '#10B981' : '#94A3B8';
+      lbl.textContent = total ? `${online} / ${total} online` : 'No devices';
+    }
+  } catch (_) {}
+}
+
+refreshStatus();
+setInterval(refreshStatus, POLL_MS);
+</script>
 {% endblock %}
