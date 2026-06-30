@@ -82,9 +82,28 @@
                pattern="[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]" required style="width:100%">
         <span class="hint">Lowercase letters, digits, hyphens · 3–50 chars</span>
       </div>
-      <div class="field" style="margin-bottom:20px">
+      <div class="field" style="margin-bottom:14px">
         <label for="display_name">Display Name</label>
         <input type="text" id="display_name" name="display_name" placeholder="Acme Corp" required style="width:100%">
+      </div>
+      <div class="field" style="margin-bottom:20px">
+        <label for="create-pw">Unattended Access Password</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="password" id="create-pw" name="unattended_password"
+                 placeholder="Optional — embedded in installer"
+                 autocomplete="new-password" style="width:100%">
+          <button type="button" onclick="var f=document.getElementById('create-pw');f.type=f.type==='password'?'text':'password'"
+                  title="Show/hide"
+                  style="background:none;border:1px solid var(--border-md);border-radius:var(--radius-sm);
+                         padding:6px 8px;cursor:pointer;color:var(--text-3);flex-shrink:0">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                 style="width:16px;height:16px;display:block">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+        <span class="hint">Leave blank if not needed. Can be set later in group settings.</span>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button type="button" onclick="document.getElementById('create-modal').style.display='none'" class="btn btn-ghost">Cancel</button>

@@ -136,7 +136,7 @@ def get_status() -> dict | None:
 # Client group management
 # ---------------------------------------------------------------------------
 
-def create_group(slug: str, display_name: str) -> dict:
+def create_group(slug: str, display_name: str, unattended_password: str | None = None) -> dict:
     if not SLUG_RE.match(slug):
         raise ProvisioningError(f"Invalid slug '{slug}'. Use lowercase letters, digits, hyphens; 3-50 chars.")
 
@@ -147,8 +147,8 @@ def create_group(slug: str, display_name: str) -> dict:
         raise ProvisioningError(f"Client group '{slug}' already exists.")
 
     cur = conn.execute(
-        "INSERT INTO client_groups (slug, display_name) VALUES (?, ?)",
-        (slug, display_name),
+        "INSERT INTO client_groups (slug, display_name, unattended_password) VALUES (?, ?, ?)",
+        (slug, display_name, unattended_password or None),
     )
     conn.commit()
     log_event(conn, "group_created", slug)

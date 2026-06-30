@@ -40,11 +40,12 @@ async def groups_create(
     request: Request,
     slug: str = Form(...),
     display_name: str = Form(...),
+    unattended_password: str = Form(""),
     current_user: dict = Depends(require_auth),
 ):
     from setup_server import create_group, ProvisioningError
     try:
-        create_group(slug, display_name)
+        create_group(slug, display_name, unattended_password.strip() or None)
         _set_flash(request, "success", f"Group '{slug}' created.")
         return RedirectResponse(f"/groups/{slug}", status_code=303)
     except ProvisioningError as e:
