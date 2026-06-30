@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Devices — RustDesk Fleet{% endblock %}
+{% block page_title %}Devices{% endblock %}
+{% block topbar_actions %}
+  <div style="display:flex;align-items:center;gap:8px">
+    <span class="text-muted text-sm">Filter by group:</span>
+    <select onchange="window.location='/devices'+(this.value?'?group='+this.value:'')"
+            style="padding:5px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);color:var(--text-1);cursor:pointer">
+      <option value="" {% if not active_group %}selected{% endif %}>All groups</option>
+      {% for g in groups %}
+      <option value="{{ g.slug }}" {% if active_group == g.slug %}selected{% endif %}>{{ g.display_name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:16px">
+  <span style="font-size:13px;color:var(--text-2)">
+    {{ devices|length }} device{{ 's' if devices|length != 1 }}
+    {% if active_group %}in <strong>{{ active_group }}</strong>{% endif %}
+  </span>
+</div>
+
+{% if devices %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>RustDesk ID</th>
+          <th>Hostname</th>
+          <th>OS</th>
+          <th>Status</th>
+          <th>Client Group</th>
+          <th>Last Seen</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for d in devices %}
+        <tr>
+          <td><code>{{ d.rustdesk_id or '—' }}</code></td>
+          <td style="font-weight:500">{{ d.hostname or '<span class="text-muted">—</span>' }}</td>
+          <td class="text-muted text-sm">{{ d.os or '—' }}</td>
+          <td><span class="badge badge-{{ d.status or 'unknown' }}">{{ d.status or 'unknown' }}</span></td>
+          <td>
+            {% if d.group_name %}
+            <a href="/groups/{{ d.group_slug }}" style="color:var(--accent);text-decoration:none;font-size:13px">{{ d.group_name }}</a>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+          <td class="text-muted text-sm">{{ d.last_seen or '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card"><div class="card-body">
+  <div class="empty">
+    <div class="empty-icon">💻</div>
+    <p>No devices registered yet.</p>
+    <p>Install a client-group installer on a machine to see it appear here.</p>
+  </div>
+</div></div>
+{% endif %}
+{% endblock %}

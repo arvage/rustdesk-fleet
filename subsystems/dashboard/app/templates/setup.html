@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Create admin account — RustDesk Fleet</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-shell">
+  <div class="login-card" style="width:400px">
+    <div class="login-logo">
+      <div class="brand-icon">R</div>
+      <div>
+        <span class="brand-name">RustDesk Fleet</span>
+        <span class="brand-sub">Management Console</span>
+      </div>
+    </div>
+    <h2>Create your admin account</h2>
+    <p>This is a one-time setup. You'll use these credentials to sign in.</p>
+    {% if error %}<div class="flash error" style="margin-bottom:16px">{{ error }}</div>{% endif %}
+    <form method="post" action="/setup">
+      <div class="login-field">
+        <label for="display_name">Your name</label>
+        <input type="text" id="display_name" name="display_name" autofocus required
+               placeholder="Jane Smith" autocomplete="name">
+      </div>
+      <div class="login-field">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required
+               placeholder="you@example.com" autocomplete="email">
+      </div>
+      <div class="login-field">
+        <label for="password">Password <span class="text-muted" style="font-weight:400">(10+ characters)</span></label>
+        <input type="password" id="password" name="password" required
+               minlength="10" placeholder="Choose a strong password" autocomplete="new-password">
+      </div>
+      <div class="login-field">
+        <label for="password2">Confirm password</label>
+        <input type="password" id="password2" name="password2" required
+               minlength="10" placeholder="Repeat password" autocomplete="new-password">
+      </div>
+      <button type="submit" class="btn btn-primary" style="margin-top:8px">Create account</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>

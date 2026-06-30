@@ -8,7 +8,9 @@ router = APIRouter()
 
 
 @router.get("/", response_class=HTMLResponse)
-async def home(request: Request, _: None = Depends(require_auth)):
+async def home(request: Request, current_user: dict = Depends(require_auth)):
     from setup_server import get_status
     status = get_status()
-    return templates.TemplateResponse(request, "home.html", {"server": status})
+    return templates.TemplateResponse(
+        request, "home.html", {"server": status, "current_user": current_user}
+    )
