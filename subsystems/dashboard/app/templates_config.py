@@ -14,3 +14,19 @@ def _get_new_user_pw(request):
 
 templates.env.globals["get_flash"] = _get_flash
 templates.env.globals["get_new_user_pw"] = _get_new_user_pw
+
+
+def _format_rid(rid: str) -> str:
+    """Format a RustDesk ID in groups of 3 from the right: '# ### ### ###'."""
+    s = str(rid).strip()
+    if not s.isdigit():
+        return s
+    groups = []
+    while len(s) > 3:
+        groups.insert(0, s[-3:])
+        s = s[:-3]
+    groups.insert(0, s)
+    return " ".join(groups)
+
+
+templates.env.filters["format_rid"] = _format_rid

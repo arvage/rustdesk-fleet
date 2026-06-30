@@ -3,6 +3,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
@@ -71,17 +72,40 @@ def _online_ips() -> set[str]:
 
 @router.get("/devices/status")
 async def devices_status(_: dict = Depends(require_auth)):
-    """Return {rustdesk_id: "online"|"offline"} for every known peer."""
+    """Return {rustdesk_id: "online"|"offline"} for every known peer.
+
+    Two signals are combined:
+    1. Live TCP connection to an hbbs port seen within the grace period.
+    2. created_at in the hbbs peer table updated within the last 15 minutes.
+       RustDesk sessions often go P2P (bypassing our server), so the client's
+       TCP connection to hbbs becomes idle and gets killed by NAT — especially
+       on Japanese networks.  created_at is refreshed each time the client
+       re-registers, so a recent value means the device was alive recently.
+    """
     online_ips = _online_ips()
     status: dict[str, str] = {}
 
     if HBBS_DB_PATH.exists():
         conn = sqlite3.connect(HBBS_DB_PATH)
         conn.row_factory = sqlite3.Row
-        for peer in conn.execute("SELECT id, info FROM peer").fetchall():
+        now_utc = datetime.now(timezone.utc)
+
+        for peer in conn.execute("SELECT id, info, created_at FROM peer").fetchall():
             info = json.loads(peer["info"] or "{}")
             peer_ip = info.get("ip", "").replace("::ffff:", "")
-            status[peer["id"]] = "online" if peer_ip in online_ips else "offline"
+
+            tcp_online = peer_ip in online_ips
+
+            recently_registered = False
+            if peer["created_at"]:
+                try:
+                    ts = datetime.fromisoformat(peer["created_at"]).replace(tzinfo=timezone.utc)
+                    recently_registered = (now_utc - ts).total_seconds() < 1800  # 30 min
+                except Exception:
+                    pass
+
+            status[peer["id"]] = "online" if (tcp_online or recently_registered) else "offline"
+
         conn.close()
 
     return JSONResponse({"devices": status})

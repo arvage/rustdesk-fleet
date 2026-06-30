@@ -52,7 +52,7 @@
         <tr data-rid="{{ d.rustdesk_id }}"
             data-search="{{ d.rustdesk_id }} {{ d.label }} {{ d.ip }} {{ d.group_name or '' }}">
           <td data-val="{{ d.rustdesk_id }}" style="white-space:nowrap">
-            <code>{{ d.rustdesk_id }}</code>
+            <code>{{ d.rustdesk_id | format_rid }}</code>
             <button class="btn-copy" onclick="copyText('{{ d.rustdesk_id }}', this)" title="Copy ID">
               <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
@@ -166,12 +166,17 @@
 <form id="device-delete-form" method="post" style="display:none"></form>
 
 <script>
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function formatRid(id) {
+  return /^\d+$/.test(id) ? id.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') : id;
+}
+
 // ── Device edit modal ────────────────────────────────────────────────────────
 let _modalRid = '';
 
 function openDeviceModal(rid, label, groupId) {
   _modalRid = rid;
-  document.getElementById('modal-rid').textContent = rid;
+  document.getElementById('modal-rid').textContent = formatRid(rid);
   document.getElementById('modal-label').value = label;
   document.getElementById('modal-group').value = groupId || '';
   document.getElementById('device-edit-form').action = '/devices/' + rid + '/edit';
