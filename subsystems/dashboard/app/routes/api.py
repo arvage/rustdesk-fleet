@@ -27,12 +27,12 @@ def _online_ips() -> set[str]:
     ips: set[str] = set()
     for line in result.stdout.splitlines()[1:]:  # skip header row
         parts = line.split()
-        if len(parts) < 5:
+        if len(parts) < 4:
             continue
-        local_port = parts[3].rsplit(":", 1)[-1]
+        local_port = parts[2].rsplit(":", 1)[-1]
         if local_port not in HBBS_PORTS:
             continue
-        remote_addr = parts[4].rsplit(":", 1)[0].strip("[]")
+        remote_addr = parts[3].rsplit(":", 1)[0].strip("[]")
         if remote_addr.startswith("::ffff:"):
             remote_addr = remote_addr[7:]
         ips.add(remote_addr)
