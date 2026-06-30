@@ -1,14 +1,16 @@
 ; RustDesk pre-configured installer — built by generate_installer.py.
 ; @@PLACEHOLDER@@ markers are substituted at build time; do not edit them here.
 ;
-; What this does:
-;   1. Runs the official RustDesk installer silently (no UI)
-;   2. Kills any RustDesk process that auto-started during install
-;   3. Writes RustDesk2.toml to %APPDATA%\RustDesk\config\ pointing at our server
-;
-; Limitation: config is written to the *running user's* AppData. If an admin
-; deploys this remotely under a different account, the config lands in the
-; admin's profile, not the end-user's. For direct user-run installs this is fine.
+; Install sequence:
+;   1. Run the official RustDesk installer silently — this installs the app
+;      AND starts the RustDesk Windows service (running as SYSTEM).
+;   2. Kill the tray UI and stop the Windows service before writing config,
+;      so neither process holds the file open or re-reads stale values.
+;   3. Write RustDesk2.toml to TWO locations:
+;        a) %APPDATA%\RustDesk\config\  — read by the tray/UI process
+;        b) SYSTEM profile AppData      — read by the Windows service
+;   4. Restart the service, then launch the tray app so the client is live
+;      immediately after install without requiring a reboot.
 
 Unicode True
 RequestExecutionLevel admin
@@ -20,19 +22,20 @@ Name "@@DISPLAY_NAME@@ Remote Support"
 OutFile "@@OUTPUT_PATH@@"
 
 Section "Install"
-  ; Embed and run the official RustDesk installer silently
+  ; Run the official RustDesk installer silently and wait for it to finish.
+  ; This installs the app and starts the RustDesk Windows service.
   SetOutPath "$TEMP"
   File "@@RUSTDESK_EXE_SRC@@"
   ExecWait '"$TEMP\@@RUSTDESK_EXE_NAME@@" --silent-install'
 
-  ; Kill any RustDesk process that auto-started during install, so it
-  ; doesn't hold the config file open when we write it. Ignore errors
-  ; (exit code is non-zero if no process found, which is fine).
+  ; Stop the tray app and the Windows service before touching config.
+  ; Ignore non-zero exits (process/service may not be running yet — fine).
   nsExec::ExecToLog 'taskkill /F /IM rustdesk.exe'
   Pop $0
+  nsExec::ExecToLog 'net stop RustDesk'
+  Pop $0
 
-  ; Write our server config. This overwrites whatever the RustDesk installer
-  ; wrote, so the user's first real launch connects to our server.
+  ; --- Write config to user-profile path (tray app reads this) ---
   CreateDirectory "$APPDATA\RustDesk\config"
   FileOpen $0 "$APPDATA\RustDesk\config\RustDesk2.toml" w
   FileWrite $0 'rendezvous_server = "@@HOST@@"$\r$\n'
@@ -42,6 +45,24 @@ Section "Install"
   FileWrite $0 'relay-server = "@@HOST@@"$\r$\n'
   FileWrite $0 'key = "@@PUBKEY@@"$\r$\n'
 @@PASSWORD_LINE@@  FileClose $0
+
+  ; --- Write same config to SYSTEM service profile path ---
+  ; The RustDesk Windows service runs as SYSTEM whose AppData resolves to
+  ; C:\Windows\System32\config\systemprofile\AppData\Roaming.
+  CreateDirectory "$WINDIR\System32\config\systemprofile\AppData\Roaming\RustDesk\config"
+  FileOpen $0 "$WINDIR\System32\config\systemprofile\AppData\Roaming\RustDesk\config\RustDesk2.toml" w
+  FileWrite $0 'rendezvous_server = "@@HOST@@"$\r$\n'
+  FileWrite $0 '$\r$\n'
+  FileWrite $0 '[options]$\r$\n'
+  FileWrite $0 'custom-rendezvous-server = "@@HOST@@"$\r$\n'
+  FileWrite $0 'relay-server = "@@HOST@@"$\r$\n'
+  FileWrite $0 'key = "@@PUBKEY@@"$\r$\n'
+@@PASSWORD_LINE@@  FileClose $0
+
+  ; Restart the service then launch the tray app.
+  nsExec::ExecToLog 'net start RustDesk'
+  Pop $0
+  Exec '"$PROGRAMFILES64\RustDesk\rustdesk.exe"'
 
   Delete "$TEMP\@@RUSTDESK_EXE_NAME@@"
 SectionEnd
