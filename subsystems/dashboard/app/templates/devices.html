@@ -24,53 +24,60 @@
 {% endblock %}
 
 {% block content %}
-<div style="margin-bottom:16px">
+<div style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">
   <span class="text-muted text-sm">
     {{ devices|length }} device{{ 's' if devices|length != 1 }}{% if active_group %} in <strong>{{ active_group }}</strong>{% endif %}
     &nbsp;·&nbsp; {{ peer_count }} registered with server
   </span>
+  {% if devices %}
+  <input id="device-filter" type="search" placeholder="Filter by ID, hostname, IP, group…"
+         oninput="filterDevices()"
+         style="padding:7px 11px;border:1px solid var(--border-md);border-radius:var(--radius-sm);
+                font-size:13px;width:280px;outline:none;background:var(--surface)">
+  {% endif %}
 </div>
 
 {% if devices %}
 <div class="card">
   <div class="table-wrap">
-    <table>
+    <table id="devices-table">
       <thead>
         <tr>
-          <th>RustDesk ID</th>
-          <th>Hostname</th>
-          <th>OS</th>
-          <th>IP</th>
-          <th>Status</th>
-          <th>Client Group</th>
-          <th>Last Seen</th>
+          <th class="sortable" onclick="sortDevices(0)">RustDesk ID <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(1)">Hostname <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(2)">OS <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(3)">IP <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(4)">Status <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(5)">Client Group <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(6)">Last Seen <span class="sort-icon">↕</span></th>
           <th></th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="devices-tbody">
       {% for d in devices %}
-        <tr>
-          <td style="white-space:nowrap">
+        <tr data-rid="{{ d.rustdesk_id }}"
+            data-search="{{ d.rustdesk_id }} {{ d.hostname }} {{ d.ip }} {{ d.group_name or '' }} {{ d.os }}">
+          <td data-val="{{ d.rustdesk_id }}" style="white-space:nowrap">
             <code>{{ d.rustdesk_id }}</code>
             <button class="btn-copy" onclick="copyText('{{ d.rustdesk_id }}', this)" title="Copy ID">
               <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
           </td>
-          <td style="font-weight:500">{{ d.hostname }}</td>
-          <td class="text-muted text-sm">{{ d.os }}</td>
-          <td class="text-muted text-sm mono">{{ d.ip }}</td>
-          <td>
+          <td data-val="{{ d.hostname | lower }}" style="font-weight:500">{{ d.hostname }}</td>
+          <td data-val="{{ d.os | lower }}" class="text-muted text-sm">{{ d.os }}</td>
+          <td data-val="{{ d.ip }}" class="text-muted text-sm mono">{{ d.ip }}</td>
+          <td data-val="{{ d.status or 'unknown' }}">
             <span id="status-{{ d.rustdesk_id }}"
                   class="badge badge-{{ 'active' if d.status == 'registered' else (d.status or 'unknown') }}">
               {{ d.status or 'unknown' }}
             </span>
           </td>
-          <td>
+          <td data-val="{{ d.group_name | lower if d.group_name else 'zzz' }}">
             {% if d.group_name %}
             <a href="/groups/{{ d.group_slug }}" style="color:var(--accent);text-decoration:none;font-size:13px">{{ d.group_name }}</a>
             {% else %}<span class="text-muted text-sm">Unassigned</span>{% endif %}
           </td>
-          <td class="text-muted text-sm">{{ d.last_seen }}</td>
+          <td data-val="{{ d.last_seen or '' }}" class="text-muted text-sm">{{ d.last_seen }}</td>
           <td>
             <button onclick="document.getElementById('assign-{{ d.rustdesk_id }}').style.display='flex'"
                     class="btn btn-ghost btn-sm">Assign →</button>
@@ -98,6 +105,9 @@
       </tbody>
     </table>
   </div>
+  <div id="no-device-results" style="display:none;padding:40px;text-align:center;color:var(--text-3);font-size:13px">
+    No devices match your filter.
+  </div>
 </div>
 {% else %}
 <div class="card"><div class="card-body">
@@ -110,11 +120,11 @@
 {% endif %}
 
 <script>
+// ── Real-time status polling ──────────────────────────────────────────────
 const POLL_MS = 10000;
-
 const statusClasses = {
-  online:  { cls: 'badge badge-active',   label: 'online' },
-  offline: { cls: 'badge badge-offline',  label: 'offline' },
+  online:  { cls: 'badge badge-active',  label: 'online' },
+  offline: { cls: 'badge badge-offline', label: 'offline' },
 };
 
 async function refreshStatus() {
@@ -122,18 +132,20 @@ async function refreshStatus() {
     const res = await fetch('/api/devices/status');
     if (!res.ok) return;
     const { devices } = await res.json();
-
     let online = 0, total = 0;
     for (const [id, st] of Object.entries(devices)) {
       total++;
       if (st === 'online') online++;
       const el = document.getElementById('status-' + id);
-      if (!el) continue;
-      const s = statusClasses[st] || { cls: 'badge badge-unknown', label: st };
-      el.className = s.cls;
-      el.textContent = s.label;
+      if (el) {
+        const s = statusClasses[st] || { cls: 'badge badge-unknown', label: st };
+        el.className = s.cls;
+        el.textContent = s.label;
+        // Keep data-val in sync so status sort reflects live state
+        const td = el.closest('td');
+        if (td) td.dataset.val = st;
+      }
     }
-
     const dot = document.getElementById('status-dot');
     const lbl = document.getElementById('status-label');
     if (dot && lbl) {
@@ -145,5 +157,55 @@ async function refreshStatus() {
 
 refreshStatus();
 setInterval(refreshStatus, POLL_MS);
+
+// ── Sort & filter ─────────────────────────────────────────────────────────
+let sortCol = -1, sortAsc = true;
+
+function filterDevices() {
+  const q = document.getElementById('device-filter').value.toLowerCase();
+  const tbody = document.getElementById('devices-tbody');
+  if (!tbody) return;
+  let visible = 0;
+  tbody.querySelectorAll('tr[data-rid]').forEach(row => {
+    const match = !q || row.dataset.search.toLowerCase().includes(q);
+    row.style.display = match ? '' : 'none';
+    // Always collapse assign panel when filter changes
+    const panel = document.getElementById('assign-' + row.dataset.rid);
+    if (panel) panel.style.display = 'none';
+    if (match) visible++;
+  });
+  const noResults = document.getElementById('no-device-results');
+  if (noResults) noResults.style.display = visible ? 'none' : 'block';
+}
+
+function sortDevices(col) {
+  sortAsc = sortCol === col ? !sortAsc : true;
+  sortCol = col;
+
+  document.querySelectorAll('#devices-table th.sortable').forEach((th, i) => {
+    const icon = th.querySelector('.sort-icon');
+    if (i === col) {
+      icon.textContent = sortAsc ? '↑' : '↓';
+      th.style.color = 'var(--text-1)';
+    } else {
+      icon.textContent = '↕';
+      th.style.color = '';
+    }
+  });
+
+  const tbody = document.getElementById('devices-tbody');
+  const dataRows = Array.from(tbody.querySelectorAll('tr[data-rid]'));
+  dataRows.sort((a, b) => {
+    const av = a.querySelectorAll('td')[col]?.dataset.val ?? '';
+    const bv = b.querySelectorAll('td')[col]?.dataset.val ?? '';
+    return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+  // Re-append each data row immediately followed by its assign panel
+  dataRows.forEach(row => {
+    const panel = document.getElementById('assign-' + row.dataset.rid);
+    tbody.appendChild(row);
+    if (panel) tbody.appendChild(panel);
+  });
+}
 </script>
 {% endblock %}

@@ -10,33 +10,51 @@
 
 {% block content %}
 {% if groups %}
+<div style="margin-bottom:14px">
+  <input id="group-filter" type="search" placeholder="Filter by name…"
+         oninput="filterGroups()"
+         style="padding:7px 11px;border:1px solid var(--border-md);border-radius:var(--radius-sm);
+                font-size:13px;width:240px;outline:none;background:var(--surface)">
+</div>
+
 <div class="card">
   <div class="table-wrap">
-    <table>
+    <table id="groups-table">
       <thead>
         <tr>
-          <th>Name</th>
-          <th>Status</th>
-          <th>Devices</th>
-          <th>Created</th>
+          <th class="sortable" data-col="0" onclick="sortTable(0)">
+            Name <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="1" onclick="sortTable(1)">
+            Status <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="2" onclick="sortTable(2)">
+            Devices <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="3" onclick="sortTable(3)">
+            Created <span class="sort-icon">↕</span>
+          </th>
           <th></th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="groups-tbody">
       {% for g in groups %}
-        <tr>
-          <td style="font-weight:500">{{ g.display_name }}</td>
-          <td><span class="badge badge-{{ g.status }}">{{ g.status }}</span></td>
-          <td>
+        <tr data-name="{{ g.display_name | lower }}">
+          <td style="font-weight:500" data-val="{{ g.display_name | lower }}">{{ g.display_name }}</td>
+          <td data-val="{{ g.status }}"><span class="badge badge-{{ g.status }}">{{ g.status }}</span></td>
+          <td data-val="{{ '%010d' % g.device_count }}">
             <span style="font-weight:600">{{ g.device_count }}</span>
             <span class="text-muted text-sm"> device{{ 's' if g.device_count != 1 }}</span>
           </td>
-          <td class="text-muted text-sm">{{ g.created_at[:10] }}</td>
+          <td data-val="{{ g.created_at[:10] }}" class="text-muted text-sm">{{ g.created_at[:10] }}</td>
           <td><a href="/groups/{{ g.slug }}" class="btn btn-ghost btn-sm">View →</a></td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div id="no-results" style="display:none;padding:40px;text-align:center;color:var(--text-3);font-size:13px">
+    No groups match your filter.
   </div>
 </div>
 {% else %}
@@ -75,4 +93,50 @@
     </form>
   </div>
 </div>
+
+<script>
+let sortCol = -1, sortAsc = true;
+
+function filterGroups() {
+  const q = document.getElementById('group-filter').value.toLowerCase();
+  const rows = document.querySelectorAll('#groups-tbody tr');
+  let visible = 0;
+  rows.forEach(row => {
+    const match = row.dataset.name.includes(q);
+    row.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  document.getElementById('no-results').style.display = visible ? 'none' : 'block';
+}
+
+function sortTable(col) {
+  if (sortCol === col) {
+    sortAsc = !sortAsc;
+  } else {
+    sortCol = col;
+    sortAsc = true;
+  }
+
+  // Update header icons
+  document.querySelectorAll('#groups-table th.sortable').forEach((th, i) => {
+    const icon = th.querySelector('.sort-icon');
+    if (i === col) {
+      icon.textContent = sortAsc ? '↑' : '↓';
+      th.style.color = 'var(--text-1)';
+    } else {
+      icon.textContent = '↕';
+      th.style.color = '';
+    }
+  });
+
+  const tbody = document.getElementById('groups-tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  rows.sort((a, b) => {
+    const av = a.querySelectorAll('td')[col]?.dataset.val ?? '';
+    const bv = b.querySelectorAll('td')[col]?.dataset.val ?? '';
+    return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+  rows.forEach(r => tbody.appendChild(r));
+}
+</script>
 {% endblock %}

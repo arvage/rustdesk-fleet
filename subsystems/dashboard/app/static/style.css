@@ -292,6 +292,11 @@ code {
 .login-field input { width: 100%; }
 .login-card .btn { width: 100%; justify-content: center; padding: 9px; margin-top: 6px; }
 
+/* ── Sortable table headers ───────────────────────────────────── */
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--text-1); }
+.sort-icon { font-style: normal; color: var(--text-3); margin-left: 3px; font-size: 11px; }
+
 /* ── Copy button ──────────────────────────────────────────────── */
 .btn-copy {
   display: inline-flex; align-items: center; gap: 5px;
