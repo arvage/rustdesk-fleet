@@ -3,175 +3,267 @@
 {% block page_title %}Notifications{% endblock %}
 
 {% block content %}
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
+<style>
+/* Scope input resets to this page so the global min-width doesn't cause overflow */
+.notif-form input,
+.notif-form select,
+.notif-form textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 11px;
+  border: 1px solid var(--border-md);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-1);
+  background: var(--surface);
+  font-family: inherit;
+  transition: border-color .12s, box-shadow .12s;
+  outline: none;
+  box-sizing: border-box;
+}
+.notif-form input:focus,
+.notif-form select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99,102,241,.12);
+}
+.notif-form .field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  margin-bottom: 5px;
+}
+.notif-form .field { display: flex; flex-direction: column; }
+/* Toggle switch */
+.toggle { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; inset: 0; cursor: pointer;
+  background: #334155; border-radius: 20px; transition: .2s;
+}
+.toggle-slider::before {
+  content: ''; position: absolute;
+  height: 14px; width: 14px; left: 3px; bottom: 3px;
+  background: #fff; border-radius: 50%; transition: .2s;
+}
+.toggle input:checked + .toggle-slider { background: #3B82F6; }
+.toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
+</style>
 
-  <!-- ── SMTP Configuration ──────────────────────────────────────────── -->
-  <div class="card" style="grid-column:1/-1">
-    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+<div style="display:flex;flex-direction:column;gap:20px">
+
+  <!-- ── SMTP Configuration ───────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
       <div>
-        <h2 class="card-title">Email / SMTP</h2>
-        <p class="card-sub">Configure the outbound mail server used to deliver alerts.</p>
+        <h2 style="font-size:13px;font-weight:600;color:var(--text-1);margin:0">Email / SMTP</h2>
+        <div style="font-size:12px;color:var(--text-3);margin-top:2px">Configure the outbound mail server used to deliver alerts.</div>
       </div>
-      <form method="post" action="/notifications/test" style="margin:0">
+      <form method="post" action="/notifications/test" style="margin:0;flex-shrink:0">
         <button type="submit" class="btn btn-ghost btn-sm">
-          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;display:inline;vertical-align:-2px;margin-right:4px"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+               style="width:14px;height:14px;flex-shrink:0">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+            <polyline points="22,6 12,13 2,6"/>
+          </svg>
           Send test email
         </button>
       </form>
     </div>
-    <form method="post" action="/notifications/settings">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
 
-        <div style="grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:14px 16px;background:#0F172A;border-radius:8px;margin-bottom:4px">
+    <form method="post" action="/notifications/settings" class="notif-form">
+      <div style="padding:18px;display:flex;flex-direction:column;gap:16px">
+
+        <!-- Enable/disable toggle -->
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#0F172A;border-radius:8px">
           <label class="toggle" style="margin:0">
-            <input type="checkbox" name="enabled" value="1" {% if settings.enabled %}checked{% endif %}
+            <input type="checkbox" name="enabled" value="1"
+                   {% if settings.enabled %}checked{% endif %}
                    onchange="this.form.submit()">
             <span class="toggle-slider"></span>
           </label>
           <div>
-            <div style="font-weight:600;font-size:14px;color:#F1F5F9">
+            <div style="font-weight:600;font-size:13px;color:#F1F5F9">
               Notifications {{ 'enabled' if settings.enabled else 'disabled' }}
             </div>
-            <div style="font-size:12px;color:#64748B">Toggle to enable or disable all email alerts</div>
+            <div style="font-size:11px;color:#64748B;margin-top:2px">
+              Toggle to enable or disable all email alerts globally
+            </div>
           </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">SMTP host</label>
-          <input class="form-input" type="text" name="smtp_host"
-                 value="{{ settings.smtp_host }}" placeholder="smtp.gmail.com">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Port</label>
-          <input class="form-input" type="number" name="smtp_port"
-                 value="{{ settings.smtp_port }}" placeholder="587" style="max-width:120px">
+        <!-- 2-col grid for SMTP fields -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div class="field">
+            <label>SMTP host</label>
+            <input type="text" name="smtp_host"
+                   value="{{ settings.smtp_host }}" placeholder="smtp.gmail.com">
+          </div>
+          <div class="field">
+            <label>Port</label>
+            <input type="number" name="smtp_port"
+                   value="{{ settings.smtp_port }}" placeholder="587">
+          </div>
+          <div class="field">
+            <label>Encryption</label>
+            <select name="smtp_tls">
+              <option value="starttls" {% if settings.smtp_tls == 'starttls' %}selected{% endif %}>STARTTLS (port 587)</option>
+              <option value="ssl"      {% if settings.smtp_tls == 'ssl'      %}selected{% endif %}>SSL / TLS (port 465)</option>
+              <option value="none"     {% if settings.smtp_tls == 'none'     %}selected{% endif %}>None (port 25)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Username</label>
+            <input type="text" name="smtp_user"
+                   value="{{ settings.smtp_user }}"
+                   placeholder="you@example.com" autocomplete="username">
+          </div>
+          <div class="field">
+            <label>
+              Password
+              <span style="font-weight:400;color:var(--text-3)"> — leave blank to keep current</span>
+            </label>
+            <input type="password" name="smtp_pass"
+                   placeholder="••••••••" autocomplete="current-password">
+          </div>
+          <div class="field">
+            <label>From address</label>
+            <input type="email" name="from_addr"
+                   value="{{ settings.from_addr }}" placeholder="fleet@example.com">
+          </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Encryption</label>
-          <select class="form-input" name="smtp_tls">
-            <option value="starttls" {% if settings.smtp_tls == 'starttls' %}selected{% endif %}>STARTTLS (port 587)</option>
-            <option value="ssl"      {% if settings.smtp_tls == 'ssl'      %}selected{% endif %}>SSL / TLS (port 465)</option>
-            <option value="none"     {% if settings.smtp_tls == 'none'     %}selected{% endif %}>None (port 25)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Username</label>
-          <input class="form-input" type="text" name="smtp_user"
-                 value="{{ settings.smtp_user }}" placeholder="you@example.com" autocomplete="username">
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Password <span class="text-muted text-sm">(leave blank to keep current)</span></label>
-          <input class="form-input" type="password" name="smtp_pass"
-                 placeholder="••••••••" autocomplete="current-password">
-        </div>
-        <div class="form-group">
-          <label class="form-label">From address</label>
-          <input class="form-input" type="email" name="from_addr"
-                 value="{{ settings.from_addr }}" placeholder="fleet@example.com">
-        </div>
-
-        <div class="form-group" style="grid-column:1/-1">
-          <label class="form-label">Recipients <span class="text-muted text-sm">(comma-separated)</span></label>
-          <input class="form-input" type="text" name="to_addrs"
+        <!-- Recipients — full width -->
+        <div class="field">
+          <label>
+            Recipients
+            <span style="font-weight:400;color:var(--text-3)"> — comma-separated</span>
+          </label>
+          <input type="text" name="to_addrs"
                  value="{{ settings.to_addrs }}"
                  placeholder="admin@example.com, oncall@example.com">
         </div>
-      </div>
-      <div style="margin-top:16px;display:flex;gap:8px">
-        <button type="submit" class="btn btn-primary">Save settings</button>
-      </div>
-    </form>
-  </div>
 
-  <!-- ── Event triggers ────────────────────────────────────────────────── -->
-  <div class="card">
-    <div class="card-header">
-      <h2 class="card-title">Event triggers</h2>
-      <p class="card-sub">Choose which events send an email alert.</p>
-    </div>
-    <form method="post" action="/notifications/events">
-      <table style="width:100%;border-collapse:collapse">
-        <thead>
-          <tr>
-            <th style="text-align:left;font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.06em;padding:0 0 10px">Event</th>
-            <th style="text-align:right;font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.06em;padding:0 0 10px">Enabled</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for et, label in event_labels.items() %}
-          <tr style="border-top:1px solid #1E293B">
-            <td style="padding:12px 0;font-size:14px;color:#CBD5E1">{{ label }}</td>
-            <td style="padding:12px 0;text-align:right">
-              <label class="toggle" style="margin:0">
-                <input type="checkbox" name="{{ et }}" value="1"
-                       {% if event_states.get(et, True) %}checked{% endif %}>
-                <span class="toggle-slider"></span>
-              </label>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <div style="margin-top:16px">
-        <button type="submit" class="btn btn-primary btn-sm">Save triggers</button>
+        <div>
+          <button type="submit" class="btn btn-primary btn-sm">Save settings</button>
+        </div>
       </div>
     </form>
   </div>
 
-  <!-- ── Delivery log ──────────────────────────────────────────────────── -->
-  <div class="card">
-    <div class="card-header">
-      <h2 class="card-title">Delivery log</h2>
-      <p class="card-sub">Last 50 notification attempts.</p>
-    </div>
-    {% if log %}
-    <table style="width:100%;border-collapse:collapse;font-size:13px">
-      <thead>
-        <tr>
-          <th style="text-align:left;padding:0 0 8px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">When</th>
-          <th style="text-align:left;padding:0 0 8px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Event</th>
-          <th style="text-align:left;padding:0 0 8px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for entry in log %}
-        <tr style="border-top:1px solid #1E293B" {% if entry.error %}title="{{ entry.error }}"{% endif %}>
-          <td style="padding:9px 0;color:#64748B;white-space:nowrap">{{ entry.created_at | localtime }}</td>
-          <td style="padding:9px 8px;color:#CBD5E1">{{ entry.event_type }}</td>
-          <td style="padding:9px 0">
-            {% if entry.status == 'sent' %}
-            <span class="badge badge-active">sent</span>
-            {% else %}
-            <span class="badge badge-unknown" title="{{ entry.error or '' }}">failed</span>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="text-muted text-sm" style="margin:0">No notifications sent yet.</p>
-    {% endif %}
-  </div>
+  <!-- ── Bottom two cards side by side ────────────────────────────────────── -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
 
+    <!-- Event triggers -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h2 style="font-size:13px;font-weight:600;color:var(--text-1);margin:0">Event triggers</h2>
+          <div style="font-size:12px;color:var(--text-3);margin-top:2px">Choose which events send an email.</div>
+        </div>
+      </div>
+      <form method="post" action="/notifications/events" class="notif-form">
+        <div style="padding:0 18px">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:12px 0 8px;font-size:11px;font-weight:600;
+                           color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;
+                           border-bottom:1px solid var(--border)">
+                  Event
+                </th>
+                <th style="text-align:right;padding:12px 0 8px;font-size:11px;font-weight:600;
+                           color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;
+                           border-bottom:1px solid var(--border)">
+                  On
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for et, label in event_labels.items() %}
+              <tr>
+                <td style="padding:11px 0;font-size:13px;color:var(--text-1);
+                           border-bottom:1px solid var(--border)">
+                  {{ label }}
+                </td>
+                <td style="padding:11px 0;text-align:right;border-bottom:1px solid var(--border)">
+                  <label class="toggle" style="margin:0">
+                    <input type="checkbox" name="{{ et }}" value="1"
+                           {% if event_states.get(et, True) %}checked{% endif %}>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div style="padding:14px 18px;border-top:1px solid var(--border)">
+          <button type="submit" class="btn btn-primary btn-sm">Save triggers</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Delivery log -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h2 style="font-size:13px;font-weight:600;color:var(--text-1);margin:0">Delivery log</h2>
+          <div style="font-size:12px;color:var(--text-3);margin-top:2px">Last 50 notification attempts.</div>
+        </div>
+      </div>
+      {% if log %}
+      <div style="padding:0 18px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:12px 0 8px;font-size:11px;font-weight:600;
+                         color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;
+                         border-bottom:1px solid var(--border);white-space:nowrap">
+                When
+              </th>
+              <th style="text-align:left;padding:12px 8px 8px;font-size:11px;font-weight:600;
+                         color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;
+                         border-bottom:1px solid var(--border)">
+                Event
+              </th>
+              <th style="text-align:left;padding:12px 0 8px;font-size:11px;font-weight:600;
+                         color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;
+                         border-bottom:1px solid var(--border)">
+                Status
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in log %}
+            <tr {% if entry.error %}title="{{ entry.error | e }}"{% endif %}>
+              <td style="padding:9px 0;color:var(--text-3);white-space:nowrap;
+                         border-bottom:1px solid var(--border);font-size:12px">
+                {{ entry.created_at | localtime }}
+              </td>
+              <td style="padding:9px 8px;color:var(--text-1);border-bottom:1px solid var(--border);
+                         font-size:12px;word-break:break-word">
+                {{ entry.event_type }}
+              </td>
+              <td style="padding:9px 0;border-bottom:1px solid var(--border)">
+                {% if entry.status == 'sent' %}
+                <span class="badge badge-active">sent</span>
+                {% else %}
+                <span class="badge badge-failed" title="{{ entry.error or '' }}">failed</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div style="padding:18px">
+        <p style="color:var(--text-3);font-size:13px;margin:0">No notifications sent yet.</p>
+      </div>
+      {% endif %}
+    </div>
+
+  </div><!-- /bottom grid -->
 </div>
-
-<style>
-/* Toggle switch */
-.toggle { position:relative; display:inline-block; width:36px; height:20px; flex-shrink:0 }
-.toggle input { opacity:0; width:0; height:0 }
-.toggle-slider {
-  position:absolute; inset:0; cursor:pointer;
-  background:#334155; border-radius:20px; transition:.2s;
-}
-.toggle-slider::before {
-  content:''; position:absolute;
-  height:14px; width:14px; left:3px; bottom:3px;
-  background:#fff; border-radius:50%; transition:.2s;
-}
-.toggle input:checked + .toggle-slider { background:#3B82F6 }
-.toggle input:checked + .toggle-slider::before { transform:translateX(16px) }
-</style>
 {% endblock %}
