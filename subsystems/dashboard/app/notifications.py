@@ -29,12 +29,16 @@ EVENT_LABELS: dict[str, str] = {
     "device_registered": "New device registered",
     "device_deleted":    "Device deleted",
     "installer_built":   "Installer built",
+    "user_created":      "User account created",
+    "user_deleted":      "User account deleted",
 }
 
 _SUBJECTS: dict[str, str] = {
     "device_registered": "New device registered — {rustdesk_id}",
     "device_deleted":    "Device removed — {rustdesk_id}",
     "installer_built":   "Installer built — {group_name} ({platform})",
+    "user_created":      "New user created — {email}",
+    "user_deleted":      "User deleted — {email}",
 }
 
 # ── Settings helpers ──────────────────────────────────────────────────────────
@@ -173,6 +177,31 @@ def _render(event_type: str, context: dict) -> tuple[str, str]:
             )
         )
         subtitle = "Installer ready"
+
+    elif event_type == "user_created":
+        body = (
+            "<p>A new user account has been created in RustDesk Fleet.</p>"
+            + _kv(
+                ("Name", context.get("display_name", "—")),
+                ("Email", context.get("email", "—")),
+                ("Role", context.get("role", "—")),
+                ("Group access", context.get("groups") or "None"),
+                ("Created by", context.get("created_by", "—")),
+            )
+        )
+        subtitle = "New user created"
+
+    elif event_type == "user_deleted":
+        body = (
+            "<p>A user account has been removed from RustDesk Fleet.</p>"
+            + _kv(
+                ("Name", context.get("display_name", "—")),
+                ("Email", context.get("email", "—")),
+                ("Role", context.get("role", "—")),
+                ("Deleted by", context.get("deleted_by", "—")),
+            )
+        )
+        subtitle = "User deleted"
 
     else:
         body = f"<p>Event: <strong>{event_type}</strong></p>"

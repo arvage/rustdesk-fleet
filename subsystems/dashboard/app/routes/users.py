@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
 from app.deps import get_db
-from app.notifications import send_credentials_email
+from app.notifications import fire_notification, send_credentials_email
 from app.templates_config import templates
 
 router = APIRouter()
@@ -89,6 +89,7 @@ async def user_create(
     password_mode: str = Form("auto"),
     password: str = Form(""),
     send_email: str = Form(""),
+    group_ids: list[int] = Form(default=[]),
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
@@ -122,12 +123,40 @@ async def user_create(
         (email, display_name, role, pw_hash),
     )
     conn.commit()
+    user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    if role == "tech" and group_ids:
+        for gid in group_ids:
+            conn.execute(
+                "INSERT OR IGNORE INTO user_group_access (user_id, group_id) VALUES (?, ?)",
+                (user_id, gid),
+            )
+        conn.commit()
+
+    # Resolve group names for the notification context
+    group_names = []
+    if group_ids:
+        placeholders = ",".join("?" * len(group_ids))
+        rows = conn.execute(
+            f"SELECT display_name FROM client_groups WHERE id IN ({placeholders})",
+            group_ids,
+        ).fetchall()
+        group_names = [r["display_name"] for r in rows]
+
     conn.close()
 
     email_sent = False
     if send_email == "1":
         ok, _ = send_credentials_email(email, display_name, final_password)
         email_sent = ok
+
+    fire_notification("user_created", {
+        "email": email,
+        "display_name": display_name or email,
+        "role": role,
+        "groups": ", ".join(group_names) if group_names else "None",
+        "created_by": current_user["email"],
+    })
 
     request.session["new_user_pw"] = {
         "email": email,
@@ -256,10 +285,22 @@ async def user_delete(
         return RedirectResponse("/users", status_code=303)
 
     conn = get_db()
+    deleted = conn.execute(
+        "SELECT email, display_name, role FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
     conn.execute("DELETE FROM user_group_access WHERE user_id = ?", (user_id,))
     conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
+
+    if deleted:
+        fire_notification("user_deleted", {
+            "email": deleted["email"],
+            "display_name": deleted["display_name"] or deleted["email"],
+            "role": deleted["role"],
+            "deleted_by": current_user["email"],
+        })
+
     _set_flash(request, "success", "User deleted.")
     return RedirectResponse("/users", status_code=303)
 

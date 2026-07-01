@@ -260,10 +260,33 @@
         <!-- Role -->
         <div class="modal-field">
           <label for="new-role">Role</label>
-          <select id="new-role" name="role" class="modal-select">
+          <select id="new-role" name="role" class="modal-select" onchange="onRoleChange(this.value)">
             <option value="tech">tech — limited to assigned groups</option>
             <option value="admin">admin — full access</option>
           </select>
+        </div>
+
+        <!-- Group access (hidden for admin) -->
+        <div id="create-group-section">
+          <div style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
+            <span>Group Access</span>
+            <span id="create-group-count" style="font-weight:400;text-transform:none;letter-spacing:0;color:#475569">0 selected</span>
+          </div>
+          <div style="position:relative;margin-bottom:8px">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                 style="position:absolute;left:10px;top:50%;transform:translateY(-50%);width:13px;height:13px;color:#64748B;pointer-events:none">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input type="text" id="create-group-search" class="modal-input"
+                   placeholder="Search groups…" oninput="filterCreateGroups(this.value)"
+                   autocomplete="off" style="padding-left:30px">
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:6px">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="setAllCreateGroups(true)">Select all</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="setAllCreateGroups(false)">Clear</button>
+          </div>
+          <div id="create-group-list" class="group-list" style="max-height:180px;background:#0F172A;border-radius:8px;border:1px solid #334155"></div>
+          <div id="create-group-hidden"></div>
         </div>
 
         <!-- Password section -->
@@ -419,15 +442,81 @@ document.getElementById('group-form').addEventListener('submit', function(e) {
 });
 
 // ── Create user modal ─────────────────────────────────────────────────────────
+let _createSelected = new Set();
+
 function openCreateModal() {
   document.getElementById('create-form').reset();
   setPwMode('auto');
+  _createSelected = new Set();
+  document.getElementById('create-group-search').value = '';
+  renderCreateGroupList('');
+  onRoleChange('tech');
   document.getElementById('create-modal').classList.add('open');
   setTimeout(() => document.getElementById('new-name').focus(), 60);
 }
 function closeCreateModal() {
   document.getElementById('create-modal').classList.remove('open');
 }
+
+function onRoleChange(role) {
+  const sec = document.getElementById('create-group-section');
+  sec.style.display = role === 'admin' ? 'none' : 'block';
+}
+
+function renderCreateGroupList(query) {
+  const q = query.trim().toLowerCase();
+  const filtered = q ? GROUPS.filter(g =>
+    g.name.toLowerCase().includes(q) || g.slug.toLowerCase().includes(q)
+  ) : GROUPS;
+  const list = document.getElementById('create-group-list');
+  if (!filtered.length) {
+    list.innerHTML = '<div class="group-empty">No groups match "' + escHtml(query) + '"</div>';
+  } else {
+    list.innerHTML = filtered.map(g => {
+      const chk = _createSelected.has(g.id) ? 'checked' : '';
+      return `<div class="group-item" onclick="toggleCreateGroup(${g.id},this)">
+        <input type="checkbox" id="cgc-${g.id}" ${chk}
+               onclick="event.stopPropagation();toggleCreateGroup(${g.id},this.closest('.group-item'))">
+        <label for="cgc-${g.id}">${escHtml(g.name)}<span class="group-slug" style="margin-left:8px">${escHtml(g.slug)}</span></label>
+      </div>`;
+    }).join('');
+  }
+  updateCreateCount();
+}
+
+function toggleCreateGroup(id, row) {
+  if (_createSelected.has(id)) { _createSelected.delete(id); } else { _createSelected.add(id); }
+  const cb = row.querySelector('input[type=checkbox]');
+  if (cb) cb.checked = _createSelected.has(id);
+  updateCreateCount();
+}
+
+function updateCreateCount() {
+  const n = _createSelected.size;
+  document.getElementById('create-group-count').textContent = n + ' selected';
+}
+
+function setAllCreateGroups(checked) {
+  const q = document.getElementById('create-group-search').value.trim().toLowerCase();
+  const filtered = q ? GROUPS.filter(g =>
+    g.name.toLowerCase().includes(q) || g.slug.toLowerCase().includes(q)
+  ) : GROUPS;
+  filtered.forEach(g => { if (checked) _createSelected.add(g.id); else _createSelected.delete(g.id); });
+  renderCreateGroupList(q);
+}
+
+function filterCreateGroups(val) { renderCreateGroupList(val); }
+
+// Inject hidden group_ids before create form submits
+document.getElementById('create-form').addEventListener('submit', function() {
+  const container = document.getElementById('create-group-hidden');
+  container.innerHTML = '';
+  _createSelected.forEach(id => {
+    const inp = document.createElement('input');
+    inp.type = 'hidden'; inp.name = 'group_ids'; inp.value = id;
+    container.appendChild(inp);
+  });
+});
 
 function setPwMode(mode) {
   const isManual = mode === 'manual';
