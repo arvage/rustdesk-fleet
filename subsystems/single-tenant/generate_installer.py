@@ -64,6 +64,14 @@ class InstallerError(RuntimeError):
     pass
 
 
+def _strip_port(host: str) -> str:
+    """Return the hostname portion of host[:port], stripping any port number."""
+    # Handle IPv6 bracket notation [addr]:port
+    if host.startswith("["):
+        return host.split("]")[0].lstrip("[")
+    return host.split(":")[0]
+
+
 def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -168,7 +176,7 @@ def _build_nsis(
         "@@OUTPUT_PATH@@":              str(output_path),
         "@@RUSTDESK_EXE_SRC@@":         str(rustdesk_exe_src),
         "@@RUSTDESK_EXE_NAME@@":        cfg["exe_name"],
-        "@@HOST@@":                     server["host"],
+        "@@HOST@@":                     _strip_port(server["host"]),
         "@@PUBKEY@@":                   server["pubkey"],
         "@@PASSWORD_PRE_WRITE_BLOCK@@": password_pre_write_block,
         "@@PASSWORD_CLI_NSIS@@":        password_cli_nsis,
@@ -214,7 +222,7 @@ def _build_script(
         "@@DISPLAY_NAME@@":    group["display_name"],
         "@@GROUP_SLUG@@":      group["slug"],
         "@@RUSTDESK_VERSION@@": RUSTDESK_VERSION,
-        "@@HOST@@":            server["host"],
+        "@@HOST@@":            _strip_port(server["host"]),
         "@@PUBKEY@@":          server["pubkey"],
         **_shell_password_substitutions(pw),
     }
