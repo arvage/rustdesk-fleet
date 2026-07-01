@@ -34,6 +34,14 @@ async def devices_list(
     groups = conn.execute(
         "SELECT id, slug, display_name FROM client_groups ORDER BY display_name"
     ).fetchall()
+    deleted_rows = conn.execute(
+        """SELECT d.rustdesk_id, d.label, d.last_seen,
+                  cg.display_name AS group_name, cg.slug AS group_slug
+           FROM devices d
+           LEFT JOIN client_groups cg ON cg.id = d.group_id
+           WHERE d.hidden = 1
+           ORDER BY d.last_seen DESC"""
+    ).fetchall()
     conn.close()
 
     return templates.TemplateResponse(
@@ -45,6 +53,7 @@ async def devices_list(
             "active_group": group,
             "current_user": current_user,
             "peer_count": peer_count,
+            "deleted_devices": [dict(r) for r in deleted_rows],
         },
     )
 
@@ -115,6 +124,23 @@ async def device_delete(
             pass
 
     _set_flash(request, "success", f"Device {rustdesk_id} removed.")
+    return RedirectResponse("/devices", status_code=303)
+
+
+@router.post("/devices/{rustdesk_id}/restore")
+async def device_restore(
+    request: Request,
+    rustdesk_id: str,
+    current_user: dict = Depends(require_auth),
+):
+    conn = get_db()
+    conn.execute(
+        "UPDATE devices SET hidden = 0, status = 'registered' WHERE rustdesk_id = ?",
+        (rustdesk_id,),
+    )
+    conn.commit()
+    conn.close()
+    _set_flash(request, "success", f"Device {rustdesk_id} restored.")
     return RedirectResponse("/devices", status_code=303)
 
 
