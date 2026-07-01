@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
 from app.deps import get_db, get_hbbs_peers
+from app.notifications import fire_notification
 from app.templates_config import templates
 
 OUTPUT_DIR = Path("/opt/rustdesk-fleet/installers")
@@ -209,6 +210,16 @@ async def group_build(
         sha_short = (result["sha256_unsigned"] or "")[:16]
         label = PLATFORMS[platform]["label"]
         _set_flash(request, "success", f"{label} installer ready. SHA256: {sha_short}…")
+        conn = get_db()
+        grp = conn.execute("SELECT display_name FROM client_groups WHERE slug=?", (slug,)).fetchone()
+        conn.close()
+        fire_notification("installer_built", {
+            "group_name": grp["display_name"] if grp else slug,
+            "group_slug": slug,
+            "platform": label,
+            "version": result.get("rustdesk_version", ""),
+            "sha256": result.get("sha256_unsigned", ""),
+        })
     except InstallerError as e:
         _set_flash(request, "error", f"Build failed: {e}")
     return RedirectResponse(f"/groups/{slug}", status_code=303)

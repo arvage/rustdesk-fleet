@@ -100,4 +100,34 @@ def run_migrations() -> None:
         conn.execute("ALTER TABLE devices ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 
+    # Notification tables (idempotent CREATE IF NOT EXISTS)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS notification_settings (
+            id          INTEGER PRIMARY KEY CHECK (id = 1),
+            enabled     INTEGER NOT NULL DEFAULT 0,
+            smtp_host   TEXT NOT NULL DEFAULT '',
+            smtp_port   INTEGER NOT NULL DEFAULT 587,
+            smtp_tls    TEXT NOT NULL DEFAULT 'starttls',
+            smtp_user   TEXT NOT NULL DEFAULT '',
+            smtp_pass   TEXT NOT NULL DEFAULT '',
+            from_addr   TEXT NOT NULL DEFAULT '',
+            to_addrs    TEXT NOT NULL DEFAULT '',
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS notification_events (
+            event_type  TEXT PRIMARY KEY,
+            enabled     INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS notification_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type  TEXT NOT NULL,
+            subject     TEXT NOT NULL,
+            recipients  TEXT NOT NULL,
+            status      TEXT NOT NULL,
+            error       TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+    """)
+    conn.commit()
+
     conn.close()

@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
 from app.deps import get_db, get_devices, get_hbbs_peers
+from app.notifications import fire_notification
 from app.templates_config import templates
 
 HBBS_DB_PATH = Path("/opt/rustdesk-fleet/data/db_v2.sqlite3")
@@ -78,13 +79,27 @@ async def device_edit(
             "UPDATE devices SET label = ?, group_id = ? WHERE rustdesk_id = ?",
             (label, gid, rustdesk_id),
         )
+        conn.commit()
+        conn.close()
     else:
         conn.execute(
             "INSERT INTO devices (rustdesk_id, label, group_id, status, last_seen) VALUES (?, ?, ?, 'registered', ?)",
             (rustdesk_id, label, gid, _now_utc()),
         )
-    conn.commit()
-    conn.close()
+        conn.commit()
+        group_name = ""
+        if gid:
+            row = conn.execute("SELECT display_name FROM client_groups WHERE id=?", (gid,)).fetchone()
+            if row:
+                group_name = row["display_name"]
+        conn.close()
+        fire_notification("device_registered", {
+            "rustdesk_id": rustdesk_id,
+            "label": label or "",
+            "group_name": group_name,
+            "ip": "—",
+            "registered_at": _now_utc(),
+        })
     _set_flash(request, "success", "Device updated.")
     return RedirectResponse("/devices", status_code=303)
 
@@ -97,21 +112,30 @@ async def device_delete(
 ):
     conn = get_db()
     existing = conn.execute(
-        "SELECT id FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
+        """SELECT d.rustdesk_id, d.label, d.last_seen, cg.display_name AS group_name
+           FROM devices d LEFT JOIN client_groups cg ON cg.id = d.group_id
+           WHERE d.rustdesk_id = ?""",
+        (rustdesk_id,),
     ).fetchone()
     if existing:
-        # Mark hidden so the device is suppressed even if it reappears in hbbs peers
+        notif_ctx = {
+            "rustdesk_id": existing["rustdesk_id"],
+            "label": existing["label"] or "",
+            "group_name": existing["group_name"] or "",
+            "last_seen": existing["last_seen"] or "",
+        }
         conn.execute(
             "UPDATE devices SET hidden = 1 WHERE rustdesk_id = ?", (rustdesk_id,)
         )
     else:
-        # Device only exists in hbbs — insert a hidden tombstone so it stays hidden
+        notif_ctx = {"rustdesk_id": rustdesk_id, "label": "", "group_name": "", "last_seen": ""}
         conn.execute(
             "INSERT INTO devices (rustdesk_id, hidden, status, last_seen) VALUES (?, 1, 'deleted', ?)",
             (rustdesk_id, _now_utc()),
         )
     conn.commit()
     conn.close()
+    fire_notification("device_deleted", notif_ctx)
 
     # Best-effort removal from hbbs peer DB (may fail if daemon has a write lock)
     if HBBS_DB_PATH.exists():
@@ -170,6 +194,14 @@ async def devices_sync(request: Request, current_user: dict = Depends(require_au
                 (rustdesk_id, now),
             )
             new_count += 1
+            peer = peers[rustdesk_id]
+            fire_notification("device_registered", {
+                "rustdesk_id": rustdesk_id,
+                "label": "",
+                "group_name": "",
+                "ip": peer.get("ip") or "—",
+                "registered_at": peer.get("registered_at") or now,
+            })
     conn.commit()
     conn.close()
 

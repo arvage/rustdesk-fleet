@@ -96,3 +96,35 @@ CREATE TABLE IF NOT EXISTS provisioning_events (
 
 CREATE INDEX IF NOT EXISTS idx_devices_group ON devices(group_id);
 CREATE INDEX IF NOT EXISTS idx_installers_group ON installers(group_id);
+
+-- Notification configuration (singleton row, id always 1).
+CREATE TABLE IF NOT EXISTS notification_settings (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled     INTEGER NOT NULL DEFAULT 0,
+    smtp_host   TEXT NOT NULL DEFAULT '',
+    smtp_port   INTEGER NOT NULL DEFAULT 587,
+    smtp_tls    TEXT NOT NULL DEFAULT 'starttls'
+                    CHECK (smtp_tls IN ('starttls','ssl','none')),
+    smtp_user   TEXT NOT NULL DEFAULT '',
+    smtp_pass   TEXT NOT NULL DEFAULT '',
+    from_addr   TEXT NOT NULL DEFAULT '',
+    to_addrs    TEXT NOT NULL DEFAULT '',   -- comma-separated recipient list
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Per-event toggle.  Rows inserted on first save via INSERT OR REPLACE.
+CREATE TABLE IF NOT EXISTS notification_events (
+    event_type  TEXT PRIMARY KEY,
+    enabled     INTEGER NOT NULL DEFAULT 1
+);
+
+-- Delivery log (capped to last 200 rows by the notification module).
+CREATE TABLE IF NOT EXISTS notification_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type  TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    recipients  TEXT NOT NULL,
+    status      TEXT NOT NULL CHECK (status IN ('sent','failed')),
+    error       TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
