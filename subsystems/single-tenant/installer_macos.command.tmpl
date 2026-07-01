@@ -14,7 +14,9 @@ KEY="@@PUBKEY@@"
 RDVER="@@RUSTDESK_VERSION@@"
 @@PASSWORD_VAR@@
 
-# ── Write RustDesk2.toml ────────────────────────────────────────────────
+# ── Write config files ──────────────────────────────────────────────────
+# RustDesk2.toml holds server/options (Config2 struct).
+# RustDesk.toml holds the permanent password (Config struct, top-level "password" field).
 CONFIG_DIR="$HOME/Library/Application Support/RustDesk/config"
 
 write_config() {
@@ -25,9 +27,9 @@ write_config() {
     printf 'custom-rendezvous-server = "%s"\n' "$HOST"
     printf 'relay-server = "%s"\n' "$HOST"
     printf 'key = "%s"\n' "$KEY"
-@@PASSWORD_LINE_SHELL@@  } > "$1/RustDesk2.toml"
+  } > "$1/RustDesk2.toml"
   echo "  Config → $1/RustDesk2.toml"
-}
+@@PASSWORD_CONFIG_WRITE_SHELL@@}
 
 echo "Writing config…"
 write_config "$CONFIG_DIR"
@@ -83,8 +85,8 @@ launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load  "$PLIST" 2>/dev/null || true
 
 # ── Set permanent password via RustDesk CLI ─────────────────────────────
-# Writing the TOML alone is not enough — the CLI call stores the password
-# in the format the running service actually validates against.
+# RustDesk.toml already has "password = ..." (plaintext, legacy auth path).
+# The CLI call upgrades it to a proper hash via IPC to the running service.
 if [ -n "${PW:-}" ]; then
   sleep 1
   /Applications/RustDesk.app/Contents/MacOS/rustdesk --password "$PW" 2>/dev/null || true

@@ -84,15 +84,24 @@ def log_event(conn: sqlite3.Connection, event: str, detail: str = "") -> None:
 
 
 def _shell_password_substitutions(pw: str | None) -> dict[str, str]:
-    """Return @@PASSWORD_VAR@@ and @@PASSWORD_LINE_SHELL@@ replacements."""
+    """Return shell password placeholder replacements.
+
+    @@PASSWORD_VAR@@ — declares PW variable at top of script.
+    @@PASSWORD_CONFIG_WRITE_SHELL@@ — writes RustDesk.toml with password = "..."
+        inside write_config(). Must be the Config struct's top-level "password"
+        field (not permanent-password under [options], which is Config2 and
+        has no effect on authentication).
+    """
     if pw:
         return {
-            "@@PASSWORD_VAR@@":         f'PW="{pw}"',
-            "@@PASSWORD_LINE_SHELL@@":  f'    printf \'permanent-password = "%s"\\n\' "$PW"\n',
+            "@@PASSWORD_VAR@@": f'PW="{pw}"',
+            "@@PASSWORD_CONFIG_WRITE_SHELL@@": (
+                f'  printf \'password = "%s"\\n\' "$PW" > "$1/RustDesk.toml"\n'
+            ),
         }
     return {
-        "@@PASSWORD_VAR@@":        "",
-        "@@PASSWORD_LINE_SHELL@@": "",
+        "@@PASSWORD_VAR@@": "",
+        "@@PASSWORD_CONFIG_WRITE_SHELL@@": "",
     }
 
 
@@ -119,9 +128,20 @@ def _build_nsis(
     output_path = OUTPUT_DIR / output_filename
 
     pw = group["unattended_password"] if "unattended_password" in group.keys() else None
-    password_line = (
-        f'  FileWrite $0 \'permanent-password = "{pw}"$\\r$\\n\'\n' if pw else ""
-    )
+
+    # Write RustDesk.toml (Config struct, top-level "password" field) inside the
+    # WriteConfig macro. This is NOT RustDesk2.toml — that file is Config2 and its
+    # [options] section has no effect on password authentication.
+    password_rustdesk_toml = ""
+    if pw:
+        password_rustdesk_toml = (
+            f'  FileOpen $R0 "${{path}}\\RustDesk.toml" w\n'
+            f'  FileWrite $R0 \'password = "{pw}"$\\r$\\n\'\n'
+            f'  FileClose $R0\n'
+        )
+
+    # Belt-and-suspenders: also call rustdesk.exe --password via IPC so the
+    # service upgrades the plaintext storage to a proper hash format.
     password_cli_nsis = (
         f'  nsExec::ExecToLog \'"$PROGRAMFILES64\\RustDesk\\rustdesk.exe" --password "{pw}"\'\n  Pop $0\n\n'
         if pw else ""
@@ -129,14 +149,14 @@ def _build_nsis(
 
     nsi_script = (TMPL_DIR / "installer.nsi.tmpl").read_text()
     for marker, value in {
-        "@@DISPLAY_NAME@@":       group["display_name"],
-        "@@OUTPUT_PATH@@":        str(output_path),
-        "@@RUSTDESK_EXE_SRC@@":   str(rustdesk_exe_src),
-        "@@RUSTDESK_EXE_NAME@@":  cfg["exe_name"],
-        "@@HOST@@":               server["host"],
-        "@@PUBKEY@@":             server["pubkey"],
-        "@@PASSWORD_LINE@@":      password_line,
-        "@@PASSWORD_CLI_NSIS@@":  password_cli_nsis,
+        "@@DISPLAY_NAME@@":           group["display_name"],
+        "@@OUTPUT_PATH@@":            str(output_path),
+        "@@RUSTDESK_EXE_SRC@@":       str(rustdesk_exe_src),
+        "@@RUSTDESK_EXE_NAME@@":      cfg["exe_name"],
+        "@@HOST@@":                   server["host"],
+        "@@PUBKEY@@":                 server["pubkey"],
+        "@@PASSWORD_RUSTDESK_TOML@@": password_rustdesk_toml,
+        "@@PASSWORD_CLI_NSIS@@":      password_cli_nsis,
     }.items():
         nsi_script = nsi_script.replace(marker, value)
 

@@ -27,7 +27,9 @@ AutoCloseWindow true
 Name "@@DISPLAY_NAME@@ Remote Support"
 OutFile "@@OUTPUT_PATH@@"
 
-; Write RustDesk2.toml to the given directory (caller sets shell var context)
+; Write config files to the given directory (caller sets shell var context).
+; RustDesk2.toml holds server/options; RustDesk.toml holds the permanent password.
+; These are separate files because RustDesk loads them via different Config structs.
 !macro WriteConfig path
   CreateDirectory "${path}"
   FileOpen $0 "${path}\RustDesk2.toml" w
@@ -37,8 +39,8 @@ OutFile "@@OUTPUT_PATH@@"
   FileWrite $0 'custom-rendezvous-server = "@@HOST@@"$\r$\n'
   FileWrite $0 'relay-server = "@@HOST@@"$\r$\n'
   FileWrite $0 'key = "@@PUBKEY@@"$\r$\n'
-@@PASSWORD_LINE@@  FileClose $0
-!macroend
+  FileClose $0
+@@PASSWORD_RUSTDESK_TOML@@!macroend
 
 Section "Install"
 
@@ -106,8 +108,8 @@ Section "Install"
   nsExec::ExecToLog 'net start RustDesk'
   Pop $0
 
-  ; Set permanent password via RustDesk CLI so it is stored in the format
-  ; the service actually validates against (writing TOML alone is not enough).
+  ; Belt-and-suspenders: upgrade the plaintext RustDesk.toml password to the
+  ; proper hash format by calling the CLI (requires service to be running).
 @@PASSWORD_CLI_NSIS@@
   Exec '"$PROGRAMFILES64\RustDesk\rustdesk.exe"'
 
