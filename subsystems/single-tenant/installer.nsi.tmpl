@@ -8,7 +8,7 @@
 ;   2. Run the official RustDesk installer with --silent-install and wait.
 ;      The binary spawns a background child and exits early, so we poll for
 ;      the installed EXE rather than sleeping a fixed amount.
-;   3. Stop the service and tray app, re-write ONLY RustDesk2.toml everywhere.
+;   3. Stop the service and tray app, re-write RustDesk2.toml and _local.toml everywhere.
 ;      We deliberately do NOT re-write RustDesk.toml here — the service already
 ;      wrote its identity (id, key_pair, salt) around our password; overwriting
 ;      would destroy those fields and force another key regeneration.
@@ -33,13 +33,23 @@ AutoCloseWindow true
 Name "@@DISPLAY_NAME@@ Remote Support"
 OutFile "@@OUTPUT_PATH@@"
 
-; Write RustDesk2.toml (server settings) to the given directory.
-; Used in both pre-write and post-write steps.
+; Write RustDesk2.toml (daemon Config2) AND _local.toml (UI LocalConfig) to the
+; given directory.  Both must carry the same server/key options:
+;   Config2 / RustDesk2.toml  — used by the background service for actual connections.
+;   LocalConfig / _local.toml — read by the tray/UI for the Network settings display.
+; Writing only RustDesk2.toml leaves the Network settings dialog showing blank fields
+; even though the service connects correctly.
 !macro WriteConfig path
   CreateDirectory "${path}"
   FileOpen $0 "${path}\RustDesk2.toml" w
   FileWrite $0 'rendezvous_server = "@@HOST@@"$\r$\n'
   FileWrite $0 '$\r$\n'
+  FileWrite $0 '[options]$\r$\n'
+  FileWrite $0 'custom-rendezvous-server = "@@HOST@@"$\r$\n'
+  FileWrite $0 'relay-server = "@@HOST@@"$\r$\n'
+  FileWrite $0 'key = "@@PUBKEY@@"$\r$\n'
+  FileClose $0
+  FileOpen $0 "${path}\_local.toml" w
   FileWrite $0 '[options]$\r$\n'
   FileWrite $0 'custom-rendezvous-server = "@@HOST@@"$\r$\n'
   FileWrite $0 'relay-server = "@@HOST@@"$\r$\n'

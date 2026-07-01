@@ -40,7 +40,13 @@ write_config() {
     printf 'relay-server = "%s"\n' "$HOST"
     printf 'key = "%s"\n' "$KEY"
   } > "$1/RustDesk2.toml"
-  echo "  Config → $1/RustDesk2.toml"
+  {
+    printf '[options]\n'
+    printf 'custom-rendezvous-server = "%s"\n' "$HOST"
+    printf 'relay-server = "%s"\n' "$HOST"
+    printf 'key = "%s"\n' "$KEY"
+  } > "$1/_local.toml"
+  echo "  Config → $1/RustDesk2.toml + _local.toml"
 @@PASSWORD_CONFIG_WRITE_SHELL@@}
 
 echo "Writing config…"
