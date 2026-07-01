@@ -265,6 +265,38 @@ def fire_notification(event_type: str, context: dict) -> None:
     t.start()
 
 
+def send_credentials_email(to_email: str, display_name: str, password: str) -> tuple[bool, str]:
+    """Send a welcome/credentials email to a new user. Returns (ok, error_msg)."""
+    settings = get_settings()
+    if not settings.get("enabled") or not settings.get("smtp_host"):
+        return False, "Notifications not configured or disabled."
+    if not settings.get("from_addr"):
+        return False, "No from address configured."
+    try:
+        subject = "Your RustDesk Fleet account credentials"
+        html = f"""
+        <div style="font-family:Inter,system-ui,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1E293B">
+          <h2 style="font-size:20px;font-weight:700;margin-bottom:8px">Welcome to RustDesk Fleet</h2>
+          <p style="color:#64748B;font-size:14px;margin-bottom:24px">
+            Hi {display_name or to_email}, an account has been created for you.
+          </p>
+          <div style="background:#F1F5F9;border-radius:10px;padding:20px 24px;margin-bottom:24px">
+            <p style="margin:0 0 6px;font-size:13px;color:#64748B;font-weight:500">LOGIN EMAIL</p>
+            <p style="margin:0 0 16px;font-size:15px;font-weight:600;color:#0F172A">{to_email}</p>
+            <p style="margin:0 0 6px;font-size:13px;color:#64748B;font-weight:500">TEMPORARY PASSWORD</p>
+            <p style="margin:0;font-size:15px;font-weight:600;color:#0F172A;letter-spacing:.05em;font-family:monospace">{password}</p>
+          </div>
+          <p style="font-size:13px;color:#94A3B8">
+            Please change your password after your first login. This email was sent once and will not be resent.
+          </p>
+        </div>
+        """
+        _send_sync(settings, [to_email], subject, html)
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
+
+
 def send_test_email(settings: dict) -> tuple[bool, str]:
     """Send a test email with the given settings dict.  Returns (ok, error_msg)."""
     to_list = [a.strip() for a in settings.get("to_addrs", "").split(",") if a.strip()]

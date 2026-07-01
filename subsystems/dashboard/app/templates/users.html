@@ -2,23 +2,107 @@
 {% block title %}Users — RustDesk Fleet{% endblock %}
 {% block page_title %}Users{% endblock %}
 {% block topbar_actions %}
-  <button onclick="document.getElementById('create-modal').style.display='flex'" class="btn btn-primary btn-sm">
+  <button onclick="openCreateModal()" class="btn btn-primary btn-sm">
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     Add User
   </button>
 {% endblock %}
 
 {% block content %}
+<style>
+.modal-backdrop {
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;
+  align-items:center;justify-content:center;
+}
+.modal-backdrop.open { display:flex; }
+.modal-box {
+  background:#1E293B;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);
+  width:100%;color:#F1F5F9;
+}
+.modal-header {
+  display:flex;align-items:center;justify-content:space-between;
+  padding:20px 24px 16px;border-bottom:1px solid #334155;
+}
+.modal-header h2 { font-size:15px;font-weight:700;margin:0;color:#F1F5F9; }
+.modal-close {
+  background:none;border:none;cursor:pointer;color:#64748B;font-size:22px;
+  line-height:1;padding:0;transition:color .12s;
+}
+.modal-close:hover { color:#F1F5F9; }
+.modal-field { display:flex;flex-direction:column;gap:5px; }
+.modal-field label {
+  font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.05em;
+}
+.modal-input {
+  width:100%;box-sizing:border-box;padding:8px 11px;
+  background:#0F172A;border:1px solid #334155;border-radius:8px;
+  color:#F1F5F9;font-size:13px;font-family:inherit;outline:none;
+  transition:border-color .12s,box-shadow .12s;
+}
+.modal-input:focus { border-color:#6366F1;box-shadow:0 0 0 3px rgba(99,102,241,.2); }
+.modal-input::placeholder { color:#475569; }
+.modal-select {
+  width:100%;box-sizing:border-box;padding:8px 11px;
+  background:#0F172A;border:1px solid #334155;border-radius:8px;
+  color:#F1F5F9;font-size:13px;font-family:inherit;outline:none;cursor:pointer;
+}
+.seg-btn {
+  flex:1;padding:6px 0;font-size:12px;font-weight:500;border:1px solid #334155;
+  background:#0F172A;color:#94A3B8;cursor:pointer;transition:all .15s;
+}
+.seg-btn:first-child { border-radius:6px 0 0 6px;border-right:none; }
+.seg-btn:last-child  { border-radius:0 6px 6px 0;border-left:none; }
+.seg-btn.active { background:#6366F1;border-color:#6366F1;color:#fff; }
+.pw-reveal-btn {
+  position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  background:none;border:none;cursor:pointer;color:#64748B;padding:0;
+  display:flex;align-items:center;
+}
+.pw-reveal-btn:hover { color:#CBD5E1; }
+.group-search-wrap { position:relative; padding:14px 16px 10px; }
+.group-search-wrap svg {
+  position:absolute;left:26px;top:50%;transform:translateY(-50%);
+  width:14px;height:14px;color:#64748B;pointer-events:none;
+}
+.group-search-wrap input {
+  width:100%;box-sizing:border-box;padding:7px 10px 7px 34px;
+  background:#0F172A;border:1px solid #334155;border-radius:7px;
+  color:#F1F5F9;font-size:13px;outline:none;transition:border-color .12s;
+}
+.group-search-wrap input:focus { border-color:#6366F1; }
+.group-search-wrap input::placeholder { color:#475569; }
+.group-list { max-height:280px;overflow-y:auto;padding:0 16px 4px; }
+.group-list::-webkit-scrollbar { width:4px; }
+.group-list::-webkit-scrollbar-thumb { background:#334155;border-radius:2px; }
+.group-item {
+  display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;
+  cursor:pointer;transition:background .1s;
+}
+.group-item:hover { background:#0F172A; }
+.group-item input[type=checkbox] { width:15px;height:15px;accent-color:#6366F1;cursor:pointer;flex-shrink:0; }
+.group-item label { font-size:13px;color:#CBD5E1;cursor:pointer;flex:1;user-select:none; }
+.group-item .group-slug { font-size:11px;color:#475569;font-family:monospace; }
+.group-empty { padding:32px 0;text-align:center;color:#475569;font-size:13px; }
+</style>
+
+{# Serialise all groups and all access maps to JSON for JS #}
+<script id="groups-json" type="application/json">
+[{% for g in groups %}{"id":{{ g.id }},"slug":"{{ g.slug }}","name":"{{ g.display_name | e }}"}{% if not loop.last %},{% endif %}{% endfor %}]
+</script>
+<script id="access-json" type="application/json">
+{{% for u in users %}"{{ u.id }}":[{% for gid in u.group_ids %}{{ gid }}{% if not loop.last %},{% endif %}{% endfor %}]{% if not loop.last %},{% endif %}{% endfor %}}
+</script>
 
 {# One-time new-user password reveal #}
 {% set new_pw = get_new_user_pw(request) %}
 {% if new_pw %}
-<div class="flash success" style="flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:20px">
-  <strong>Account ready — share these credentials once, they won't be shown again:</strong>
-  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:4px">
+<div class="flash success" style="flex-direction:column;align-items:flex-start;gap:8px;margin-bottom:20px">
+  <strong>Account ready{% if new_pw.email_sent %} — credentials emailed to {{ new_pw.email }}{% else %} — share these credentials once, they won't be shown again{% endif %}:</strong>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:2px">
     <span>Email: <code>{{ new_pw.email }}</code></span>
     <span>Password: <code style="background:#D1FAE5;padding:3px 8px;border-radius:4px">{{ new_pw.password }}</code></span>
   </div>
+  {% if new_pw.email_sent %}<div style="font-size:12px;color:#10B981">✓ Email delivered</div>{% endif %}
 </div>
 {% endif %}
 
@@ -51,16 +135,16 @@
             {% if u.role == 'admin' %}
               <span class="text-muted text-sm">All groups</span>
             {% else %}
-            <form method="post" action="/users/{{ u.id }}/access" style="margin:0;display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap">
-              {% for g in groups %}
-              <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
-                <input type="checkbox" name="group_ids" value="{{ g.id }}"
-                       {% if g.id in u.group_ids %}checked{% endif %}
-                       onchange="this.closest('form').submit()">
-                {{ g.display_name }}
-              </label>
-              {% endfor %}
-            </form>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span id="access-label-{{ u.id }}" class="text-sm text-muted">
+                  {%- set cnt = u.group_ids | length -%}
+                  {{ cnt }} group{{ 's' if cnt != 1 else '' }}
+                </span>
+                <button type="button" class="btn btn-ghost btn-sm"
+                        onclick="openGroupModal({{ u.id }}, '{{ u.display_name or u.email | e }}')">
+                  Edit
+                </button>
+              </div>
             {% endif %}
           </td>
           <td class="text-muted text-sm">{{ u.created_at | localtime("%Y-%m-%d") }}</td>
@@ -69,12 +153,12 @@
               <button onclick="document.getElementById('edit-{{ u.id }}').style.display='table-row'"
                       class="btn btn-ghost btn-sm">Edit</button>
               <form method="post" action="/users/{{ u.id }}/reset-password" style="margin:0"
-                    onsubmit="return confirm('Reset password for {{ u.email }}?')">
+                    onsubmit="return confirm('Reset password for {{ u.email | e }}?')">
                 <button type="submit" class="btn btn-ghost btn-sm">Reset pw</button>
               </form>
               {% if u.id != current_user.id %}
               <form method="post" action="/users/{{ u.id }}/delete" style="margin:0"
-                    onsubmit="return confirm('Delete {{ u.email }}? This cannot be undone.')">
+                    onsubmit="return confirm('Delete {{ u.email | e }}? This cannot be undone.')">
                 <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Delete</button>
               </form>
               {% endif %}
@@ -116,36 +200,274 @@
 </div></div>
 {% endif %}
 
-<!-- Create user modal -->
-<div id="create-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center">
-  <div style="background:#fff;border-radius:14px;padding:28px 28px 24px;width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-      <h2 style="font-size:16px;font-weight:700">Add User</h2>
-      <button onclick="document.getElementById('create-modal').style.display='none'"
-              style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">✕</button>
+<!-- ── Group Access Modal ──────────────────────────────────────────────────── -->
+<div id="group-modal" class="modal-backdrop" onclick="if(event.target===this)closeGroupModal()">
+  <div class="modal-box" style="max-width:460px">
+    <div class="modal-header">
+      <div>
+        <h2 id="group-modal-title">Group Access</h2>
+        <div id="group-modal-sub" style="font-size:12px;color:#64748B;margin-top:2px"></div>
+      </div>
+      <button class="modal-close" onclick="closeGroupModal()">✕</button>
     </div>
-    <p class="text-muted text-sm" style="margin-bottom:16px">A temporary password will be generated. Share it once — it won't be shown again.</p>
-    <form method="post" action="/users">
-      <div class="field" style="margin-bottom:12px">
-        <label for="new-name">Full name</label>
-        <input type="text" id="new-name" name="display_name" placeholder="Jane Smith" required style="width:100%">
+
+    <div class="group-search-wrap">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input type="text" id="group-search" placeholder="Search groups…" oninput="filterGroups(this.value)" autocomplete="off">
+    </div>
+
+    <div style="padding:0 16px 8px;display:flex;align-items:center;justify-content:space-between">
+      <span id="group-count-label" style="font-size:12px;color:#64748B"></span>
+      <div style="display:flex;gap:12px">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="setAllGroups(true)">Select all</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="setAllGroups(false)">Clear all</button>
       </div>
-      <div class="field" style="margin-bottom:12px">
-        <label for="new-email">Email</label>
-        <input type="email" id="new-email" name="email" placeholder="jane@example.com" required style="width:100%">
+    </div>
+
+    <div class="group-list" id="group-list"></div>
+
+    <form id="group-form" method="post" style="margin:0">
+      <div id="group-form-inputs"></div>
+      <div style="padding:14px 16px;border-top:1px solid #334155;display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" class="btn btn-ghost" onclick="closeGroupModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save access</button>
       </div>
-      <div class="field" style="margin-bottom:20px">
-        <label for="new-role">Role</label>
-        <select id="new-role" name="role" style="padding:7px 11px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;width:100%;background:var(--surface)">
-          <option value="tech">tech</option>
-          <option value="admin">admin</option>
-        </select>
+    </form>
+  </div>
+</div>
+
+<!-- ── Create User Modal ──────────────────────────────────────────────────── -->
+<div id="create-modal" class="modal-backdrop" onclick="if(event.target===this)closeCreateModal()">
+  <div class="modal-box" style="max-width:460px">
+    <div class="modal-header">
+      <h2>Add User</h2>
+      <button class="modal-close" onclick="closeCreateModal()">✕</button>
+    </div>
+
+    <form method="post" action="/users" id="create-form">
+      <div style="padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+
+        <!-- Name & Email -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div class="modal-field">
+            <label for="new-name">Full name</label>
+            <input type="text" id="new-name" name="display_name" class="modal-input" placeholder="Jane Smith" required>
+          </div>
+          <div class="modal-field">
+            <label for="new-email">Email</label>
+            <input type="email" id="new-email" name="email" class="modal-input" placeholder="jane@example.com" required>
+          </div>
+        </div>
+
+        <!-- Role -->
+        <div class="modal-field">
+          <label for="new-role">Role</label>
+          <select id="new-role" name="role" class="modal-select">
+            <option value="tech">tech — limited to assigned groups</option>
+            <option value="admin">admin — full access</option>
+          </select>
+        </div>
+
+        <!-- Password section -->
+        <div>
+          <div style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
+            Password
+          </div>
+          <div style="display:flex;margin-bottom:12px">
+            <button type="button" id="seg-auto" class="seg-btn active" onclick="setPwMode('auto')">Auto-generate</button>
+            <button type="button" id="seg-manual" class="seg-btn" onclick="setPwMode('manual')">Set manually</button>
+          </div>
+          <input type="hidden" name="password_mode" id="pw-mode-field" value="auto">
+
+          <div id="pw-manual-wrap" style="display:none;position:relative">
+            <input type="password" name="password" id="new-pw" class="modal-input"
+                   placeholder="Min. 10 characters" autocomplete="new-password"
+                   style="padding-right:76px">
+            <div style="position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;gap:4px">
+              <button type="button" class="pw-reveal-btn" onclick="togglePwVisibility()" title="Show/hide">
+                <svg id="pw-eye" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:15px;height:15px">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </button>
+              <button type="button" class="pw-reveal-btn" onclick="generateIntoField()" title="Generate">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:15px;height:15px">
+                  <polyline points="23 4 23 10 17 10"/>
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div id="pw-auto-note" style="font-size:12px;color:#64748B;margin-top:4px">
+            A secure 16-character password will be generated automatically.
+          </div>
+        </div>
+
+        <!-- Email credentials -->
+        <div style="background:#0F172A;border-radius:8px;padding:12px 14px;display:flex;align-items:flex-start;gap:10px">
+          <input type="checkbox" name="send_email" value="1" id="send-email-cb"
+                 style="width:15px;height:15px;accent-color:#6366F1;margin-top:2px;flex-shrink:0"
+                 {% if not smtp_ready %}disabled{% endif %}>
+          <div>
+            <label for="send-email-cb" style="font-size:13px;font-weight:500;color:#CBD5E1;cursor:pointer">
+              Email credentials to user
+            </label>
+            <div style="font-size:11px;color:#475569;margin-top:2px">
+              {% if smtp_ready %}
+                Sends a welcome email with login details to the user's address.
+              {% else %}
+                SMTP not configured — set up notifications first to enable this.
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
       </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button type="button" onclick="document.getElementById('create-modal').style.display='none'" class="btn btn-ghost">Cancel</button>
+
+      <div style="padding:14px 24px;border-top:1px solid #334155;display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" class="btn btn-ghost" onclick="closeCreateModal()">Cancel</button>
         <button type="submit" class="btn btn-primary">Create user</button>
       </div>
     </form>
   </div>
 </div>
+
+<script>
+// ── Data ─────────────────────────────────────────────────────────────────────
+const GROUPS = JSON.parse(document.getElementById('groups-json').textContent);
+const ACCESS = JSON.parse(document.getElementById('access-json').textContent);
+
+// ── Group access modal ────────────────────────────────────────────────────────
+let _activeUserId = null;
+let _selected = new Set();
+
+function openGroupModal(userId, userName) {
+  _activeUserId = userId;
+  _selected = new Set((ACCESS[String(userId)] || []).map(Number));
+  document.getElementById('group-modal-title').textContent = 'Group Access — ' + userName;
+  document.getElementById('group-form').action = '/users/' + userId + '/access';
+  document.getElementById('group-search').value = '';
+  renderGroupList('');
+  document.getElementById('group-modal').classList.add('open');
+  setTimeout(() => document.getElementById('group-search').focus(), 60);
+}
+
+function closeGroupModal() {
+  document.getElementById('group-modal').classList.remove('open');
+  _activeUserId = null;
+}
+
+function renderGroupList(query) {
+  const q = query.trim().toLowerCase();
+  const filtered = q ? GROUPS.filter(g =>
+    g.name.toLowerCase().includes(q) || g.slug.toLowerCase().includes(q)
+  ) : GROUPS;
+
+  const list = document.getElementById('group-list');
+  if (!filtered.length) {
+    list.innerHTML = '<div class="group-empty">No groups match "' + escHtml(query) + '"</div>';
+  } else {
+    list.innerHTML = filtered.map(g => {
+      const chk = _selected.has(g.id) ? 'checked' : '';
+      return `<div class="group-item" onclick="toggleGroup(${g.id},this)">
+        <input type="checkbox" id="gc-${g.id}" ${chk} onclick="event.stopPropagation();toggleGroup(${g.id},this.closest('.group-item'))">
+        <label for="gc-${g.id}">${escHtml(g.name)}<span class="group-slug" style="margin-left:8px">${escHtml(g.slug)}</span></label>
+      </div>`;
+    }).join('');
+  }
+  updateCountLabel();
+}
+
+function toggleGroup(id, row) {
+  if (_selected.has(id)) { _selected.delete(id); } else { _selected.add(id); }
+  const cb = row.querySelector('input[type=checkbox]');
+  if (cb) cb.checked = _selected.has(id);
+  updateCountLabel();
+}
+
+function updateCountLabel() {
+  const n = _selected.size;
+  document.getElementById('group-count-label').textContent = n + ' group' + (n !== 1 ? 's' : '') + ' selected';
+  // Update the table label live
+  if (_activeUserId) {
+    const lbl = document.getElementById('access-label-' + _activeUserId);
+    if (lbl) lbl.textContent = n + ' group' + (n !== 1 ? 's' : '');
+  }
+}
+
+function setAllGroups(checked) {
+  const q = document.getElementById('group-search').value.trim().toLowerCase();
+  const filtered = q ? GROUPS.filter(g =>
+    g.name.toLowerCase().includes(q) || g.slug.toLowerCase().includes(q)
+  ) : GROUPS;
+  filtered.forEach(g => { if (checked) _selected.add(g.id); else _selected.delete(g.id); });
+  renderGroupList(q);
+}
+
+function filterGroups(val) { renderGroupList(val); }
+
+// Intercept form submit to inject hidden inputs from _selected
+document.getElementById('group-form').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const container = document.getElementById('group-form-inputs');
+  container.innerHTML = '';
+  _selected.forEach(id => {
+    const inp = document.createElement('input');
+    inp.type = 'hidden'; inp.name = 'group_ids'; inp.value = id;
+    container.appendChild(inp);
+  });
+  this.submit();
+});
+
+// ── Create user modal ─────────────────────────────────────────────────────────
+function openCreateModal() {
+  document.getElementById('create-form').reset();
+  setPwMode('auto');
+  document.getElementById('create-modal').classList.add('open');
+  setTimeout(() => document.getElementById('new-name').focus(), 60);
+}
+function closeCreateModal() {
+  document.getElementById('create-modal').classList.remove('open');
+}
+
+function setPwMode(mode) {
+  const isManual = mode === 'manual';
+  document.getElementById('pw-mode-field').value = mode;
+  document.getElementById('seg-auto').classList.toggle('active', !isManual);
+  document.getElementById('seg-manual').classList.toggle('active', isManual);
+  document.getElementById('pw-manual-wrap').style.display = isManual ? 'block' : 'none';
+  document.getElementById('pw-auto-note').style.display = isManual ? 'none' : 'block';
+  document.getElementById('new-pw').required = isManual;
+}
+
+function togglePwVisibility() {
+  const inp = document.getElementById('new-pw');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function generateIntoField() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  const pw = Array.from(arr).map(b => chars[b % chars.length]).join('');
+  const inp = document.getElementById('new-pw');
+  inp.value = pw;
+  inp.type = 'text';
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Close modals on Escape
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    closeGroupModal();
+    closeCreateModal();
+  }
+});
+</script>
 {% endblock %}

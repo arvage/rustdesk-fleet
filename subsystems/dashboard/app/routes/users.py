@@ -1,5 +1,6 @@
 import secrets
 import string
+from typing import Optional
 
 import bcrypt
 from fastapi import APIRouter, Depends, Form, Request
@@ -7,6 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
 from app.deps import get_db
+from app.notifications import send_credentials_email
 from app.templates_config import templates
 
 router = APIRouter()
@@ -36,11 +38,12 @@ async def users_list(request: Request, current_user: dict = Depends(require_auth
     groups = conn.execute(
         "SELECT id, slug, display_name FROM client_groups ORDER BY display_name"
     ).fetchall()
-
-    # Fetch group access per user
     access_rows = conn.execute(
         "SELECT user_id, group_id FROM user_group_access"
     ).fetchall()
+    smtp_row = conn.execute(
+        "SELECT enabled, smtp_host FROM notification_settings WHERE id = 1"
+    ).fetchone()
     conn.close()
 
     access_by_user: dict[int, set[int]] = {}
@@ -52,6 +55,8 @@ async def users_list(request: Request, current_user: dict = Depends(require_auth
         for u in users
     ]
 
+    smtp_ready = bool(smtp_row and smtp_row["enabled"] and smtp_row["smtp_host"])
+
     return templates.TemplateResponse(
         request,
         "users.html",
@@ -59,6 +64,7 @@ async def users_list(request: Request, current_user: dict = Depends(require_auth
             "users": users_with_access,
             "groups": groups,
             "current_user": current_user,
+            "smtp_ready": smtp_ready,
         },
     )
 
@@ -69,6 +75,9 @@ async def user_create(
     email: str = Form(...),
     display_name: str = Form(...),
     role: str = Form("tech"),
+    password_mode: str = Form("auto"),
+    password: str = Form(""),
+    send_email: str = Form(""),
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
@@ -79,8 +88,16 @@ async def user_create(
         _set_flash(request, "error", "Invalid role.")
         return RedirectResponse("/users", status_code=303)
 
-    temp_password = _gen_password()
-    pw_hash = bcrypt.hashpw(temp_password.encode(), bcrypt.gensalt(rounds=12)).decode()
+    if password_mode == "manual":
+        chosen = password.strip()
+        if len(chosen) < 10:
+            _set_flash(request, "error", "Password must be at least 10 characters.")
+            return RedirectResponse("/users", status_code=303)
+        final_password = chosen
+    else:
+        final_password = _gen_password()
+
+    pw_hash = bcrypt.hashpw(final_password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
     conn = get_db()
     existing = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
@@ -96,8 +113,16 @@ async def user_create(
     conn.commit()
     conn.close()
 
-    # Store the temp password in the session flash so admin can copy it once
-    request.session["new_user_pw"] = {"email": email, "password": temp_password}
+    email_sent = False
+    if send_email == "1":
+        ok, _ = send_credentials_email(email, display_name, final_password)
+        email_sent = ok
+
+    request.session["new_user_pw"] = {
+        "email": email,
+        "password": final_password,
+        "email_sent": email_sent,
+    }
     return RedirectResponse("/users", status_code=303)
 
 
