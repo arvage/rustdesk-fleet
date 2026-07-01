@@ -1,6 +1,6 @@
+import json
 import secrets
 import string
-from typing import Optional
 
 import bcrypt
 from fastapi import APIRouter, Depends, Form, Request
@@ -57,6 +57,15 @@ async def users_list(request: Request, current_user: dict = Depends(require_auth
 
     smtp_ready = bool(smtp_row and smtp_row["enabled"] and smtp_row["smtp_host"])
 
+    groups_json = json.dumps([
+        {"id": g["id"], "slug": g["slug"], "name": g["display_name"]}
+        for g in groups
+    ])
+    access_json = json.dumps({
+        str(u["id"]): sorted(u["group_ids"])
+        for u in users_with_access
+    })
+
     return templates.TemplateResponse(
         request,
         "users.html",
@@ -65,6 +74,8 @@ async def users_list(request: Request, current_user: dict = Depends(require_auth
             "groups": groups,
             "current_user": current_user,
             "smtp_ready": smtp_ready,
+            "groups_json": groups_json,
+            "access_json": access_json,
         },
     )
 

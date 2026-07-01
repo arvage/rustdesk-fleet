@@ -85,13 +85,9 @@
 .group-empty { padding:32px 0;text-align:center;color:#475569;font-size:13px; }
 </style>
 
-{# Serialise all groups and all access maps to JSON for JS #}
-<script id="groups-json" type="application/json">
-[{% for g in groups %}{"id":{{ g.id }},"slug":"{{ g.slug }}","name":"{{ g.display_name | e }}"}{% if not loop.last %},{% endif %}{% endfor %}]
-</script>
-<script id="access-json" type="application/json">
-{{% for u in users %}"{{ u.id }}":[{% for gid in u.group_ids %}{{ gid }}{% if not loop.last %},{% endif %}{% endfor %}]{% if not loop.last %},{% endif %}{% endfor %}}
-</script>
+{# Serialise all groups and access maps to JSON for JS — done in Python to avoid Jinja2 brace collision #}
+<script id="groups-json" type="application/json">{{ groups_json | safe }}</script>
+<script id="access-json" type="application/json">{{ access_json | safe }}</script>
 
 {# One-time new-user password reveal #}
 {% set new_pw = get_new_user_pw(request) %}
