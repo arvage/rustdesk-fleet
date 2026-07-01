@@ -101,6 +101,7 @@ async def group_detail(
             "installers": installer_rows,
             "current_user": current_user,
             "has_password": bool(group["unattended_password"]),
+            "unattended_password": group["unattended_password"] or "",
         },
     )
 

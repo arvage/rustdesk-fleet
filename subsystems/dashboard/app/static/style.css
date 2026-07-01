@@ -292,6 +292,12 @@ code {
 .login-field input { width: 100%; }
 .login-card .btn { width: 100%; justify-content: center; padding: 9px; margin-top: 6px; }
 
+/* ── Label column expands; ID and Actions columns stay tight ─────── */
+#devices-table th:nth-child(2),
+#devices-table td:nth-child(2) { width: 100%; }
+#devices-table td:nth-child(1),
+#devices-table td:nth-child(8) { white-space: nowrap; width: 1px; }
+
 /* ── Sortable table headers ───────────────────────────────────── */
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { color: var(--text-1); }

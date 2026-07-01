@@ -19,20 +19,17 @@
 
 {% block content %}
 <div style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">
-  <span class="text-muted text-sm">
+  <span class="text-muted text-sm" id="device-count-label">
     {{ devices|length }} device{{ 's' if devices|length != 1 }}{% if active_group %} in <strong>{{ active_group }}</strong>{% endif %}
-    &nbsp;·&nbsp; {{ peer_count }} registered with server
+    &nbsp;·&nbsp; <span id="peer-count">{{ peer_count }}</span> registered with server
   </span>
-  {% if devices %}
   <input id="device-filter" type="search" placeholder="Filter by ID, IP, label, group…"
          oninput="filterDevices()"
          style="padding:7px 11px;border:1px solid var(--border-md);border-radius:var(--radius-sm);
                 font-size:13px;width:280px;outline:none;background:var(--surface)">
-  {% endif %}
 </div>
 
-{% if devices %}
-<div class="card">
+<div class="card" id="devices-card">
   <div class="table-wrap">
     <table id="devices-table">
       <thead>
@@ -58,11 +55,8 @@
             </button>
           </td>
           <td data-val="{{ d.label | lower }}">
-            {% if d.label %}
-            <span style="font-weight:500">{{ d.label }}</span>
-            {% else %}
-            <span class="text-muted text-sm">—</span>
-            {% endif %}
+            {% if d.label %}<span style="font-weight:500">{{ d.label }}</span>
+            {% else %}<span class="text-muted text-sm">—</span>{% endif %}
           </td>
           <td data-val="{{ d.ip }}" class="text-muted text-sm mono">{{ d.ip }}</td>
           <td data-val="{{ d.status or 'unknown' }}">
@@ -81,8 +75,7 @@
           <td style="white-space:nowrap">
             <a href="rustdesk://{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm"
                title="Connect via RustDesk" style="color:#2563EB">
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-                   style="width:14px;height:14px">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
                 <path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.82v6.36a1 1 0 0 1-1.447.894L15 14"/>
                 <rect x="1" y="6" width="15" height="12" rx="2"/>
               </svg>
@@ -100,17 +93,8 @@
     No devices match your filter.
   </div>
 </div>
-{% else %}
-<div class="card"><div class="card-body">
-  <div class="empty">
-    <div class="empty-icon">💻</div>
-    <p>No devices found.</p>
-    <p>Install the client on a machine to see it appear here.</p>
-  </div>
-</div></div>
-{% endif %}
 
-<!-- Device edit modal (shared, populated by JS) -->
+<!-- Device edit modal -->
 <div id="device-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center"
      onclick="if(event.target===this)closeDeviceModal()">
   <div style="background:#fff;border-radius:14px;padding:28px 28px 22px;width:400px;box-shadow:0 20px 60px rgba(0,0,0,.22)">
@@ -119,12 +103,10 @@
       <button onclick="closeDeviceModal()"
               style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1;padding:0">✕</button>
     </div>
-
     <div style="margin-bottom:18px;padding:9px 12px;background:#F8FAFC;border:1px solid var(--border-lt);border-radius:8px">
       <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Device ID</span>
-      <div><code id="modal-rid" style="font-size:13px;color:var(--text-1)"></code></div>
+      <div><code id="modal-rid" style="font-size:13px;color:var(--text-1);letter-spacing:.04em"></code></div>
     </div>
-
     <form id="device-edit-form" method="post">
       <div class="field" style="margin-bottom:14px">
         <label for="modal-label">Label</label>
@@ -161,14 +143,233 @@
     </form>
   </div>
 </div>
-
-<!-- Hidden form used for delete submission -->
 <form id="device-delete-form" method="post" style="display:none"></form>
 
 <script>
+// ── SVG snippets reused when building rows ───────────────────────────────────
+const SVG_COPY = `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+const SVG_VIDEO = `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.82v6.36a1 1 0 0 1-1.447.894L15 14"/><rect x="1" y="6" width="15" height="12" rx="2"/></svg>`;
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) { return esc(s).replace(/'/g,'&#39;'); }
 function formatRid(id) {
   return /^\d+$/.test(id) ? id.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') : id;
+}
+
+// ── Build a table row HTML string from a device object ───────────────────────
+function buildRow(d) {
+  const rid = d.rustdesk_id;
+  const label = d.label || '';
+  const ip = d.ip || '—';
+  const st = d.status || 'unknown';
+  const stClass = st === 'registered' ? 'active' : st;
+  const groupCell = d.group_name
+    ? `<a href="/groups/${esc(d.group_slug)}" style="color:var(--accent);text-decoration:none;font-size:13px">${esc(d.group_name)}</a>`
+    : `<span class="text-muted text-sm">—</span>`;
+
+  return `<tr data-rid="${rid}" data-search="${esc(rid)} ${esc(label)} ${esc(ip)} ${esc(d.group_name)}">
+    <td data-val="${rid}" style="white-space:nowrap">
+      <code>${formatRid(rid)}</code>
+      <button class="btn-copy" onclick="copyText('${rid}', this)" title="Copy ID">${SVG_COPY}</button>
+    </td>
+    <td data-val="${esc(label.toLowerCase())}">
+      ${label ? `<span style="font-weight:500">${esc(label)}</span>` : `<span class="text-muted text-sm">—</span>`}
+    </td>
+    <td data-val="${esc(ip)}" class="text-muted text-sm mono">${esc(ip)}</td>
+    <td data-val="${st}">
+      <span id="status-${rid}" class="badge badge-${stClass}">${st}</span>
+    </td>
+    <td data-val="${d.group_name ? esc(d.group_name.toLowerCase()) : 'zzz'}">${groupCell}</td>
+    <td data-val="${esc(d.registered_at)}" class="text-muted text-sm">${esc(d.registered_at) || '—'}</td>
+    <td data-val="${esc(d.last_seen)}" class="text-muted text-sm">${esc(d.last_seen) || '—'}</td>
+    <td style="white-space:nowrap">
+      <a href="rustdesk://${rid}" class="btn btn-ghost btn-sm" title="Connect via RustDesk" style="color:#2563EB">${SVG_VIDEO} Connect</a>
+      <button onclick="openDeviceModal('${rid}','${escAttr(label)}','${d.group_id ?? ''}')" class="btn btn-ghost btn-sm">Edit</button>
+    </td>
+  </tr>`;
+}
+
+// ── Update a row's non-status cells in place ─────────────────────────────────
+function patchRow(tr, d) {
+  const label = d.label || '';
+  const ip = d.ip || '—';
+  tr.dataset.search = `${d.rustdesk_id} ${label} ${ip} ${d.group_name || ''}`;
+
+  const cells = tr.querySelectorAll('td');
+
+  // Label
+  cells[1].dataset.val = label.toLowerCase();
+  cells[1].innerHTML = label
+    ? `<span style="font-weight:500">${esc(label)}</span>`
+    : `<span class="text-muted text-sm">—</span>`;
+
+  // IP
+  cells[2].textContent = ip;
+  cells[2].dataset.val = ip;
+
+  // Group (skip status cell[3] — status poller owns it)
+  cells[4].dataset.val = d.group_name ? d.group_name.toLowerCase() : 'zzz';
+  cells[4].innerHTML = d.group_name
+    ? `<a href="/groups/${esc(d.group_slug)}" style="color:var(--accent);text-decoration:none;font-size:13px">${esc(d.group_name)}</a>`
+    : `<span class="text-muted text-sm">—</span>`;
+
+  // Registered
+  cells[5].textContent = d.registered_at || '—';
+  cells[5].dataset.val = d.registered_at || '';
+
+  // Last seen
+  cells[6].textContent = d.last_seen || '—';
+  cells[6].dataset.val = d.last_seen || '';
+
+  // Edit button onclick (label or group may have changed)
+  const editBtn = cells[7].querySelector('button.btn-ghost');
+  if (editBtn) editBtn.setAttribute('onclick',
+    `openDeviceModal('${d.rustdesk_id}','${escAttr(label)}','${d.group_id ?? ''}')`);
+}
+
+// ── Main table refresh ───────────────────────────────────────────────────────
+const DEVICES_POLL_MS = 30000;
+const activeGroup = new URLSearchParams(location.search).get('group') || '';
+
+async function refreshDevices() {
+  try {
+    const url = '/api/devices' + (activeGroup ? `?group=${encodeURIComponent(activeGroup)}` : '');
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const { devices, peer_count } = await res.json();
+
+    const tbody = document.getElementById('devices-tbody');
+    if (!tbody) return;
+
+    // Index new data
+    const newMap = new Map(devices.map(d => [d.rustdesk_id, d]));
+
+    // Remove rows that disappeared
+    tbody.querySelectorAll('tr[data-rid]').forEach(tr => {
+      if (!newMap.has(tr.dataset.rid)) tr.remove();
+    });
+
+    // Update existing / add new
+    const existing = new Map(
+      Array.from(tbody.querySelectorAll('tr[data-rid]')).map(tr => [tr.dataset.rid, tr])
+    );
+    devices.forEach(d => {
+      const tr = existing.get(d.rustdesk_id);
+      if (tr) {
+        patchRow(tr, d);
+      } else {
+        tbody.insertAdjacentHTML('beforeend', buildRow(d));
+      }
+    });
+
+    // Update peer count
+    const pc = document.getElementById('peer-count');
+    if (pc) pc.textContent = peer_count;
+
+    // Update device count label
+    const cl = document.getElementById('device-count-label');
+    if (cl) {
+      const n = devices.length;
+      const suffix = activeGroup ? ` in <strong>${esc(activeGroup)}</strong>` : '';
+      cl.innerHTML = `${n} device${n !== 1 ? 's' : ''}${suffix} &nbsp;·&nbsp; <span id="peer-count">${peer_count}</span> registered with server`;
+    }
+
+    // Re-apply status badges from cache
+    applyStatuses(_statusCache);
+
+    // Re-apply active sort
+    if (sortCol >= 0) _applySort();
+
+    // Re-apply filter
+    filterDevices();
+
+    // Show/hide empty state
+    const empty = tbody.querySelectorAll('tr[data-rid]').length === 0;
+    document.getElementById('no-device-results').style.display =
+      (empty && !document.getElementById('device-filter').value) ? 'none' : '';
+  } catch (_) {}
+}
+
+setInterval(refreshDevices, DEVICES_POLL_MS);
+
+// ── Real-time status polling ─────────────────────────────────────────────────
+const STATUS_POLL_MS = 10000;
+let _statusCache = {};
+
+function applyStatuses(statusMap) {
+  let online = 0, total = 0;
+  for (const [id, st] of Object.entries(statusMap)) {
+    total++;
+    if (st === 'online') online++;
+    const el = document.getElementById('status-' + id);
+    if (el) {
+      el.className = st === 'online' ? 'badge badge-active' : 'badge badge-offline';
+      el.textContent = st;
+      const td = el.closest('td');
+      if (td) td.dataset.val = st;
+    }
+  }
+  const dot = document.getElementById('status-dot');
+  const lbl = document.getElementById('status-label');
+  if (dot && lbl) {
+    dot.style.background = online > 0 ? '#10B981' : '#94A3B8';
+    lbl.textContent = total ? `${online} / ${total} online` : 'No devices';
+  }
+}
+
+async function refreshStatus() {
+  try {
+    const res = await fetch('/api/devices/status');
+    if (!res.ok) return;
+    const { devices } = await res.json();
+    _statusCache = devices;
+    applyStatuses(_statusCache);
+  } catch (_) {}
+}
+
+refreshStatus();
+setInterval(refreshStatus, STATUS_POLL_MS);
+
+// ── Sort & filter ────────────────────────────────────────────────────────────
+let sortCol = -1, sortAsc = true;
+
+function filterDevices() {
+  const q = (document.getElementById('device-filter')?.value || '').toLowerCase();
+  const tbody = document.getElementById('devices-tbody');
+  if (!tbody) return;
+  let visible = 0;
+  tbody.querySelectorAll('tr[data-rid]').forEach(row => {
+    const match = !q || row.dataset.search.toLowerCase().includes(q);
+    row.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  document.getElementById('no-device-results').style.display = visible ? 'none' : 'block';
+}
+
+function _applySort() {
+  const tbody = document.getElementById('devices-tbody');
+  if (!tbody) return;
+  const rows = Array.from(tbody.querySelectorAll('tr[data-rid]'));
+  rows.sort((a, b) => {
+    const av = a.querySelectorAll('td')[sortCol]?.dataset.val ?? '';
+    const bv = b.querySelectorAll('td')[sortCol]?.dataset.val ?? '';
+    return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+  rows.forEach(r => tbody.appendChild(r));
+}
+
+function sortDevices(col) {
+  sortAsc = sortCol === col ? !sortAsc : true;
+  sortCol = col;
+  document.querySelectorAll('#devices-table th.sortable').forEach((th, i) => {
+    const icon = th.querySelector('.sort-icon');
+    icon.textContent = i === col ? (sortAsc ? '↑' : '↓') : '↕';
+    th.style.color = i === col ? 'var(--text-1)' : '';
+  });
+  _applySort();
 }
 
 // ── Device edit modal ────────────────────────────────────────────────────────
@@ -197,83 +398,6 @@ function confirmDelete() {
   }
 }
 
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeDeviceModal();
-});
-
-// ── Real-time status polling ─────────────────────────────────────────────────
-const POLL_MS = 10000;
-
-async function refreshStatus() {
-  try {
-    const res = await fetch('/api/devices/status');
-    if (!res.ok) return;
-    const { devices } = await res.json();
-    let online = 0, total = 0;
-    for (const [id, st] of Object.entries(devices)) {
-      total++;
-      if (st === 'online') online++;
-      const el = document.getElementById('status-' + id);
-      if (el) {
-        const cls = st === 'online' ? 'badge badge-active' : 'badge badge-offline';
-        el.className = cls;
-        el.textContent = st;
-        const td = el.closest('td');
-        if (td) td.dataset.val = st;
-      }
-    }
-    const dot = document.getElementById('status-dot');
-    const lbl = document.getElementById('status-label');
-    if (dot && lbl) {
-      dot.style.background = online > 0 ? '#10B981' : '#94A3B8';
-      lbl.textContent = total ? `${online} / ${total} online` : 'No devices';
-    }
-  } catch (_) {}
-}
-
-refreshStatus();
-setInterval(refreshStatus, POLL_MS);
-
-// ── Sort & filter ────────────────────────────────────────────────────────────
-let sortCol = -1, sortAsc = true;
-
-function filterDevices() {
-  const q = document.getElementById('device-filter').value.toLowerCase();
-  const tbody = document.getElementById('devices-tbody');
-  if (!tbody) return;
-  let visible = 0;
-  tbody.querySelectorAll('tr[data-rid]').forEach(row => {
-    const match = !q || row.dataset.search.toLowerCase().includes(q);
-    row.style.display = match ? '' : 'none';
-    if (match) visible++;
-  });
-  const noResults = document.getElementById('no-device-results');
-  if (noResults) noResults.style.display = visible ? 'none' : 'block';
-}
-
-function sortDevices(col) {
-  sortAsc = sortCol === col ? !sortAsc : true;
-  sortCol = col;
-
-  document.querySelectorAll('#devices-table th.sortable').forEach((th, i) => {
-    const icon = th.querySelector('.sort-icon');
-    if (i === col) {
-      icon.textContent = sortAsc ? '↑' : '↓';
-      th.style.color = 'var(--text-1)';
-    } else {
-      icon.textContent = '↕';
-      th.style.color = '';
-    }
-  });
-
-  const tbody = document.getElementById('devices-tbody');
-  const rows = Array.from(tbody.querySelectorAll('tr[data-rid]'));
-  rows.sort((a, b) => {
-    const av = a.querySelectorAll('td')[col]?.dataset.val ?? '';
-    const bv = b.querySelectorAll('td')[col]?.dataset.val ?? '';
-    return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
-  });
-  rows.forEach(row => tbody.appendChild(row));
-}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDeviceModal(); });
 </script>
 {% endblock %}

@@ -32,6 +32,53 @@ def get_hbbs_peers() -> dict[str, dict]:
         return {}
 
 
+def get_devices(group: str = "") -> tuple[list[dict], int]:
+    """Return (devices_list, peer_count), optionally filtered by group slug.
+
+    Merges hbbs peer registry with fleet DB.  Devices marked hidden=1 in
+    the fleet DB are suppressed even if they still appear in the peer table.
+    """
+    peers = get_hbbs_peers()
+
+    conn = get_db()
+    fleet_rows = conn.execute(
+        """SELECT d.*, cg.display_name AS group_name, cg.slug AS group_slug
+           FROM devices d
+           LEFT JOIN client_groups cg ON cg.id = d.group_id"""
+    ).fetchall()
+    conn.close()
+
+    hidden_ids = {r["rustdesk_id"] for r in fleet_rows if r["hidden"]}
+    fleet_by_id = {
+        r["rustdesk_id"]: dict(r)
+        for r in fleet_rows
+        if r["rustdesk_id"] and not r["hidden"]
+    }
+
+    all_ids = (set(peers) | set(fleet_by_id)) - hidden_ids
+    devices: list[dict] = []
+    for rid in all_ids:
+        peer = peers.get(rid, {})
+        fleet = fleet_by_id.get(rid, {})
+        devices.append({
+            "rustdesk_id": rid,
+            "label": fleet.get("label") or "",
+            "ip": peer.get("ip") or "—",
+            "status": "registered" if rid in peers else (fleet.get("status") or "unknown"),
+            "registered_at": (peer.get("registered_at") or "")[:10] or "—",
+            "last_seen": fleet.get("last_seen") or "—",
+            "group_name": fleet.get("group_name") or "",
+            "group_slug": fleet.get("group_slug") or "",
+            "group_id": fleet.get("group_id"),
+        })
+
+    if group:
+        devices = [d for d in devices if d["group_slug"] == group]
+
+    devices.sort(key=lambda d: d["last_seen"] or "", reverse=True)
+    return devices, len(peers)
+
+
 def run_migrations() -> None:
     conn = get_db()
 

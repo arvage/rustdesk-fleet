@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from app.auth import require_auth
+from app.deps import get_devices
 
 HBBS_DB_PATH = Path("/opt/rustdesk-fleet/data/db_v2.sqlite3")
 HBBS_PORTS = {"21115", "21116", "21117", "21118", "21119"}
@@ -109,3 +110,13 @@ async def devices_status(_: dict = Depends(require_auth)):
         conn.close()
 
     return JSONResponse({"devices": status})
+
+
+@router.get("/devices")
+async def api_devices_list(
+    group: str = "",
+    _: dict = Depends(require_auth),
+):
+    """Return the full device list as JSON for dynamic table updates."""
+    devices, peer_count = get_devices(group)
+    return JSONResponse({"devices": devices, "peer_count": peer_count})

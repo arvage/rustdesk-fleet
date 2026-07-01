@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
-from app.deps import get_db, get_hbbs_peers
+from app.deps import get_db, get_devices, get_hbbs_peers
 from app.templates_config import templates
 
 HBBS_DB_PATH = Path("/opt/rustdesk-fleet/data/db_v2.sqlite3")
@@ -28,50 +28,13 @@ async def devices_list(
     group: str = "",
     current_user: dict = Depends(require_auth),
 ):
-    peers = get_hbbs_peers()
+    devices, peer_count = get_devices(group)
 
     conn = get_db()
     groups = conn.execute(
         "SELECT id, slug, display_name FROM client_groups ORDER BY display_name"
     ).fetchall()
-
-    fleet_rows = conn.execute(
-        """SELECT d.*, cg.display_name AS group_name, cg.slug AS group_slug
-           FROM devices d
-           LEFT JOIN client_groups cg ON cg.id = d.group_id"""
-    ).fetchall()
     conn.close()
-
-    # hidden=1 devices are suppressed even if they're still in hbbs peers
-    hidden_ids = {r["rustdesk_id"] for r in fleet_rows if r["hidden"]}
-    fleet_by_id = {
-        r["rustdesk_id"]: dict(r)
-        for r in fleet_rows
-        if r["rustdesk_id"] and not r["hidden"]
-    }
-
-    all_ids = (set(peers) | set(fleet_by_id)) - hidden_ids
-    devices = []
-    for rid in all_ids:
-        peer = peers.get(rid, {})
-        fleet = fleet_by_id.get(rid, {})
-
-        devices.append({
-            "rustdesk_id": rid,
-            "label": fleet.get("label") or "",
-            "ip": peer.get("ip") or "—",
-            "status": "registered" if rid in peers else (fleet.get("status") or "unknown"),
-            "registered_at": (peer.get("registered_at") or "")[:10] or "—",
-            "last_seen": fleet.get("last_seen") or "—",
-            "group_name": fleet.get("group_name"),
-            "group_slug": fleet.get("group_slug"),
-            "group_id": fleet.get("group_id"),
-        })
-
-    if group:
-        devices = [d for d in devices if d.get("group_slug") == group]
-
-    devices.sort(key=lambda d: d["last_seen"] or "", reverse=True)
 
     return templates.TemplateResponse(
         request,
@@ -81,7 +44,7 @@ async def devices_list(
             "groups": groups,
             "active_group": group,
             "current_user": current_user,
-            "peer_count": len(peers),
+            "peer_count": peer_count,
         },
     )
 

@@ -177,7 +177,8 @@
         <label for="edit-pw">Unattended Access Password</label>
         <div style="display:flex;gap:6px;align-items:center">
           <input type="password" id="edit-pw" name="unattended_password"
-                 placeholder="{{ '••••••••  (set)' if has_password else 'Set a password…' }}"
+                 value="{{ unattended_password }}"
+                 placeholder="Set a password…"
                  autocomplete="new-password" style="width:100%">
           <button type="button" onclick="togglePw()" title="Show/hide"
                   style="background:none;border:1px solid var(--border-md);border-radius:var(--radius-sm);
