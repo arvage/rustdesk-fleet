@@ -7,7 +7,7 @@ SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]$')
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
-from app.deps import get_db, get_hbbs_peers
+from app.deps import get_db, get_hbbs_peers, log_event
 from app.notifications import fire_notification
 from app.templates_config import templates
 
@@ -47,6 +47,9 @@ async def groups_create(
     from setup_server import create_group, ProvisioningError
     try:
         create_group(slug, display_name, unattended_password.strip() or None)
+        conn = get_db()
+        log_event(conn, "group_created", slug, current_user["email"])
+        conn.close()
         _set_flash(request, "success", f"Group '{slug}' created.")
         return RedirectResponse(f"/groups/{slug}", status_code=303)
     except ProvisioningError as e:
@@ -157,6 +160,7 @@ async def group_edit(
         "UPDATE client_groups SET slug = ?, display_name = ?, unattended_password = ? WHERE id = ?",
         (new_slug, display_name, new_pw, group["id"]),
     )
+    log_event(conn, "group_updated", new_slug, current_user["email"])
     conn.commit()
     conn.close()
     _set_flash(request, "success", "Group updated.")
@@ -212,6 +216,7 @@ async def group_build(
         _set_flash(request, "success", f"{label} installer ready. SHA256: {sha_short}…")
         conn = get_db()
         grp = conn.execute("SELECT display_name FROM client_groups WHERE slug=?", (slug,)).fetchone()
+        log_event(conn, "installer_built", f"group={slug} platform={platform}", current_user["email"])
         conn.close()
         fire_notification("installer_built", {
             "group_name": grp["display_name"] if grp else slug,

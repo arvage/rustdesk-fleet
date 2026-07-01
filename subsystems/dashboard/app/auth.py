@@ -41,6 +41,7 @@ def require_auth(request: Request) -> dict:
         "id": user_id,
         "role": request.session.get("user_role", "tech"),
         "name": request.session.get("user_name", ""),
+        "email": request.session.get("user_email", ""),
     }
 
 
@@ -133,6 +134,7 @@ async def login_post(
     request.session["user_id"] = user["id"]
     request.session["user_role"] = user["role"]
     request.session["user_name"] = user["display_name"] or user["email"]
+    request.session["user_email"] = user["email"]
     return RedirectResponse("/", status_code=303)
 
 

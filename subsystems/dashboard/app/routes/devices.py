@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
-from app.deps import get_db, get_devices, get_hbbs_peers
+from app.deps import get_db, get_devices, get_hbbs_peers, log_event
 from app.notifications import fire_notification
 from app.templates_config import templates
 
@@ -79,6 +79,7 @@ async def device_edit(
             "UPDATE devices SET label = ?, group_id = ? WHERE rustdesk_id = ?",
             (label, gid, rustdesk_id),
         )
+        log_event(conn, "device_updated", rustdesk_id, current_user["email"])
         conn.commit()
         conn.close()
     else:
@@ -86,6 +87,7 @@ async def device_edit(
             "INSERT INTO devices (rustdesk_id, label, group_id, status, last_seen) VALUES (?, ?, ?, 'registered', ?)",
             (rustdesk_id, label, gid, _now_utc()),
         )
+        log_event(conn, "device_registered", rustdesk_id, current_user["email"])
         conn.commit()
         group_name = ""
         if gid:
@@ -133,6 +135,7 @@ async def device_delete(
             "INSERT INTO devices (rustdesk_id, hidden, status, last_seen) VALUES (?, 1, 'deleted', ?)",
             (rustdesk_id, _now_utc()),
         )
+    log_event(conn, "device_deleted", rustdesk_id, current_user["email"])
     conn.commit()
     conn.close()
     fire_notification("device_deleted", notif_ctx)
@@ -162,6 +165,7 @@ async def device_restore(
         "UPDATE devices SET hidden = 0, status = 'registered' WHERE rustdesk_id = ?",
         (rustdesk_id,),
     )
+    log_event(conn, "device_restored", rustdesk_id, current_user["email"])
     conn.commit()
     conn.close()
     _set_flash(request, "success", f"Device {rustdesk_id} restored.")
@@ -194,6 +198,7 @@ async def devices_sync(request: Request, current_user: dict = Depends(require_au
                 (rustdesk_id, now),
             )
             new_count += 1
+            log_event(conn, "device_registered", rustdesk_id, current_user["email"])
             peer = peers[rustdesk_id]
             fire_notification("device_registered", {
                 "rustdesk_id": rustdesk_id,

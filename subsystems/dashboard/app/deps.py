@@ -79,6 +79,14 @@ def get_devices(group: str = "") -> tuple[list[dict], int]:
     return devices, len(peers)
 
 
+def log_event(conn, event: str, detail: str = "", user_email: str = "") -> None:
+    conn.execute(
+        "INSERT INTO provisioning_events (event, detail, user_email) VALUES (?, ?, ?)",
+        (event, detail or None, user_email or None),
+    )
+    conn.commit()
+
+
 def run_migrations() -> None:
     conn = get_db()
 
@@ -98,6 +106,11 @@ def run_migrations() -> None:
         conn.commit()
     if "hidden" not in devices_cols:
         conn.execute("ALTER TABLE devices ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+
+    events_cols = {row[1] for row in conn.execute("PRAGMA table_info(provisioning_events)").fetchall()}
+    if "user_email" not in events_cols:
+        conn.execute("ALTER TABLE provisioning_events ADD COLUMN user_email TEXT")
         conn.commit()
 
     # Notification tables (idempotent CREATE IF NOT EXISTS)
