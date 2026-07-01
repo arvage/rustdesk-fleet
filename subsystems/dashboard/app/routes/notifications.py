@@ -106,7 +106,6 @@ async def notifications_save(
 async def notifications_events(
     request: Request,
     current_user: dict = Depends(require_auth),
-    **_kwargs,
 ):
     _require_admin(current_user)
     form = await request.form()
