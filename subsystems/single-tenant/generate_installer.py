@@ -1,13 +1,14 @@
 """
-generate_installer.py — build a pre-configured RustDesk Windows installer.
+generate_installer.py — build a pre-configured RustDesk installer for any
+supported platform.
 
-Reads server config (host, pubkey) from the fleet DB, renders the NSIS
-template, and compiles it with makensis. Output is a single .exe that
-installs RustDesk and drops a pre-configured RustDesk2.toml pointing at
-our server, tagged by client group.
+Reads server config (host, pubkey) and group settings from the fleet DB,
+substitutes placeholders in the appropriate template, and either compiles
+with makensis (Windows) or writes a shell script (Linux / macOS).
 
 Usage:
-    python3 generate_installer.py build --group govirtual365-internal
+    python3 generate_installer.py build --group govirtual365-internal --platform windows-x64
+    python3 generate_installer.py build --group govirtual365-internal --platform linux
     python3 generate_installer.py list
 """
 
@@ -22,16 +23,41 @@ import sys
 import tempfile
 from pathlib import Path
 
-FLEET_ROOT    = Path("/opt/rustdesk-fleet")
-DB_PATH       = FLEET_ROOT / "fleet.sqlite3"
-SCHEMA_PATH   = Path(__file__).parent / "schema.sql"
-NSI_TEMPLATE  = Path(__file__).parent / "installer.nsi.tmpl"
-ASSETS_DIR    = FLEET_ROOT / "installer-assets"
-OUTPUT_DIR    = FLEET_ROOT / "installers"
+FLEET_ROOT  = Path("/opt/rustdesk-fleet")
+DB_PATH     = FLEET_ROOT / "fleet.sqlite3"
+SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+ASSETS_DIR  = FLEET_ROOT / "installer-assets"
+OUTPUT_DIR  = FLEET_ROOT / "installers"
+TMPL_DIR    = Path(__file__).parent
 
-RUSTDESK_VERSION  = "1.4.8"
-RUSTDESK_EXE_NAME = f"rustdesk-{RUSTDESK_VERSION}-x86_64.exe"
-PLATFORM          = "windows-x64"
+RUSTDESK_VERSION = "1.4.8"
+
+PLATFORMS: dict[str, dict] = {
+    "windows-x64": {
+        "label":         "Windows x64",
+        "type":          "nsis",
+        "exe_name":      f"rustdesk-{RUSTDESK_VERSION}-x86_64.exe",
+        "output_suffix": f"x64.exe",
+    },
+    "windows-arm64": {
+        "label":         "Windows ARM64",
+        "type":          "nsis",
+        "exe_name":      f"rustdesk-{RUSTDESK_VERSION}-aarch64.exe",
+        "output_suffix": f"arm64.exe",
+    },
+    "linux": {
+        "label":         "Linux",
+        "type":          "script",
+        "template":      "installer_linux.sh.tmpl",
+        "output_suffix": "linux.sh",
+    },
+    "macos": {
+        "label":         "macOS",
+        "type":          "script",
+        "template":      "installer_macos.command.tmpl",
+        "output_suffix": "macos.command",
+    },
+}
 
 
 class InstallerError(RuntimeError):
@@ -57,7 +83,116 @@ def log_event(conn: sqlite3.Connection, event: str, detail: str = "") -> None:
     conn.commit()
 
 
-def build_installer(group_slug: str) -> dict:
+def _shell_password_substitutions(pw: str | None) -> dict[str, str]:
+    """Return @@PASSWORD_VAR@@ and @@PASSWORD_LINE_SHELL@@ replacements."""
+    if pw:
+        return {
+            "@@PASSWORD_VAR@@":         f'PW="{pw}"',
+            "@@PASSWORD_LINE_SHELL@@":  f'    printf \'permanent-password = "%s"\\n\' "$PW"\n',
+        }
+    return {
+        "@@PASSWORD_VAR@@":        "",
+        "@@PASSWORD_LINE_SHELL@@": "",
+    }
+
+
+def _build_nsis(
+    conn: sqlite3.Connection,
+    group: sqlite3.Row,
+    server: sqlite3.Row,
+    platform: str,
+    installer_id: int,
+) -> Path:
+    cfg = PLATFORMS[platform]
+
+    if not shutil.which("makensis"):
+        raise InstallerError("makensis not found — install nsis: sudo apt install nsis")
+
+    rustdesk_exe_src = ASSETS_DIR / cfg["exe_name"]
+    if not rustdesk_exe_src.exists():
+        raise InstallerError(
+            f"RustDesk source binary not found: {rustdesk_exe_src}\n"
+            f"Download it from https://github.com/rustdesk/rustdesk/releases/tag/{RUSTDESK_VERSION}"
+        )
+
+    output_filename = f"RemoteSupport-{group['slug']}-{RUSTDESK_VERSION}-{cfg['output_suffix']}"
+    output_path = OUTPUT_DIR / output_filename
+
+    pw = group["unattended_password"] if "unattended_password" in group.keys() else None
+    password_line = (
+        f'  FileWrite $0 \'permanent-password = "{pw}"$\\r$\\n\'\n' if pw else ""
+    )
+
+    nsi_script = (TMPL_DIR / "installer.nsi.tmpl").read_text()
+    for marker, value in {
+        "@@DISPLAY_NAME@@":      group["display_name"],
+        "@@OUTPUT_PATH@@":       str(output_path),
+        "@@RUSTDESK_EXE_SRC@@":  str(rustdesk_exe_src),
+        "@@RUSTDESK_EXE_NAME@@": cfg["exe_name"],
+        "@@HOST@@":              server["host"],
+        "@@PUBKEY@@":            server["pubkey"],
+        "@@PASSWORD_LINE@@":     password_line,
+    }.items():
+        nsi_script = nsi_script.replace(marker, value)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        nsi_path = Path(tmpdir) / "installer.nsi"
+        nsi_path.write_text(nsi_script)
+
+        result = subprocess.run(
+            ["makensis", str(nsi_path)],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            raise InstallerError(
+                f"makensis failed (exit {result.returncode}):\n"
+                f"{result.stdout}\n{result.stderr}"
+            )
+
+    if not output_path.exists():
+        raise InstallerError(f"makensis exited 0 but output file not found: {output_path}")
+
+    return output_path
+
+
+def _build_script(
+    conn: sqlite3.Connection,
+    group: sqlite3.Row,
+    server: sqlite3.Row,
+    platform: str,
+    installer_id: int,
+) -> Path:
+    cfg = PLATFORMS[platform]
+
+    output_filename = f"RemoteSupport-{group['slug']}-{RUSTDESK_VERSION}-{cfg['output_suffix']}"
+    output_path = OUTPUT_DIR / output_filename
+
+    pw = group["unattended_password"] if "unattended_password" in group.keys() else None
+
+    template = (TMPL_DIR / cfg["template"]).read_text()
+    substitutions = {
+        "@@DISPLAY_NAME@@":    group["display_name"],
+        "@@GROUP_SLUG@@":      group["slug"],
+        "@@RUSTDESK_VERSION@@": RUSTDESK_VERSION,
+        "@@HOST@@":            server["host"],
+        "@@PUBKEY@@":          server["pubkey"],
+        **_shell_password_substitutions(pw),
+    }
+    for marker, value in substitutions.items():
+        template = template.replace(marker, value)
+
+    output_path.write_text(template)
+    output_path.chmod(0o755)
+
+    return output_path
+
+
+def build_installer(group_slug: str, platform: str = "windows-x64") -> dict:
+    if platform not in PLATFORMS:
+        raise InstallerError(
+            f"Unknown platform '{platform}'. Valid options: {', '.join(PLATFORMS)}"
+        )
+
     conn = get_db()
     ensure_schema(conn)
 
@@ -71,65 +206,23 @@ def build_installer(group_slug: str) -> dict:
     if group is None:
         raise InstallerError(f"Client group '{group_slug}' not found.")
 
-    if not shutil.which("makensis"):
-        raise InstallerError("makensis not found — install nsis: sudo apt install nsis")
-
-    rustdesk_exe_src = ASSETS_DIR / RUSTDESK_EXE_NAME
-    if not rustdesk_exe_src.exists():
-        raise InstallerError(
-            f"RustDesk source binary not found: {rustdesk_exe_src}\n"
-            f"Download it from https://github.com/rustdesk/rustdesk/releases/tag/{RUSTDESK_VERSION}"
-        )
-
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    output_filename = f"RemoteSupport-{group_slug}-{RUSTDESK_VERSION}-x64.exe"
-    output_path = OUTPUT_DIR / output_filename
 
     cur = conn.execute(
         """INSERT INTO installers (group_id, platform, rustdesk_version, status)
            VALUES (?, ?, ?, 'pending')""",
-        (group["id"], PLATFORM, RUSTDESK_VERSION),
+        (group["id"], platform, RUSTDESK_VERSION),
     )
     installer_id = cur.lastrowid
     conn.commit()
-    log_event(conn, "installer_build_start", f"group={group_slug} installer_id={installer_id}")
+    log_event(conn, "installer_build_start", f"group={group_slug} platform={platform} installer_id={installer_id}")
 
     try:
-        nsi_script = NSI_TEMPLATE.read_text()
-        pw = group["unattended_password"] if "unattended_password" in group.keys() else None
-        if pw:
-            password_line = f'  FileWrite $0 \'permanent-password = "{pw}"$\\r$\\n\'\n'
+        cfg = PLATFORMS[platform]
+        if cfg["type"] == "nsis":
+            output_path = _build_nsis(conn, group, server, platform, installer_id)
         else:
-            password_line = ""
-        for marker, value in {
-            "@@DISPLAY_NAME@@":    group["display_name"],
-            "@@OUTPUT_PATH@@":     str(output_path),
-            "@@RUSTDESK_EXE_SRC@@": str(rustdesk_exe_src),
-            "@@RUSTDESK_EXE_NAME@@": RUSTDESK_EXE_NAME,
-            "@@HOST@@":            server["host"],
-            "@@PUBKEY@@":          server["pubkey"],
-            "@@PASSWORD_LINE@@":   password_line,
-        }.items():
-            nsi_script = nsi_script.replace(marker, value)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            nsi_path = Path(tmpdir) / "installer.nsi"
-            nsi_path.write_text(nsi_script)
-
-            result = subprocess.run(
-                ["makensis", str(nsi_path)],
-                capture_output=True, text=True,
-            )
-            if result.returncode != 0:
-                raise InstallerError(
-                    f"makensis failed (exit {result.returncode}):\n"
-                    f"{result.stdout}\n{result.stderr}"
-                )
-
-        if not output_path.exists():
-            raise InstallerError(
-                f"makensis exited 0 but output file not found: {output_path}"
-            )
+            output_path = _build_script(conn, group, server, platform, installer_id)
 
         sha256 = hashlib.sha256(output_path.read_bytes()).hexdigest()
 
@@ -171,6 +264,12 @@ def main():
 
     p_build = sub.add_parser("build", help="Build a pre-configured installer for a client group")
     p_build.add_argument("--group", required=True, help="Client group slug")
+    p_build.add_argument(
+        "--platform",
+        default="windows-x64",
+        choices=list(PLATFORMS),
+        help="Target platform (default: windows-x64)",
+    )
 
     sub.add_parser("list", help="List all generated installers")
 
@@ -178,7 +277,7 @@ def main():
 
     if args.cmd == "build":
         try:
-            result = build_installer(args.group)
+            result = build_installer(args.group, args.platform)
         except InstallerError as e:
             sys.exit(f"Build failed: {e}")
         print(f"Installer {result['status']}.")
@@ -194,7 +293,7 @@ def main():
             print("No installers built yet.")
         for r in rows:
             print(
-                f"{r['group_slug']:<28} {r['platform']:<14} "
+                f"{r['group_slug']:<28} {r['platform']:<16} "
                 f"v{r['rustdesk_version']:<8} {r['status']:<10} "
                 f"{r['unsigned_path'] or '-'}"
             )

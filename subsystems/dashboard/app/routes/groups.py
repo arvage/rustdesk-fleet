@@ -195,13 +195,20 @@ async def installer_delete(
 
 @router.post("/groups/{slug}/build")
 async def group_build(
-    request: Request, slug: str, current_user: dict = Depends(require_auth)
+    request: Request,
+    slug: str,
+    platform: str = Form("windows-x64"),
+    current_user: dict = Depends(require_auth),
 ):
-    from generate_installer import build_installer, InstallerError
+    from generate_installer import build_installer, InstallerError, PLATFORMS
+    if platform not in PLATFORMS:
+        _set_flash(request, "error", f"Unknown platform: {platform}")
+        return RedirectResponse(f"/groups/{slug}", status_code=303)
     try:
-        result = build_installer(slug)
+        result = build_installer(slug, platform)
         sha_short = (result["sha256_unsigned"] or "")[:16]
-        _set_flash(request, "success", f"Installer ready. SHA256: {sha_short}…")
+        label = PLATFORMS[platform]["label"]
+        _set_flash(request, "success", f"{label} installer ready. SHA256: {sha_short}…")
     except InstallerError as e:
         _set_flash(request, "error", f"Build failed: {e}")
     return RedirectResponse(f"/groups/{slug}", status_code=303)

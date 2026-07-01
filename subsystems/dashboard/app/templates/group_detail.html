@@ -88,10 +88,17 @@
 <div class="section">
   <div class="section-head">
     <h2>Installers</h2>
-    <form method="post" action="/groups/{{ group.slug }}/build">
+    <form method="post" action="/groups/{{ group.slug }}/build" style="display:flex;gap:6px;align-items:center">
+      <select name="platform" class="btn btn-ghost btn-sm"
+              style="padding-right:28px;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748B' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\");background-repeat:no-repeat;background-position:right 6px center;background-size:14px;appearance:none;-webkit-appearance:none">
+        <option value="windows-x64">Windows x64</option>
+        <option value="windows-arm64">Windows ARM64</option>
+        <option value="linux">Linux (.sh)</option>
+        <option value="macos">macOS (.command)</option>
+      </select>
       <button type="submit" class="btn btn-primary btn-sm">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Build Windows x64
+        Build
       </button>
     </form>
   </div>
@@ -124,7 +131,8 @@
               <span class="text-muted text-sm" title="{{ i.error_message }}">Failed</span>
               {% endif %}
               <form method="post" action="/groups/{{ group.slug }}/build" style="margin:0">
-                <button type="submit" class="btn btn-ghost btn-sm" title="Build a fresh installer">
+                <input type="hidden" name="platform" value="{{ i.platform }}">
+                <button type="submit" class="btn btn-ghost btn-sm" title="Rebuild {{ i.platform }}">
                   <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
                   Rebuild
                 </button>
@@ -148,7 +156,7 @@
     <div class="empty">
       <div class="empty-icon">📦</div>
       <p>No installers built yet.</p>
-      <p>Click <strong>Build Windows x64</strong> above to generate one.</p>
+      <p>Select a platform above and click <strong>Build</strong> to generate one.</p>
     </div>
   </div></div>
   {% endif %}
