@@ -14,7 +14,7 @@
   {% else %}
   <span class="text-muted text-sm" style="font-size:12px">No unattended password</span>
   {% endif %}
-  <span class="text-muted text-sm">Created {{ group.created_at[:10] }}</span>
+  <span class="text-muted text-sm">Created {{ group.created_at | localtime("%Y-%m-%d") }}</span>
   <button onclick="document.getElementById('edit-group-modal').style.display='flex'"
           class="btn btn-ghost btn-sm">Edit</button>
 {% endblock %}
@@ -52,8 +52,8 @@
             <td style="font-weight:{{ '500' if d.label else 'normal' }}">{{ d.label or '—' }}</td>
             <td class="text-muted text-sm mono">{{ d.ip or '—' }}</td>
             <td><span class="badge badge-{{ d.status or 'unknown' }}">{{ d.status or 'unknown' }}</span></td>
-            <td class="text-muted text-sm">{{ d.registered_at or '—' }}</td>
-            <td class="text-muted text-sm">{{ d.last_seen or '—' }}</td>
+            <td class="text-muted text-sm">{{ d.registered_at | localtime if d.registered_at else '—' }}</td>
+            <td class="text-muted text-sm">{{ d.last_seen | localtime if d.last_seen else '—' }}</td>
             <td>
               {% if d.rustdesk_id %}
               <a href="rustdesk://{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm"
@@ -120,7 +120,7 @@
               <span class="mono text-sm" title="{{ i.sha256_unsigned }}">{{ i.sha256_unsigned[:16] }}…</span>
               {% else %}<span class="text-muted">—</span>{% endif %}
             </td>
-            <td class="text-muted text-sm" style="white-space:nowrap">{{ i.created_at[:16].replace('T',' ') }}</td>
+            <td class="text-muted text-sm" style="white-space:nowrap">{{ i.created_at | localtime }}</td>
             <td style="white-space:nowrap;display:flex;gap:6px;align-items:center;border:none">
               {% if i.status == 'built' and i.filename %}
               <a href="/download/{{ i.filename }}" class="btn btn-ghost btn-sm">

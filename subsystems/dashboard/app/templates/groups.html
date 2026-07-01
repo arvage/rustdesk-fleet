@@ -46,7 +46,7 @@
             <span style="font-weight:600">{{ g.device_count }}</span>
             <span class="text-muted text-sm"> device{{ 's' if g.device_count != 1 }}</span>
           </td>
-          <td data-val="{{ g.created_at[:10] }}" class="text-muted text-sm">{{ g.created_at[:10] }}</td>
+          <td data-val="{{ g.created_at | localtime('%Y-%m-%d') }}" class="text-muted text-sm">{{ g.created_at | localtime("%Y-%m-%d") }}</td>
           <td><a href="/groups/{{ g.slug }}" class="btn btn-ghost btn-sm">View →</a></td>
         </tr>
       {% endfor %}

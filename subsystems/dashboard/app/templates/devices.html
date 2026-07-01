@@ -70,8 +70,8 @@
             <a href="/groups/{{ d.group_slug }}" style="color:var(--accent);text-decoration:none;font-size:13px">{{ d.group_name }}</a>
             {% else %}<span class="text-muted text-sm">—</span>{% endif %}
           </td>
-          <td data-val="{{ d.registered_at or '' }}" class="text-muted text-sm">{{ d.registered_at or '—' }}</td>
-          <td data-val="{{ d.last_seen or '' }}" class="text-muted text-sm">{{ d.last_seen }}</td>
+          <td data-val="{{ d.registered_at or '' }}" class="text-muted text-sm">{{ d.registered_at | localtime if d.registered_at else '—' }}</td>
+          <td data-val="{{ d.last_seen or '' }}" class="text-muted text-sm">{{ d.last_seen | localtime if d.last_seen else '—' }}</td>
           <td style="white-space:nowrap">
             <a href="rustdesk://{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm"
                title="Connect via RustDesk" style="color:#2563EB">
@@ -199,7 +199,7 @@
                 <a href="/groups/{{ d.group_slug }}" style="color:var(--accent);text-decoration:none;font-size:13px">{{ d.group_name }}</a>
                 {% else %}<span class="text-muted text-sm">—</span>{% endif %}
               </td>
-              <td class="text-muted text-sm">{{ d.last_seen[:16].replace('T', ' ') if d.last_seen else '—' }}</td>
+              <td class="text-muted text-sm">{{ d.last_seen | localtime if d.last_seen else '—' }}</td>
               <td style="white-space:nowrap">
                 <form method="post" action="/devices/{{ d.rustdesk_id }}/restore" style="display:inline;margin:0">
                   <button type="submit" class="btn btn-ghost btn-sm" style="color:#10B981">
@@ -232,6 +232,13 @@ function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 function escAttr(s) { return esc(s).replace(/'/g,'&#39;'); }
+function toLA(utcStr) {
+  if (!utcStr || utcStr === '—') return utcStr || '—';
+  try {
+    const d = new Date(String(utcStr).replace(' ', 'T').replace(/Z?$/, 'Z'));
+    return d.toLocaleString('sv-SE', { timeZone: 'America/Los_Angeles' }).slice(0, 16);
+  } catch(e) { return utcStr; }
+}
 function formatRid(id) {
   return /^\d+$/.test(id) ? id.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') : id;
 }
@@ -260,8 +267,8 @@ function buildRow(d) {
       <span id="status-${rid}" class="badge badge-${stClass}">${st}</span>
     </td>
     <td data-val="${d.group_name ? esc(d.group_name.toLowerCase()) : 'zzz'}">${groupCell}</td>
-    <td data-val="${esc(d.registered_at)}" class="text-muted text-sm">${esc(d.registered_at) || '—'}</td>
-    <td data-val="${esc(d.last_seen)}" class="text-muted text-sm">${esc(d.last_seen) || '—'}</td>
+    <td data-val="${esc(d.registered_at)}" class="text-muted text-sm">${toLA(d.registered_at)}</td>
+    <td data-val="${esc(d.last_seen)}" class="text-muted text-sm">${toLA(d.last_seen)}</td>
     <td style="white-space:nowrap">
       <a href="rustdesk://${rid}" class="btn btn-ghost btn-sm" title="Connect via RustDesk" style="color:#2563EB">${SVG_VIDEO} Connect</a>
       <button onclick="openDeviceModal('${rid}','${escAttr(label)}','${d.group_id ?? ''}')" class="btn btn-ghost btn-sm">Edit</button>
@@ -294,11 +301,11 @@ function patchRow(tr, d) {
     : `<span class="text-muted text-sm">—</span>`;
 
   // Registered
-  cells[5].textContent = d.registered_at || '—';
+  cells[5].textContent = toLA(d.registered_at);
   cells[5].dataset.val = d.registered_at || '';
 
   // Last seen
-  cells[6].textContent = d.last_seen || '—';
+  cells[6].textContent = toLA(d.last_seen);
   cells[6].dataset.val = d.last_seen || '';
 
   // Edit button onclick (label or group may have changed)

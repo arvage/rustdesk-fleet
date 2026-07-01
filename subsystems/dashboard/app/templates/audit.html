@@ -17,7 +17,7 @@
       <tbody>
       {% for e in events %}
         <tr>
-          <td class="text-muted text-sm mono" style="white-space:nowrap">{{ e.created_at }}</td>
+          <td class="text-muted text-sm mono" style="white-space:nowrap">{{ e.created_at | localtime }}</td>
           <td><code>{{ e.event }}</code></td>
           <td class="text-sm" style="color:#475569;max-width:500px;word-break:break-all">{{ e.detail or '' }}</td>
         </tr>

@@ -63,8 +63,8 @@
     <div class="kv-grid">
       <div class="kv-row"><div class="kv-key">Data directory</div><div class="kv-val"><code>{{ server.data_dir }}</code></div></div>
       <div class="kv-row"><div class="kv-key">Compose file</div><div class="kv-val"><code>{{ server.compose_path }}</code></div></div>
-      <div class="kv-row"><div class="kv-key">Initialised</div><div class="kv-val text-muted">{{ server.created_at }}</div></div>
-      <div class="kv-row"><div class="kv-key">Last updated</div><div class="kv-val text-muted">{{ server.updated_at }}</div></div>
+      <div class="kv-row"><div class="kv-key">Initialised</div><div class="kv-val text-muted">{{ server.created_at | localtime }}</div></div>
+      <div class="kv-row"><div class="kv-key">Last updated</div><div class="kv-val text-muted">{{ server.updated_at | localtime }}</div></div>
     </div>
   </div>
 </div>

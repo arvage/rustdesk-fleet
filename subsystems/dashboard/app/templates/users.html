@@ -63,7 +63,7 @@
             </form>
             {% endif %}
           </td>
-          <td class="text-muted text-sm">{{ u.created_at[:10] }}</td>
+          <td class="text-muted text-sm">{{ u.created_at | localtime("%Y-%m-%d") }}</td>
           <td>
             <div style="display:flex;gap:6px">
               <button onclick="document.getElementById('edit-{{ u.id }}').style.display='table-row'"
