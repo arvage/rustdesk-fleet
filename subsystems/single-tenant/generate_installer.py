@@ -122,16 +122,21 @@ def _build_nsis(
     password_line = (
         f'  FileWrite $0 \'permanent-password = "{pw}"$\\r$\\n\'\n' if pw else ""
     )
+    password_cli_nsis = (
+        f'  nsExec::ExecToLog \'"$PROGRAMFILES64\\RustDesk\\rustdesk.exe" --password "{pw}"\'\n  Pop $0\n\n'
+        if pw else ""
+    )
 
     nsi_script = (TMPL_DIR / "installer.nsi.tmpl").read_text()
     for marker, value in {
-        "@@DISPLAY_NAME@@":      group["display_name"],
-        "@@OUTPUT_PATH@@":       str(output_path),
-        "@@RUSTDESK_EXE_SRC@@":  str(rustdesk_exe_src),
-        "@@RUSTDESK_EXE_NAME@@": cfg["exe_name"],
-        "@@HOST@@":              server["host"],
-        "@@PUBKEY@@":            server["pubkey"],
-        "@@PASSWORD_LINE@@":     password_line,
+        "@@DISPLAY_NAME@@":       group["display_name"],
+        "@@OUTPUT_PATH@@":        str(output_path),
+        "@@RUSTDESK_EXE_SRC@@":   str(rustdesk_exe_src),
+        "@@RUSTDESK_EXE_NAME@@":  cfg["exe_name"],
+        "@@HOST@@":               server["host"],
+        "@@PUBKEY@@":             server["pubkey"],
+        "@@PASSWORD_LINE@@":      password_line,
+        "@@PASSWORD_CLI_NSIS@@":  password_cli_nsis,
     }.items():
         nsi_script = nsi_script.replace(marker, value)
 

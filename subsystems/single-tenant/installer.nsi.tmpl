@@ -105,6 +105,10 @@ Section "Install"
   ; Restart the service then launch the tray app
   nsExec::ExecToLog 'net start RustDesk'
   Pop $0
+
+  ; Set permanent password via RustDesk CLI so it is stored in the format
+  ; the service actually validates against (writing TOML alone is not enough).
+@@PASSWORD_CLI_NSIS@@
   Exec '"$PROGRAMFILES64\RustDesk\rustdesk.exe"'
 
   Delete "$TEMP\@@RUSTDESK_EXE_NAME@@"

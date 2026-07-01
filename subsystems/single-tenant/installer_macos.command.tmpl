@@ -82,6 +82,14 @@ PLIST_EOF
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load  "$PLIST" 2>/dev/null || true
 
+# ── Set permanent password via RustDesk CLI ─────────────────────────────
+# Writing the TOML alone is not enough — the CLI call stores the password
+# in the format the running service actually validates against.
+if [ -n "${PW:-}" ]; then
+  sleep 1
+  /Applications/RustDesk.app/Contents/MacOS/rustdesk --password "$PW" 2>/dev/null || true
+fi
+
 echo ""
 echo "✓ RustDesk ${RDVER} installed and configured → ${HOST}"
 echo "  RustDesk will start automatically on login."
