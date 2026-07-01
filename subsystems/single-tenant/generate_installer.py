@@ -129,19 +129,34 @@ def _build_nsis(
 
     pw = group["unattended_password"] if "unattended_password" in group.keys() else None
 
-    # Write RustDesk.toml (Config struct, top-level "password" field) inside the
-    # WriteConfig macro. This is NOT RustDesk2.toml — that file is Config2 and its
-    # [options] section has no effect on password authentication.
-    password_rustdesk_toml = ""
+    # PRE-WRITE block: write RustDesk.toml (Config struct "password" field) to all
+    # three profile locations before the RustDesk installer runs.  The service reads
+    # this at startup and builds its stable identity (id, key_pair, salt) around it.
+    # Post-write deliberately omits this file to preserve that generated identity.
+    password_pre_write_block = ""
     if pw:
-        password_rustdesk_toml = (
-            f'  FileOpen $R0 "${{path}}\\RustDesk.toml" w\n'
+        password_pre_write_block = (
+            f'  SetShellVarContext current\n'
+            f'  CreateDirectory "$APPDATA\\RustDesk\\config"\n'
+            f'  FileOpen $R0 "$APPDATA\\RustDesk\\config\\RustDesk.toml" w\n'
             f'  FileWrite $R0 \'password = "{pw}"$\\r$\\n\'\n'
             f'  FileClose $R0\n'
+            f'  SetShellVarContext all\n'
+            f'  CreateDirectory "$APPDATA\\RustDesk\\config"\n'
+            f'  FileOpen $R0 "$APPDATA\\RustDesk\\config\\RustDesk.toml" w\n'
+            f'  FileWrite $R0 \'password = "{pw}"$\\r$\\n\'\n'
+            f'  FileClose $R0\n'
+            f'  SetShellVarContext current\n'
+            f'  ${{DisableX64FSRedirection}}\n'
+            f'  CreateDirectory "$WINDIR\\System32\\config\\systemprofile\\AppData\\Roaming\\RustDesk\\config"\n'
+            f'  FileOpen $R0 "$WINDIR\\System32\\config\\systemprofile\\AppData\\Roaming\\RustDesk\\config\\RustDesk.toml" w\n'
+            f'  FileWrite $R0 \'password = "{pw}"$\\r$\\n\'\n'
+            f'  FileClose $R0\n'
+            f'  ${{EnableX64FSRedirection}}\n'
         )
 
-    # Belt-and-suspenders: also call rustdesk.exe --password via IPC so the
-    # service upgrades the plaintext storage to a proper hash format.
+    # After service starts, call --password via CLI (Sleep 3000 in template gives
+    # the service IPC pipe time to initialize) to upgrade plaintext to hash+salt.
     password_cli_nsis = (
         f'  nsExec::ExecToLog \'"$PROGRAMFILES64\\RustDesk\\rustdesk.exe" --password "{pw}"\'\n  Pop $0\n\n'
         if pw else ""
@@ -149,14 +164,14 @@ def _build_nsis(
 
     nsi_script = (TMPL_DIR / "installer.nsi.tmpl").read_text()
     for marker, value in {
-        "@@DISPLAY_NAME@@":           group["display_name"],
-        "@@OUTPUT_PATH@@":            str(output_path),
-        "@@RUSTDESK_EXE_SRC@@":       str(rustdesk_exe_src),
-        "@@RUSTDESK_EXE_NAME@@":      cfg["exe_name"],
-        "@@HOST@@":                   server["host"],
-        "@@PUBKEY@@":                 server["pubkey"],
-        "@@PASSWORD_RUSTDESK_TOML@@": password_rustdesk_toml,
-        "@@PASSWORD_CLI_NSIS@@":      password_cli_nsis,
+        "@@DISPLAY_NAME@@":             group["display_name"],
+        "@@OUTPUT_PATH@@":              str(output_path),
+        "@@RUSTDESK_EXE_SRC@@":         str(rustdesk_exe_src),
+        "@@RUSTDESK_EXE_NAME@@":        cfg["exe_name"],
+        "@@HOST@@":                     server["host"],
+        "@@PUBKEY@@":                   server["pubkey"],
+        "@@PASSWORD_PRE_WRITE_BLOCK@@": password_pre_write_block,
+        "@@PASSWORD_CLI_NSIS@@":        password_cli_nsis,
     }.items():
         nsi_script = nsi_script.replace(marker, value)
 

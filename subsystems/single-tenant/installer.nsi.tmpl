@@ -2,13 +2,19 @@
 ; @@PLACEHOLDER@@ markers are substituted at build time; do not edit them here.
 ;
 ; Install sequence:
-;   1. Pre-write RustDesk2.toml to all config locations BEFORE launching
-;      the RustDesk installer, so the service reads the right server on first start.
+;   1. Pre-write RustDesk2.toml (server settings) and RustDesk.toml (password) to all
+;      config locations BEFORE launching the RustDesk installer.  The service reads
+;      the password at startup and generates its stable identity (id, key_pair) around it.
 ;   2. Run the official RustDesk installer with --silent-install and wait.
 ;      The binary spawns a background child and exits early, so we poll for
 ;      the installed EXE rather than sleeping a fixed amount.
-;   3. Stop the service and tray app, re-write config everywhere (the installer
-;      may have overwritten our settings during startup), then restart.
+;   3. Stop the service and tray app, re-write ONLY RustDesk2.toml everywhere.
+;      We deliberately do NOT re-write RustDesk.toml here — the service already
+;      wrote its identity (id, key_pair, salt) around our password; overwriting
+;      would destroy those fields and force another key regeneration.
+;   4. Restart the service, then call rustdesk --password via IPC to upgrade
+;      the plaintext password to the proper hash format.  Sleep before the call
+;      so the service IPC pipe is ready.
 ;
 ; WOW64 note: this is a 32-bit NSIS installer running on 64-bit Windows.
 ;   Writing $WINDIR\System32 from a 32-bit process is silently redirected
@@ -27,9 +33,8 @@ AutoCloseWindow true
 Name "@@DISPLAY_NAME@@ Remote Support"
 OutFile "@@OUTPUT_PATH@@"
 
-; Write config files to the given directory (caller sets shell var context).
-; RustDesk2.toml holds server/options; RustDesk.toml holds the permanent password.
-; These are separate files because RustDesk loads them via different Config structs.
+; Write RustDesk2.toml (server settings) to the given directory.
+; Used in both pre-write and post-write steps.
 !macro WriteConfig path
   CreateDirectory "${path}"
   FileOpen $0 "${path}\RustDesk2.toml" w
@@ -40,7 +45,7 @@ OutFile "@@OUTPUT_PATH@@"
   FileWrite $0 'relay-server = "@@HOST@@"$\r$\n'
   FileWrite $0 'key = "@@PUBKEY@@"$\r$\n'
   FileClose $0
-@@PASSWORD_RUSTDESK_TOML@@!macroend
+!macroend
 
 Section "Install"
 
@@ -62,6 +67,11 @@ Section "Install"
   !insertmacro WriteConfig "$WINDIR\System32\config\systemprofile\AppData\Roaming\RustDesk\config"
   ${EnableX64FSRedirection}
 
+  ; Write RustDesk.toml with permanent password to all pre-write locations.
+  ; Placed AFTER RustDesk2.toml so it overwrites any stale RustDesk.toml
+  ; from a previous install (uninstallers leave config files behind on Windows).
+  ; Post-write step skips this file intentionally — see sequence note above.
+@@PASSWORD_PRE_WRITE_BLOCK@@
   ; ── Step 2: run the RustDesk installer ────────────────────────────────────
   SetOutPath "$TEMP"
   File "@@RUSTDESK_EXE_SRC@@"
@@ -108,8 +118,9 @@ Section "Install"
   nsExec::ExecToLog 'net start RustDesk'
   Pop $0
 
-  ; Belt-and-suspenders: upgrade the plaintext RustDesk.toml password to the
-  ; proper hash format by calling the CLI (requires service to be running).
+  ; Wait for the service to fully initialize its IPC pipe, then upgrade the
+  ; plaintext RustDesk.toml password to the proper hash format via CLI.
+  Sleep 3000
 @@PASSWORD_CLI_NSIS@@
   Exec '"$PROGRAMFILES64\RustDesk\rustdesk.exe"'
 
