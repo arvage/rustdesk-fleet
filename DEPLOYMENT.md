@@ -64,7 +64,7 @@ cd /opt/rustdesk-fleet && docker compose pull && docker compose up -d
 Create the client group(s) devices/installers will be labeled with:
 
 ```bash
-python3 setup_server.py group create --slug govirtual365-internal --display-name "GoVirtual365 Internal"
+python3 setup_server.py group create --slug acme-corp --display-name "Acme Corp"
 ```
 
 ## 3. Firewall
@@ -163,8 +163,14 @@ sudo nginx -t && sudo systemctl reload nginx
 
 Visit `https://rds.example.com/` — with an empty `users` table every
 route redirects to `/setup`, a one-time page to create the first admin
-account (email + password). `/setup` locks permanently once a user
-exists.
+account.
+
+**There is no default username/password.** `/setup` prompts for the
+email and password to use for that first admin account — whatever you
+enter there becomes the login. `/setup` locks permanently once a user
+exists, so pick real credentials the first time; there's no factory
+reset short of clearing the `users` table directly in
+`fleet.sqlite3`.
 
 ## 6. Installer generation (for client devices)
 
@@ -180,7 +186,7 @@ Then build from the dashboard (`/groups/{slug}` → Build) or the CLI:
 
 ```bash
 cd ~/rustdesk-fleet/subsystems/single-tenant
-python3 generate_installer.py build --group govirtual365-internal
+python3 generate_installer.py build --group acme-corp
 ```
 
 ## Verify everything
