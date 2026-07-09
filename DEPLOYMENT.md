@@ -1,7 +1,8 @@
 # Deployment
 
 How this fleet is actually deployed and how to reproduce it on a new box.
-Reflects the live setup on `rds.pacificmit.com` as of 2026-07-09.
+Reflects the deployment pattern used in production, generalized here —
+substitute your own host/domain wherever you see `rds.example.com`.
 
 For architecture background (why single-tenant, what each subsystem does),
 see [`README.md`](README.md). This doc is just the mechanics of standing
@@ -42,7 +43,7 @@ git clone git@github.com:arvage/rustdesk-fleet.git ~/rustdesk-fleet
 
 ```bash
 cd ~/rustdesk-fleet/subsystems/single-tenant
-python3 setup_server.py init --host rds.pacificmit.com
+python3 setup_server.py init --host rds.example.com
 ```
 
 Idempotent — safe to re-run. Verify:
@@ -76,7 +77,7 @@ Two layers, both required:
 - **OS firewall**, only if `ufw` is active (`sudo ufw status`) — allow
   22/tcp first, then the same port range.
 
-Test reachability from outside the box: `nc -zv rds.pacificmit.com 21115`.
+Test reachability from outside the box: `nc -zv rds.example.com 21115`.
 
 ## 4. Dashboard
 
@@ -124,24 +125,24 @@ those modules rather than duplicating provisioning logic.
 nginx (TLS termination, reverse proxy to uvicorn on 127.0.0.1:8000):
 
 ```bash
-sudo certbot --nginx -d rds.pacificmit.com   # issues the cert, can also write the vhost
+sudo certbot --nginx -d rds.example.com   # issues the cert, can also write the vhost
 ```
 
-Resulting vhost (`/etc/nginx/sites-available/rds.pacificmit.com`):
+Resulting vhost (`/etc/nginx/sites-available/rds.example.com`):
 
 ```nginx
 server {
     listen 80;
-    server_name rds.pacificmit.com;
+    server_name rds.example.com;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name rds.pacificmit.com;
+    server_name rds.example.com;
 
-    ssl_certificate     /etc/letsencrypt/live/rds.pacificmit.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/rds.pacificmit.com/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/rds.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/rds.example.com/privkey.pem;
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
 
@@ -154,13 +155,13 @@ server {
         proxy_read_timeout 60s;
     }
 }
-sudo ln -s /etc/nginx/sites-available/rds.pacificmit.com /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/rds.example.com /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
 ## 5. First-run setup
 
-Visit `https://rds.pacificmit.com/` — with an empty `users` table every
+Visit `https://rds.example.com/` — with an empty `users` table every
 route redirects to `/setup`, a one-time page to create the first admin
 account (email + password). `/setup` locks permanently once a user
 exists.
@@ -188,7 +189,7 @@ python3 generate_installer.py build --group govirtual365-internal
 docker ps                                   # hbbs, hbbr Up
 systemctl status rustdesk-dashboard          # active (running)
 sudo nginx -t                                # config ok
-curl -I https://rds.pacificmit.com/          # 303 to /login (expected, unauthenticated)
+curl -I https://rds.example.com/            # 303 to /login (expected, unauthenticated)
 journalctl -u rustdesk-dashboard -n 50       # no tracebacks
 ```
 
@@ -204,7 +205,7 @@ journalctl -u rustdesk-dashboard -n 50       # no tracebacks
 | `/opt/rustdesk-fleet/installers` | Generated per-group installer output |
 | `/etc/rustdesk-fleet/dashboard.env` | Dashboard secrets (`SESSION_SECRET`) — not in the repo |
 | `/etc/systemd/system/rustdesk-dashboard.service` | Dashboard process supervisor |
-| `/etc/nginx/sites-available/rds.pacificmit.com` | TLS + reverse proxy |
+| `/etc/nginx/sites-available/rds.example.com` | TLS + reverse proxy |
 
 ## Out of scope here
 
