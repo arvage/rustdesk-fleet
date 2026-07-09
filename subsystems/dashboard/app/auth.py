@@ -111,7 +111,7 @@ async def login_get(request: Request):
 async def login_post(
     request: Request,
     email: str = Form(...),
-    password: str = Form(...),
+    password: str = Form(""),
 ):
     conn = get_db()
     user = conn.execute(
@@ -119,17 +119,31 @@ async def login_post(
     ).fetchone()
     conn.close()
 
-    # Constant-time failure path: always run bcrypt even on miss.
-    _dummy_hash = b"$2b$12$KIX/wKpGiQHGaL5p6vNyWOeqKKXJvq7oH9M3B5bGxDm7XQZR.vMQi"
-    stored_hash = user["password_hash"].encode() if (user and user["password_hash"]) else _dummy_hash
-    match = bcrypt.checkpw(password.encode(), stored_hash)
+    auth_method = user["auth_method"] if user else "password"
 
-    if not user or not user["password_hash"] or not match:
-        return templates.TemplateResponse(
-            request, "login.html",
-            {"error": "Invalid email or password.", "just_setup": False},
-            status_code=401,
-        )
+    # passkey-only accounts skip the password check entirely — there may be
+    # no password_hash worth checking, and the account's security no longer
+    # depends on it.
+    if auth_method != "passkey":
+        # Constant-time failure path: always run bcrypt even on miss.
+        _dummy_hash = b"$2b$12$KIX/wKpGiQHGaL5p6vNyWOeqKKXJvq7oH9M3B5bGxDm7XQZR.vMQi"
+        stored_hash = user["password_hash"].encode() if (user and user["password_hash"]) else _dummy_hash
+        match = bcrypt.checkpw(password.encode(), stored_hash)
+
+        if not user or not user["password_hash"] or not match:
+            return templates.TemplateResponse(
+                request, "login.html",
+                {"error": "Invalid email or password.", "just_setup": False},
+                status_code=401,
+            )
+    # auth_method can only be "passkey" here if `user` was found above
+    # (the no-such-user case always defaults auth_method to "password").
+
+    if auth_method in ("passkey", "both"):
+        # Second factor required before the real session is granted —
+        # require_auth() never reads this key, so nothing is accessible yet.
+        request.session["pending_2fa_user_id"] = user["id"]
+        return RedirectResponse("/login/webauthn", status_code=303)
 
     request.session["user_id"] = user["id"]
     request.session["user_role"] = user["role"]

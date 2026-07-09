@@ -14,6 +14,7 @@ from app.routes.devices import router as devices_router
 from app.routes.users import router as users_router
 from app.routes.api import router as api_router
 from app.routes.notifications import router as notifications_router
+from app.routes.webauthn import router as webauthn_router
 from app.deps import run_migrations
 
 app = FastAPI(docs_url=None, redoc_url=None)
@@ -59,3 +60,4 @@ app.include_router(audit_router)
 app.include_router(users_router)
 app.include_router(api_router)
 app.include_router(notifications_router)
+app.include_router(webauthn_router)

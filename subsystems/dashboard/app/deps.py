@@ -113,6 +113,33 @@ def run_migrations() -> None:
         conn.execute("ALTER TABLE provisioning_events ADD COLUMN user_email TEXT")
         conn.commit()
 
+    if "auth_method" not in users_cols:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN auth_method TEXT NOT NULL DEFAULT 'password' "
+            "CHECK (auth_method IN ('password','passkey','both'))"
+        )
+        conn.commit()
+    if "webauthn_user_handle" not in users_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN webauthn_user_handle TEXT")
+        conn.commit()
+
+    # WebAuthn/passkey credentials (idempotent CREATE IF NOT EXISTS)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS webauthn_credentials (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id       INTEGER NOT NULL REFERENCES users(id),
+            credential_id TEXT NOT NULL UNIQUE,
+            public_key    BLOB NOT NULL,
+            sign_count    INTEGER NOT NULL DEFAULT 0,
+            transports    TEXT,
+            nickname      TEXT NOT NULL DEFAULT '',
+            created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            last_used_at  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_user ON webauthn_credentials(user_id);
+    """)
+    conn.commit()
+
     # Notification tables (idempotent CREATE IF NOT EXISTS)
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS notification_settings (

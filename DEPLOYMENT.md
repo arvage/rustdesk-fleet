@@ -30,7 +30,7 @@ it up.
   PEP 668 guard means you'll likely need `--break-system-packages`):
   ```bash
   pip3 install --break-system-packages \
-      fastapi uvicorn jinja2 bcrypt python-multipart itsdangerous requests
+      fastapi uvicorn jinja2 bcrypt python-multipart itsdangerous requests webauthn
   ```
 
 ## 1. Get the code

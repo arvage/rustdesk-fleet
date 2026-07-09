@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in with a passkey — RustDesk Fleet</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-shell">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="brand-icon">R</div>
+      <div>
+        <span class="brand-name">RustDesk Fleet</span>
+        <span class="brand-sub">Management Console</span>
+      </div>
+    </div>
+    <h2>Confirm it's you</h2>
+    <p id="status-text">Use your passkey to finish signing in.</p>
+    <div id="error-box" class="flash error" style="margin-bottom:16px;display:none"></div>
+    <button id="retry-btn" class="btn btn-primary" style="width:100%;display:none">Try again</button>
+    <p style="margin-top:16px"><a href="/login">Back to sign in</a></p>
+  </div>
+</div>
+<script>
+function b64urlToBuf(s) {
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  const bin = atob(s);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  return buf.buffer;
+}
+function bufToB64url(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function showError(msg) {
+  const box = document.getElementById('error-box');
+  box.textContent = msg;
+  box.style.display = 'block';
+  document.getElementById('status-text').style.display = 'none';
+  document.getElementById('retry-btn').style.display = 'block';
+}
+
+async function runCeremony() {
+  document.getElementById('error-box').style.display = 'none';
+  document.getElementById('retry-btn').style.display = 'none';
+  document.getElementById('status-text').style.display = 'block';
+
+  if (!window.PublicKeyCredential) {
+    showError('This browser does not support passkeys/security keys.');
+    return;
+  }
+
+  try {
+    const beginResp = await fetch('/login/webauthn/begin', { method: 'POST' });
+    const options = await beginResp.json();
+    if (!beginResp.ok) throw new Error(options.error || 'Could not start passkey sign-in.');
+
+    options.challenge = b64urlToBuf(options.challenge);
+    if (options.allowCredentials) {
+      options.allowCredentials = options.allowCredentials.map(c => ({ ...c, id: b64urlToBuf(c.id) }));
+    }
+
+    const cred = await navigator.credentials.get({ publicKey: options });
+
+    const payload = {
+      id: cred.id,
+      rawId: bufToB64url(cred.rawId),
+      type: cred.type,
+      response: {
+        clientDataJSON: bufToB64url(cred.response.clientDataJSON),
+        authenticatorData: bufToB64url(cred.response.authenticatorData),
+        signature: bufToB64url(cred.response.signature),
+        userHandle: cred.response.userHandle ? bufToB64url(cred.response.userHandle) : null,
+      },
+    };
+
+    const completeResp = await fetch('/login/webauthn/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const result = await completeResp.json();
+    if (!completeResp.ok || !result.ok) throw new Error(result.error || 'Could not verify passkey.');
+
+    window.location.href = '/';
+  } catch (err) {
+    showError(err.message || 'Passkey sign-in failed.');
+  }
+}
+
+document.getElementById('retry-btn').addEventListener('click', runCeremony);
+runCeremony();
+</script>
+</body>
+</html>

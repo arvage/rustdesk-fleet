@@ -88,6 +88,7 @@
 {# Serialise all groups and access maps to JSON for JS — done in Python to avoid Jinja2 brace collision #}
 <script id="groups-json" type="application/json">{{ groups_json | safe }}</script>
 <script id="access-json" type="application/json">{{ access_json | safe }}</script>
+<script id="passkeys-json" type="application/json">{{ passkeys_json | safe }}</script>
 
 {# One-time new-user password reveal #}
 {% set new_pw = get_new_user_pw(request) %}
@@ -99,6 +100,7 @@
     <span>Password: <code style="background:#D1FAE5;padding:3px 8px;border-radius:4px">{{ new_pw.password }}</code></span>
   </div>
   {% if new_pw.email_sent %}<div style="font-size:12px;color:#10B981">✓ Email delivered</div>{% endif %}
+  <div style="font-size:12px;color:#065F46">Suggest they set up a passkey from My Account → Passkeys after their first login.</div>
 </div>
 {% endif %}
 
@@ -107,7 +109,7 @@
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>Name</th><th>Email</th><th>Role</th><th>Group Access</th><th>Created</th><th></th></tr>
+        <tr><th>Name</th><th>Email</th><th>Role</th><th>Group Access</th><th>MFA</th><th>Created</th><th></th></tr>
       </thead>
       <tbody>
       {% for u in users %}
@@ -143,6 +145,23 @@
               </div>
             {% endif %}
           </td>
+          <td>
+            {% if u.passkeys %}
+            <span class="badge {{ 'badge-active' if u.auth_method != 'password' else 'badge-pending' }}"
+                  style="cursor:pointer" title="View passkey details"
+                  onclick="openPasskeysModal({{ u.id }}, '{{ u.display_name or u.email | e }}')">
+              {{ 'Active' if u.auth_method != 'password' else 'Enrolled' }}
+            </span>
+            {% else %}
+            <form method="post" action="/users/{{ u.id }}/mfa-reminder" style="margin:0;display:inline"
+                  onsubmit="return confirm('Send an MFA/passkey setup reminder email to {{ u.email | e }}?')">
+              <button type="submit" class="badge badge-offline" style="cursor:pointer;border:none;font:inherit"
+                      {% if not smtp_ready %}disabled title="SMTP not configured"{% else %}title="Send a setup reminder email"{% endif %}>
+                Not active
+              </button>
+            </form>
+            {% endif %}
+          </td>
           <td class="text-muted text-sm">{{ u.created_at | localtime("%Y-%m-%d") }}</td>
           <td>
             <div style="display:flex;gap:6px">
@@ -162,7 +181,7 @@
           </td>
         </tr>
         <tr id="edit-{{ u.id }}" style="display:none;background:#F8FAFC">
-          <td colspan="6" style="padding:12px 16px">
+          <td colspan="7" style="padding:12px 16px">
             <form method="post" action="/users/{{ u.id }}/edit"
                   style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
               <div class="field">
@@ -229,6 +248,29 @@
       <div style="padding:14px 16px;border-top:1px solid #334155;display:flex;gap:8px;justify-content:flex-end">
         <button type="button" class="btn btn-ghost" onclick="closeGroupModal()">Cancel</button>
         <button type="submit" class="btn btn-primary">Save access</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Passkeys Modal ───────────────────────────────────────────────────────── -->
+<div id="passkeys-modal" class="modal-backdrop" onclick="if(event.target===this)closePasskeysModal()">
+  <div class="modal-box" style="max-width:460px">
+    <div class="modal-header">
+      <div>
+        <h2 id="passkeys-modal-title">Passkeys</h2>
+        <div id="passkeys-modal-sub" style="font-size:12px;color:#64748B;margin-top:2px"></div>
+      </div>
+      <button class="modal-close" onclick="closePasskeysModal()">✕</button>
+    </div>
+
+    <div class="group-list" id="passkeys-list" style="max-height:280px"></div>
+
+    <form id="passkeys-reset-form" method="post" style="margin:0"
+          onsubmit="return confirm('Reset all passkeys for this user? They will need to sign in with a password.')">
+      <div style="padding:14px 16px;border-top:1px solid #334155;display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" class="btn btn-ghost" onclick="closePasskeysModal()">Close</button>
+        <button type="submit" class="btn btn-ghost" style="color:var(--danger)">Reset all passkeys</button>
       </div>
     </form>
   </div>
@@ -336,7 +378,7 @@
             </label>
             <div style="font-size:11px;color:#475569;margin-top:2px">
               {% if smtp_ready %}
-                Sends a welcome email with login details to the user's address.
+                Sends a welcome email with login details and a passkey setup reminder to the user's address.
               {% else %}
                 SMTP not configured — set up notifications first to enable this.
               {% endif %}
@@ -358,6 +400,7 @@
 // ── Data ─────────────────────────────────────────────────────────────────────
 const GROUPS = JSON.parse(document.getElementById('groups-json').textContent);
 const ACCESS = JSON.parse(document.getElementById('access-json').textContent);
+const PASSKEYS = JSON.parse(document.getElementById('passkeys-json').textContent);
 
 // ── Group access modal ────────────────────────────────────────────────────────
 let _activeUserId = null;
@@ -377,6 +420,38 @@ function openGroupModal(userId, userName) {
 function closeGroupModal() {
   document.getElementById('group-modal').classList.remove('open');
   _activeUserId = null;
+}
+
+// ── Passkeys modal ─────────────────────────────────────────────────────────────
+function openPasskeysModal(userId, userName) {
+  const creds = PASSKEYS[String(userId)] || [];
+  document.getElementById('passkeys-modal-title').textContent = 'Passkeys — ' + userName;
+  document.getElementById('passkeys-modal-sub').textContent =
+    creds.length + ' registered';
+  document.getElementById('passkeys-reset-form').action = '/users/' + userId + '/passkeys/reset';
+
+  const list = document.getElementById('passkeys-list');
+  if (!creds.length) {
+    list.innerHTML = '<div class="group-empty">No passkeys registered.</div>';
+  } else {
+    list.innerHTML = creds.map(c => `
+      <div class="group-item" style="cursor:default">
+        <div style="flex:1">
+          <div style="color:#F1F5F9">${escHtml(c.nickname || 'Passkey')}</div>
+          <div style="font-size:11px;color:#64748B">Added ${escHtml(c.created_at || '')}${c.last_used_at ? ', last used ' + escHtml(c.last_used_at) : ''}</div>
+        </div>
+        <form method="post" action="/users/${userId}/passkeys/${c.id}/revoke" style="margin:0"
+              onsubmit="return confirm('Revoke this passkey?')">
+          <button type="submit" class="btn btn-ghost btn-sm">Revoke</button>
+        </form>
+      </div>
+    `).join('');
+  }
+  document.getElementById('passkeys-modal').classList.add('open');
+}
+
+function closePasskeysModal() {
+  document.getElementById('passkeys-modal').classList.remove('open');
 }
 
 function renderGroupList(query) {

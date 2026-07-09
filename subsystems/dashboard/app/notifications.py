@@ -318,6 +318,38 @@ def send_credentials_email(to_email: str, display_name: str, password: str) -> t
           <p style="font-size:13px;color:#94A3B8">
             Please change your password after your first login. This email was sent once and will not be resent.
           </p>
+          <p style="font-size:13px;color:#94A3B8">
+            For faster, more secure sign-in, consider registering a passkey (Touch ID, Windows Hello, or a security key) from <strong>My Account &rarr; Passkeys</strong> once you're logged in.
+          </p>
+        </div>
+        """
+        _send_sync(settings, [to_email], subject, html)
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
+
+
+def send_mfa_reminder_email(to_email: str, display_name: str) -> tuple[bool, str]:
+    """Nudge an existing user who hasn't set up a passkey yet. Returns (ok, error_msg)."""
+    settings = get_settings()
+    if not settings.get("enabled") or not settings.get("smtp_host"):
+        return False, "Notifications not configured or disabled."
+    if not settings.get("from_addr"):
+        return False, "No from address configured."
+    try:
+        subject = "Set up a passkey for your RustDesk Fleet account"
+        html = f"""
+        <div style="font-family:Inter,system-ui,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1E293B">
+          <h2 style="font-size:20px;font-weight:700;margin-bottom:8px">Add a passkey to your account</h2>
+          <p style="color:#64748B;font-size:14px;margin-bottom:16px">
+            Hi {display_name or to_email}, you don't have multi-factor sign-in set up yet on your
+            RustDesk Fleet account.
+          </p>
+          <p style="color:#64748B;font-size:14px;margin-bottom:24px">
+            Registering a passkey (Touch ID, Windows Hello, or a security key) makes signing in
+            faster and more secure. You can add one from <strong>My Account &rarr; Passkeys</strong>
+            after logging in.
+          </p>
         </div>
         """
         _send_sync(settings, [to_email], subject, html)
