@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
-from app.deps import get_db
+from app.deps import get_db, log_event
 from app.notifications import (
     EVENT_LABELS, get_settings, get_event_states, get_log, send_test_email
 )
@@ -95,6 +95,7 @@ async def notifications_save(
             (is_enabled, smtp_host.strip(), port, tls, smtp_user.strip(),
              smtp_pass, from_addr.strip(), to_addrs.strip()),
         )
+    log_event(conn, "notification_settings_updated", smtp_host.strip(), current_user["email"])
     conn.commit()
     conn.close()
 
@@ -117,6 +118,7 @@ async def notifications_events(
             "INSERT OR REPLACE INTO notification_events (event_type, enabled) VALUES (?, ?)",
             (et, enabled),
         )
+    log_event(conn, "notification_triggers_updated", "", current_user["email"])
     conn.commit()
     conn.close()
 
@@ -132,6 +134,10 @@ async def notifications_test(
     _require_admin(current_user)
     settings = get_settings()
     ok, err = send_test_email(settings)
+    conn = get_db()
+    log_event(conn, "notification_test_sent", "" if ok else f"failed: {err}", current_user["email"])
+    conn.commit()
+    conn.close()
     if ok:
         _set_flash(request, "success", "Test email sent successfully.")
     else:

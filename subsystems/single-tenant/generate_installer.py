@@ -84,9 +84,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def log_event(conn: sqlite3.Connection, event: str, detail: str = "") -> None:
+def log_event(conn: sqlite3.Connection, event: str, detail: str = "", user_email: str = "") -> None:
     conn.execute(
-        "INSERT INTO provisioning_events (event, detail) VALUES (?, ?)", (event, detail)
+        "INSERT INTO provisioning_events (event, detail, user_email) VALUES (?, ?, ?)",
+        (event, detail, user_email or None),
     )
     conn.commit()
 
@@ -235,7 +236,7 @@ def _build_script(
     return output_path
 
 
-def build_installer(group_slug: str, platform: str = "windows-x64") -> dict:
+def build_installer(group_slug: str, platform: str = "windows-x64", user_email: str = "") -> dict:
     if platform not in PLATFORMS:
         raise InstallerError(
             f"Unknown platform '{platform}'. Valid options: {', '.join(PLATFORMS)}"
@@ -263,7 +264,7 @@ def build_installer(group_slug: str, platform: str = "windows-x64") -> dict:
     )
     installer_id = cur.lastrowid
     conn.commit()
-    log_event(conn, "installer_build_start", f"group={group_slug} platform={platform} installer_id={installer_id}")
+    log_event(conn, "installer_build_start", f"group={group_slug} platform={platform} installer_id={installer_id}", user_email)
 
     try:
         cfg = PLATFORMS[platform]
@@ -281,7 +282,7 @@ def build_installer(group_slug: str, platform: str = "windows-x64") -> dict:
             (str(output_path), sha256, installer_id),
         )
         conn.commit()
-        log_event(conn, "installer_built", f"installer_id={installer_id} sha256={sha256[:16]}...")
+        log_event(conn, "installer_built", f"installer_id={installer_id} sha256={sha256[:16]}...", user_email)
 
     except Exception as e:
         conn.execute(
@@ -289,7 +290,7 @@ def build_installer(group_slug: str, platform: str = "windows-x64") -> dict:
             (str(e), installer_id),
         )
         conn.commit()
-        log_event(conn, "installer_build_failed", str(e)[:500])
+        log_event(conn, "installer_build_failed", str(e)[:500], user_email)
         raise
 
     return dict(conn.execute("SELECT * FROM installers WHERE id=?", (installer_id,)).fetchone())

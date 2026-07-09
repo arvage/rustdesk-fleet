@@ -46,7 +46,7 @@ async def groups_create(
 ):
     from setup_server import create_group, ProvisioningError
     try:
-        create_group(slug, display_name, unattended_password.strip() or None)
+        create_group(slug, display_name, unattended_password.strip() or None, current_user["email"])
         conn = get_db()
         log_event(conn, "group_created", slug, current_user["email"])
         conn.close()
@@ -192,6 +192,7 @@ async def installer_delete(
             candidate.unlink()
 
     conn.execute("DELETE FROM installers WHERE id = ?", (installer_id,))
+    log_event(conn, "installer_deleted", f"group={slug} installer_id={installer_id}", current_user["email"])
     conn.commit()
     conn.close()
     _set_flash(request, "success", "Installer deleted.")
@@ -210,7 +211,7 @@ async def group_build(
         _set_flash(request, "error", f"Unknown platform: {platform}")
         return RedirectResponse(f"/groups/{slug}", status_code=303)
     try:
-        result = build_installer(slug, platform)
+        result = build_installer(slug, platform, current_user["email"])
         sha_short = (result["sha256_unsigned"] or "")[:16]
         label = PLATFORMS[platform]["label"]
         _set_flash(request, "success", f"{label} installer ready. SHA256: {sha_short}…")

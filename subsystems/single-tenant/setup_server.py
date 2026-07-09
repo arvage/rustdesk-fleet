@@ -52,8 +52,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def log_event(conn: sqlite3.Connection, event: str, detail: str = "") -> None:
-    conn.execute("INSERT INTO provisioning_events (event, detail) VALUES (?, ?)", (event, detail))
+def log_event(conn: sqlite3.Connection, event: str, detail: str = "", user_email: str = "") -> None:
+    conn.execute(
+        "INSERT INTO provisioning_events (event, detail, user_email) VALUES (?, ?, ?)",
+        (event, detail, user_email or None),
+    )
     conn.commit()
 
 
@@ -136,7 +139,9 @@ def get_status() -> dict | None:
 # Client group management
 # ---------------------------------------------------------------------------
 
-def create_group(slug: str, display_name: str, unattended_password: str | None = None) -> dict:
+def create_group(
+    slug: str, display_name: str, unattended_password: str | None = None, user_email: str = ""
+) -> dict:
     if not SLUG_RE.match(slug):
         raise ProvisioningError(f"Invalid slug '{slug}'. Use lowercase letters, digits, hyphens; 3-50 chars.")
 
@@ -151,7 +156,7 @@ def create_group(slug: str, display_name: str, unattended_password: str | None =
         (slug, display_name, unattended_password or None),
     )
     conn.commit()
-    log_event(conn, "group_created", slug)
+    log_event(conn, "group_created", slug, user_email)
     return {"id": cur.lastrowid, "slug": slug, "display_name": display_name}
 
 

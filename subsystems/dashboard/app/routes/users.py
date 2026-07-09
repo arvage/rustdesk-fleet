@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
-from app.deps import get_db
+from app.deps import get_db, log_event
 from app.notifications import fire_notification, send_credentials_email
 from app.templates_config import templates
 
@@ -143,6 +143,8 @@ async def user_create(
         ).fetchall()
         group_names = [r["display_name"] for r in rows]
 
+    log_event(conn, "user_created", email, current_user["email"])
+    conn.commit()
     conn.close()
 
     email_sent = False
@@ -182,7 +184,9 @@ async def user_set_role(
         return RedirectResponse("/users", status_code=303)
 
     conn = get_db()
+    target = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+    log_event(conn, "user_role_changed", f"{target['email'] if target else user_id} -> {role}", current_user["email"])
     conn.commit()
     conn.close()
     _set_flash(request, "success", "Role updated.")
@@ -198,12 +202,18 @@ async def user_set_access(
 ):
     _require_admin(current_user)
     conn = get_db()
+    target = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.execute("DELETE FROM user_group_access WHERE user_id = ?", (user_id,))
     for gid in group_ids:
         conn.execute(
             "INSERT OR IGNORE INTO user_group_access (user_id, group_id) VALUES (?, ?)",
             (user_id, gid),
         )
+    log_event(
+        conn, "user_access_updated",
+        f"{target['email'] if target else user_id} groups={sorted(group_ids)}",
+        current_user["email"],
+    )
     conn.commit()
     conn.close()
     _set_flash(request, "success", "Group access updated.")
@@ -227,6 +237,7 @@ async def user_reset_password(
         _set_flash(request, "error", "User not found.")
         return RedirectResponse("/users", status_code=303)
     conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pw_hash, user_id))
+    log_event(conn, "user_password_reset", user["email"], current_user["email"])
     conn.commit()
     conn.close()
 
@@ -263,6 +274,7 @@ async def user_edit(
         "UPDATE users SET email = ?, display_name = ? WHERE id = ?",
         (email, display_name, user_id),
     )
+    log_event(conn, "user_updated", email, current_user["email"])
     conn.commit()
     conn.close()
 
@@ -290,6 +302,8 @@ async def user_delete(
     ).fetchone()
     conn.execute("DELETE FROM user_group_access WHERE user_id = ?", (user_id,))
     conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    if deleted:
+        log_event(conn, "user_deleted", deleted["email"], current_user["email"])
     conn.commit()
     conn.close()
 
@@ -355,6 +369,7 @@ async def account_update_profile(
         "UPDATE users SET email = ?, display_name = ? WHERE id = ?",
         (email, display_name, current_user["id"]),
     )
+    log_event(conn, "profile_updated", email, current_user["email"])
     conn.commit()
     user = conn.execute("SELECT email, display_name FROM users WHERE id = ?", (current_user["id"],)).fetchone()
     conn.close()
@@ -397,6 +412,7 @@ async def account_change_password(
     pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode()
     conn = get_db()
     conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pw_hash, current_user["id"]))
+    log_event(conn, "password_changed", current_user["email"], current_user["email"])
     conn.commit()
     conn.close()
 
