@@ -11,7 +11,7 @@
 
 services:
   hbbs:
-    image: rustdesk/rustdesk-server:1.1.14
+    image: rustdesk/rustdesk-server:1.1.15
     container_name: hbbs
     command: hbbs
     network_mode: host
@@ -22,7 +22,7 @@ services:
       - hbbr
 
   hbbr:
-    image: rustdesk/rustdesk-server:1.1.14
+    image: rustdesk/rustdesk-server:1.1.15
     container_name: hbbr
     command: hbbr
     network_mode: host
