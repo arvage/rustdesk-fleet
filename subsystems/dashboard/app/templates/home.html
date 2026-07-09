@@ -36,7 +36,31 @@
       </button>
     </div>
   </div>
+  <div class="stat-card">
+    <div class="stat-label">Server Version</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+      <span class="stat-value" style="font-size:16px">{{ current_version or 'unknown' }}</span>
+      {% if update_available %}
+      <span class="badge badge-pending" title="Latest release: {{ latest_version }}">update available</span>
+      {% endif %}
+    </div>
+  </div>
 </div>
+
+{% if update_available and current_user.role == 'admin' %}
+<div class="section">
+  <div class="card"><div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:16px">
+    <div>
+      <p style="margin:0"><strong>RustDesk server {{ latest_version }} is available</strong> (currently running {{ current_version }}).</p>
+      <p class="text-sm text-muted" style="margin:4px 0 0">Updating pulls the new image and restarts hbbs/hbbr — active remote sessions will be dropped briefly.</p>
+    </div>
+    <form method="post" action="/server/update"
+          onsubmit="return confirm('Update the RustDesk server from {{ current_version }} to {{ latest_version }}?\n\nThis restarts hbbs/hbbr and will drop any active remote sessions.')">
+      <button type="submit" class="btn btn-primary">Update to {{ latest_version }}</button>
+    </form>
+  </div></div>
+</div>
+{% endif %}
 
 <div class="section">
   <div class="section-head"><h2>Public Key</h2></div>

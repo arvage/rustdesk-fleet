@@ -26,6 +26,8 @@ import sys
 import time
 from pathlib import Path
 
+import requests
+
 FLEET_ROOT = Path("/opt/rustdesk-fleet")
 DB_PATH = FLEET_ROOT / "fleet.sqlite3"
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
@@ -71,6 +73,75 @@ def docker_compose_up() -> None:
     )
     if result.returncode != 0:
         raise ProvisioningError(f"docker compose up failed:\n{result.stderr}")
+
+
+IMAGE_TAG_RE = re.compile(r"rustdesk/rustdesk-server:([\w.\-]+)")
+
+_latest_version_cache: dict = {"version": None, "checked_at": 0.0}
+_LATEST_VERSION_TTL_S = 3600
+
+
+def get_server_version() -> str | None:
+    """Current image tag pinned in the deployed compose file."""
+    if not COMPOSE_DST.exists():
+        return None
+    match = IMAGE_TAG_RE.search(COMPOSE_DST.read_text())
+    return match.group(1) if match else None
+
+
+def get_latest_server_version() -> str | None:
+    """Latest rustdesk-server release tag from GitHub, cached for an hour.
+
+    Returns None on any network/API failure rather than raising — this is
+    a best-effort check, not something that should break the status page.
+    """
+    now = time.time()
+    if _latest_version_cache["version"] and now - _latest_version_cache["checked_at"] < _LATEST_VERSION_TTL_S:
+        return _latest_version_cache["version"]
+
+    try:
+        resp = requests.get(
+            "https://api.github.com/repos/rustdesk/rustdesk-server/releases/latest",
+            timeout=5,
+        )
+        resp.raise_for_status()
+        tag = resp.json()["tag_name"].lstrip("v")
+    except Exception:
+        return _latest_version_cache["version"]
+
+    _latest_version_cache["version"] = tag
+    _latest_version_cache["checked_at"] = now
+    return tag
+
+
+def update_server(version: str, user_email: str = "") -> None:
+    """Pin the compose file to `version`, pull the new image, and restart the stack."""
+    if not COMPOSE_DST.exists():
+        raise ProvisioningError("Server not initialised — nothing to update.")
+
+    conn = get_db()
+    current = get_server_version()
+
+    text = COMPOSE_DST.read_text()
+    new_text = IMAGE_TAG_RE.sub(f"rustdesk/rustdesk-server:{version}", text)
+    COMPOSE_DST.write_text(new_text)
+
+    log_event(conn, "server_update_start", f"{current} -> {version}", user_email)
+    try:
+        pull = subprocess.run(
+            ["docker", "compose", "-f", str(COMPOSE_DST), "pull"],
+            capture_output=True, text=True,
+        )
+        if pull.returncode != 0:
+            raise ProvisioningError(f"docker compose pull failed:\n{pull.stderr}")
+
+        docker_compose_up()
+        conn.execute("UPDATE server_config SET updated_at=datetime('now') WHERE id=1")
+        conn.commit()
+        log_event(conn, "server_updated", f"{current} -> {version}", user_email)
+    except Exception as e:
+        log_event(conn, "server_update_failed", str(e)[:500], user_email)
+        raise
 
 
 def wait_for_pubkey(timeout_s: int = 30) -> str:
