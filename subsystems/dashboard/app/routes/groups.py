@@ -176,7 +176,8 @@ async def installer_delete(
 ):
     conn = get_db()
     row = conn.execute(
-        """SELECT i.id, i.unsigned_path FROM installers i
+        """SELECT i.id, i.unsigned_path, i.platform, i.rustdesk_version, cg.display_name AS group_name
+           FROM installers i
            JOIN client_groups cg ON cg.id = i.group_id
            WHERE i.id = ? AND cg.slug = ?""",
         (installer_id, slug),
@@ -195,6 +196,15 @@ async def installer_delete(
     log_event(conn, "installer_deleted", f"group={slug} installer_id={installer_id}", current_user["email"])
     conn.commit()
     conn.close()
+
+    fire_notification("installer_deleted", {
+        "group_name": row["group_name"],
+        "group_slug": slug,
+        "platform": row["platform"],
+        "version": row["rustdesk_version"],
+        "deleted_by": current_user["email"],
+    })
+
     _set_flash(request, "success", "Installer deleted.")
     return RedirectResponse(f"/groups/{slug}", status_code=303)
 

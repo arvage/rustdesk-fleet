@@ -10,7 +10,8 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from app.auth import require_auth
-from app.deps import get_devices
+from app.deps import get_db, get_devices, log_event
+from app.notifications import fire_notification
 
 HBBS_DB_PATH = Path("/opt/rustdesk-fleet/data/db_v2.sqlite3")
 HBBS_PORTS = {"21115", "21116", "21117", "21118", "21119"}
@@ -71,8 +72,7 @@ def _online_ips() -> set[str]:
         return {ip for ip, ts in _ip_last_seen.items() if ts >= cutoff}
 
 
-@router.get("/devices/status")
-async def devices_status(_: dict = Depends(require_auth)):
+def _compute_status() -> dict[str, str]:
     """Return {rustdesk_id: "online"|"offline"} for every known peer.
 
     Two signals are combined:
@@ -82,6 +82,9 @@ async def devices_status(_: dict = Depends(require_auth)):
        TCP connection to hbbs becomes idle and gets killed by NAT — especially
        on Japanese networks.  created_at is refreshed each time the client
        re-registers, so a recent value means the device was alive recently.
+
+    Shared by the /devices/status endpoint and the offline-notification
+    background watcher below, so both agree on what "online" means.
     """
     online_ips = _online_ips()
     status: dict[str, str] = {}
@@ -109,7 +112,73 @@ async def devices_status(_: dict = Depends(require_auth)):
 
         conn.close()
 
-    return JSONResponse({"devices": status})
+    return status
+
+
+@router.get("/devices/status")
+async def devices_status(_: dict = Depends(require_auth)):
+    return JSONResponse({"devices": _compute_status()})
+
+
+# ── Offline-transition watcher ──────────────────────────────────────────────
+# Fires a "device_offline" notification the first time a device that was
+# online drops to offline. Runs on its own, coarser interval (separate from
+# the 1s ss-poll above) so a brief blip doesn't fire a notification, and so
+# it's decoupled from the per-request /devices/status calls.
+
+_OFFLINE_WATCH_INTERVAL_S = 30
+
+_prev_status: dict[str, str] | None = None
+_status_lock = threading.Lock()
+
+
+def _check_offline_transitions() -> None:
+    global _prev_status
+    current = _compute_status()
+
+    with _status_lock:
+        previous = _prev_status
+        _prev_status = current
+
+    if previous is None:
+        return  # first run — nothing to compare against yet
+
+    newly_offline = [
+        rid for rid, state in current.items()
+        if state == "offline" and previous.get(rid) == "online"
+    ]
+    if not newly_offline:
+        return
+
+    devices, _ = get_devices()
+    by_id = {d["rustdesk_id"]: d for d in devices}
+
+    conn = get_db()
+    for rid in newly_offline:
+        info = by_id.get(rid)
+        if info is None:
+            continue  # hidden/unregistered — nothing useful to notify about
+        log_event(conn, "device_offline", rid, "")
+        fire_notification("device_offline", {
+            "rustdesk_id": rid,
+            "label": info.get("label") or "",
+            "group_name": info.get("group_name") or "",
+            "last_seen": info.get("last_seen") or "",
+        })
+    conn.commit()
+    conn.close()
+
+
+def _bg_offline_watch_loop() -> None:
+    while True:
+        try:
+            _check_offline_transitions()
+        except Exception:
+            pass
+        time.sleep(_OFFLINE_WATCH_INTERVAL_S)
+
+
+threading.Thread(target=_bg_offline_watch_loop, daemon=True, name="device-offline-watch").start()
 
 
 @router.get("/devices")

@@ -8,7 +8,9 @@ delays the HTTP response.
 Supported event types (EVENT_LABELS keys):
   device_registered  — a new device appeared in the fleet
   device_deleted     — a device was removed
+  device_offline     — a previously-online device stopped responding
   installer_built    — an installer was compiled for a group
+  installer_deleted  — an installer build was deleted
 """
 
 from __future__ import annotations
@@ -28,7 +30,9 @@ DB_PATH = Path("/opt/rustdesk-fleet/fleet.sqlite3")
 EVENT_LABELS: dict[str, str] = {
     "device_registered": "New device registered",
     "device_deleted":    "Device deleted",
+    "device_offline":    "Device went offline",
     "installer_built":   "Installer built",
+    "installer_deleted": "Installer deleted",
     "user_created":      "User account created",
     "user_deleted":      "User account deleted",
 }
@@ -36,7 +40,9 @@ EVENT_LABELS: dict[str, str] = {
 _SUBJECTS: dict[str, str] = {
     "device_registered": "New device registered — {rustdesk_id}",
     "device_deleted":    "Device removed — {rustdesk_id}",
+    "device_offline":    "Device went offline — {rustdesk_id}",
     "installer_built":   "Installer built — {group_name} ({platform})",
+    "installer_deleted": "Installer deleted — {group_name} ({platform})",
     "user_created":      "New user created — {email}",
     "user_deleted":      "User deleted — {email}",
 }
@@ -166,6 +172,18 @@ def _render(event_type: str, context: dict) -> tuple[str, str]:
         )
         subtitle = "Device removed from fleet"
 
+    elif event_type == "device_offline":
+        body = (
+            "<p>A device has gone offline.</p>"
+            + _kv(
+                ("RustDesk ID", context.get("rustdesk_id", "—")),
+                ("Label", context.get("label") or "—"),
+                ("Group", context.get("group_name") or "—"),
+                ("Last seen", context.get("last_seen") or ts),
+            )
+        )
+        subtitle = "Device offline"
+
     elif event_type == "installer_built":
         body = (
             "<p>A new installer has been generated and is ready to deploy.</p>"
@@ -177,6 +195,18 @@ def _render(event_type: str, context: dict) -> tuple[str, str]:
             )
         )
         subtitle = "Installer ready"
+
+    elif event_type == "installer_deleted":
+        body = (
+            "<p>An installer build has been deleted.</p>"
+            + _kv(
+                ("Group", context.get("group_name", "—")),
+                ("Platform", context.get("platform", "—")),
+                ("RustDesk version", context.get("version", "—")),
+                ("Deleted by", context.get("deleted_by", "—")),
+            )
+        )
+        subtitle = "Installer deleted"
 
     elif event_type == "user_created":
         body = (
