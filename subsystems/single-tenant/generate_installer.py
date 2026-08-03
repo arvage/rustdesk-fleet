@@ -6,31 +6,59 @@ Reads server config (host, pubkey) and group settings from the fleet DB,
 substitutes placeholders in the appropriate template, and either compiles
 with makensis (Windows) or writes a shell script (Linux / macOS).
 
+The RustDesk binary version is pinned in `rustdesk_version.txt` (next to
+fleet.sqlite3) rather than hardcoded, so builds stay reproducible even as
+new upstream releases come out. Run `update-version` to check GitHub for a
+newer release and pull down its binaries — nothing changes until you do.
+
 Usage:
     python3 generate_installer.py build --group govirtual365-internal --platform windows-x64
     python3 generate_installer.py build --group govirtual365-internal --platform linux
     python3 generate_installer.py list
+    python3 generate_installer.py update-version
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import shutil
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
-FLEET_ROOT  = Path("/opt/rustdesk-fleet")
-DB_PATH     = FLEET_ROOT / "fleet.sqlite3"
-SCHEMA_PATH = Path(__file__).parent / "schema.sql"
-ASSETS_DIR  = FLEET_ROOT / "installer-assets"
-OUTPUT_DIR  = FLEET_ROOT / "installers"
-TMPL_DIR    = Path(__file__).parent
+FLEET_ROOT   = Path("/opt/rustdesk-fleet")
+DB_PATH      = FLEET_ROOT / "fleet.sqlite3"
+SCHEMA_PATH  = Path(__file__).parent / "schema.sql"
+ASSETS_DIR   = FLEET_ROOT / "installer-assets"
+OUTPUT_DIR   = FLEET_ROOT / "installers"
+TMPL_DIR     = Path(__file__).parent
+VERSION_FILE = FLEET_ROOT / "rustdesk_version.txt"
 
-RUSTDESK_VERSION = "1.4.8"
+# Only used to seed VERSION_FILE the first time it's read — after that the
+# file on disk is the source of truth.
+DEFAULT_VERSION = "1.4.9"
+
+GITHUB_REPO = "rustdesk/rustdesk"
+USER_AGENT = "rustdesk-fleet-installer-generator"
+
+
+def get_pinned_version() -> str:
+    if VERSION_FILE.exists():
+        pinned = VERSION_FILE.read_text().strip()
+        if pinned:
+            return pinned
+    VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    VERSION_FILE.write_text(DEFAULT_VERSION + "\n")
+    return DEFAULT_VERSION
+
+
+RUSTDESK_VERSION = get_pinned_version()
 
 PLATFORMS: dict[str, dict] = {
     "windows-x64": {
@@ -62,6 +90,78 @@ PLATFORMS: dict[str, dict] = {
 
 class InstallerError(RuntimeError):
     pass
+
+
+def fetch_latest_release_tag() -> str:
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read().decode())
+    return data["tag_name"].lstrip("v")
+
+
+def download_asset(version: str, arch: str) -> Path:
+    """Download rustdesk-{version}-{arch}.exe to a temp file inside ASSETS_DIR
+    and return its path, leaving the final filename untouched until the
+    caller commits it. Raises on any HTTP/network failure."""
+    filename = f"rustdesk-{version}-{arch}.exe"
+    url = f"https://github.com/{GITHUB_REPO}/releases/download/{version}/{filename}"
+    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = ASSETS_DIR / f".{filename}.part"
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=120) as resp, open(tmp_path, "wb") as f:
+        shutil.copyfileobj(resp, f)
+    return tmp_path
+
+
+def update_version() -> dict:
+    """Check GitHub for the latest RustDesk release. If it's newer than the
+    pinned version, download binaries for whichever architectures are
+    already present locally (so it never fetches a platform you don't use),
+    then move the pin forward. Returns a summary dict; raises InstallerError
+    on any failure, leaving the existing pin/assets untouched."""
+    current = get_pinned_version()
+
+    try:
+        latest = fetch_latest_release_tag()
+    except (urllib.error.URLError, urllib.error.HTTPError, KeyError, ValueError) as e:
+        raise InstallerError(f"Could not check latest RustDesk release: {e}")
+
+    if latest == current:
+        return {"current": current, "latest": latest, "updated": False, "archs": []}
+
+    existing = list(ASSETS_DIR.glob(f"rustdesk-{current}-*.exe"))
+    archs = [p.stem[len(f"rustdesk-{current}-"):] for p in existing]
+    if not archs:
+        raise InstallerError(
+            f"No existing rustdesk-{current}-*.exe assets found in {ASSETS_DIR} "
+            "to know which architectures to fetch."
+        )
+
+    downloaded: list[tuple[str, Path, Path]] = []
+    try:
+        for arch in archs:
+            tmp_path = download_asset(latest, arch)
+            final_path = ASSETS_DIR / f"rustdesk-{latest}-{arch}.exe"
+            downloaded.append((arch, tmp_path, final_path))
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
+        for _, tmp_path, _ in downloaded:
+            tmp_path.unlink(missing_ok=True)
+        raise InstallerError(f"Download failed partway through ({e}); pinned version unchanged.")
+
+    for _, tmp_path, final_path in downloaded:
+        tmp_path.replace(final_path)
+    VERSION_FILE.write_text(latest + "\n")
+
+    return {
+        "current": current,
+        "latest": latest,
+        "updated": True,
+        "archs": [
+            {"arch": arch, "path": str(final_path), "sha256": hashlib.sha256(final_path.read_bytes()).hexdigest()}
+            for arch, _, final_path in downloaded
+        ],
+    }
 
 
 def _strip_port(host: str) -> str:
@@ -322,6 +422,11 @@ def main():
 
     sub.add_parser("list", help="List all generated installers")
 
+    sub.add_parser(
+        "update-version",
+        help="Check GitHub for a newer RustDesk release and download it if found",
+    )
+
     args = parser.parse_args()
 
     if args.cmd == "build":
@@ -346,6 +451,20 @@ def main():
                 f"v{r['rustdesk_version']:<8} {r['status']:<10} "
                 f"{r['unsigned_path'] or '-'}"
             )
+
+    elif args.cmd == "update-version":
+        try:
+            result = update_version()
+        except InstallerError as e:
+            sys.exit(f"Update check failed: {e}")
+        if not result["updated"]:
+            print(f"Already up to date (pinned: {result['current']}, latest: {result['latest']}).")
+        else:
+            print(f"Updated pin: {result['current']} -> {result['latest']}")
+            for a in result["archs"]:
+                print(f"  {a['arch']:<10} {a['path']}")
+                print(f"  {'':<10} sha256={a['sha256']}")
+            print("Future builds will use the new version. Old binaries were left in place.")
 
 
 if __name__ == "__main__":
