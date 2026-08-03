@@ -49,7 +49,7 @@
 
 {% if update_available and current_user.role == 'admin' %}
 <div class="section">
-  <div class="card"><div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:16px">
+  <div class="card"><div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
     <div>
       <p style="margin:0"><strong>RustDesk server {{ latest_version }} is available</strong> (currently running {{ current_version }}).</p>
       <p class="text-sm text-muted" style="margin:4px 0 0">Updating pulls the new image and restarts hbbs/hbbr — active remote sessions will be dropped briefly.</p>

@@ -2,7 +2,7 @@
 {% block title %}Devices — RustDesk Fleet{% endblock %}
 {% block page_title %}Devices{% endblock %}
 {% block topbar_actions %}
-  <div style="display:flex;align-items:center;gap:8px">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <span id="status-indicator" class="text-muted text-sm" style="display:flex;align-items:center;gap:5px">
       <span id="status-dot" style="width:7px;height:7px;border-radius:50%;background:#94A3B8;flex-shrink:0;display:inline-block"></span>
       <span id="status-label">Checking…</span>
@@ -18,15 +18,14 @@
 {% endblock %}
 
 {% block content %}
-<div style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">
+<div style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
   <span class="text-muted text-sm" id="device-count-label">
     {{ devices|length }} device{{ 's' if devices|length != 1 }}{% if active_group %} in <strong>{{ active_group }}</strong>{% endif %}
     &nbsp;·&nbsp; <span id="peer-count">{{ peer_count }}</span> registered with server
   </span>
   <input id="device-filter" type="search" placeholder="Filter by ID, IP, label, group…"
          oninput="filterDevices()"
-         style="padding:7px 11px;border:1px solid var(--border-md);border-radius:var(--radius-sm);
-                font-size:13px;width:280px;outline:none;background:var(--surface)">
+         class="filter-input" style="width:280px">
 </div>
 
 <div class="card" id="devices-card">
@@ -95,9 +94,9 @@
 </div>
 
 <!-- Device edit modal -->
-<div id="device-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center"
+<div id="device-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px"
      onclick="if(event.target===this)closeDeviceModal()">
-  <div style="background:#fff;border-radius:14px;padding:28px 28px 22px;width:400px;box-shadow:0 20px 60px rgba(0,0,0,.22)">
+  <div style="background:#fff;border-radius:14px;padding:28px 28px 22px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.22)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
       <h2 style="font-size:16px;font-weight:700;margin:0">Edit Device</h2>
       <button onclick="closeDeviceModal()"

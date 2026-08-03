@@ -13,7 +13,7 @@
 <div class="shell">
 
   <!-- Sidebar -->
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <a class="sidebar-brand" href="/">
       <div class="brand-icon">R</div>
       <div>
@@ -76,9 +76,14 @@
     </div>
   </aside>
 
+  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
+
   <!-- Main -->
   <div class="main">
     <header class="topbar">
+      <button class="sidebar-toggle" onclick="toggleSidebar()" aria-label="Open menu">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
       <span class="topbar-title">{% block page_title %}{% endblock %}</span>
       <div class="topbar-right">{% block topbar_actions %}{% endblock %}</div>
     </header>
@@ -91,6 +96,14 @@
 
 </div>
 <script>
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-backdrop').classList.toggle('open');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('open');
+}
 function copyText(text, btn) {
   navigator.clipboard.writeText(text).then(() => {
     const prev = btn.innerHTML;
