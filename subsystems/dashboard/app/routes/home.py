@@ -157,6 +157,11 @@ def home(request: Request, current_user: dict = Depends(require_auth)):
     )
 
 
+@router.get("/help", response_class=HTMLResponse)
+def help_page(request: Request, current_user: dict = Depends(require_auth)):
+    return templates.TemplateResponse(request, "help.html", {"current_user": current_user})
+
+
 @router.post("/server/backup")
 def server_backup(request: Request, current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_backups")

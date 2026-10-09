@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Help — RustDesk Fleet{% endblock %}
+{% block page_title %}Help &amp; User Guide{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% block content %}
+<style>
+.help-wrap { max-width: 880px; }
+.help-toc { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px; }
+.help-toc a { font-size:12px; text-decoration:none; color:var(--text-2); background:var(--surface);
+  border:1px solid var(--border-md); border-radius:999px; padding:5px 12px; }
+.help-toc a:hover { border-color:var(--accent); color:var(--accent); }
+.help-sec { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  box-shadow:var(--shadow); padding:20px 22px; margin-bottom:16px; scroll-margin-top:16px; }
+.help-sec h2 { font-size:15px; font-weight:700; margin:0 0 10px; color:var(--text-1);
+  display:flex; align-items:center; gap:8px; }
+.help-sec h2 .n { width:22px;height:22px;flex-shrink:0;border-radius:6px;background:var(--accent);color:#fff;
+  font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center; }
+.help-sec p, .help-sec li { font-size:13.5px; line-height:1.65; color:var(--text-2); }
+.help-sec ul { margin:8px 0; padding-left:20px; }
+.help-sec li { margin:3px 0; }
+.help-sec strong { color:var(--text-1); }
+.help-sec code { background:var(--border); padding:1px 5px; border-radius:4px; font-size:12px; }
+.help-table { width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
+.help-table td { padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+.help-table td:first-child { color:var(--text-1); font-weight:500; white-space:nowrap; width:42%; }
+.help-table td:last-child { color:var(--text-2); }
+</style>
+
+<div class="help-wrap">
+<p class="text-muted text-sm" style="margin-bottom:18px">
+  How to use the dashboard day to day. Replace <code>rds.example.com</code> with your server address.
+</p>
+
+<div class="help-toc">
+  <a href="#s1">Signing in</a>
+  <a href="#s2">Server Status</a>
+  <a href="#s3">Adding devices</a>
+  <a href="#s4">Devices</a>
+  <a href="#s5">Client Groups</a>
+  <a href="#s6">Download links</a>
+  <a href="#s7">Roles &amp; permissions</a>
+  <a href="#s8">Admin tools</a>
+  <a href="#s9">Users</a>
+  <a href="#s10">Logs</a>
+  <a href="#s11">Backups</a>
+  <a href="#s12">Notifications</a>
+  <a href="#s13">My account</a>
+  <a href="#tasks">Quick tasks</a>
+</div>
+
+<div class="help-sec" id="s1">
+  <h2><span class="n">1</span> Signing in</h2>
+  <ul>
+    <li><strong>First ever visit:</strong> if no account exists, you're sent to a one-time setup page to create the first administrator. It locks permanently afterward.</li>
+    <li><strong>Normal sign-in:</strong> email + password. If you've registered a passkey, you'll be prompted for it (or it may replace the password).</li>
+    <li>The left sidebar is the navigation. What you see depends on your <strong>role</strong> — a read-only account sees the fleet but no admin tools.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="s2">
+  <h2><span class="n">2</span> Server Status (home)</h2>
+  <ul>
+    <li><strong>Server Health</strong> — live tiles: containers (hbbs/hbbr), CPU, memory, disk, devices online, uptime. Memory/disk show the alert threshold and turn amber/red near it.</li>
+    <li><strong>Server Info</strong> — status, host, ports, running server/client versions (with “update available” badges), and the public key clients use.</li>
+    <li><strong>Backups</strong> — last backup status; admins get <strong>Back up now</strong> and <strong>Download latest</strong>.</li>
+    <li>Admins also see one-click banners to update the RustDesk server or the client version used for new installers.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="s3">
+  <h2><span class="n">3</span> Adding devices (installing the client)</h2>
+  <p>Devices appear automatically once the client is installed and pointed at your server:</p>
+  <ul>
+    <li>Open (or create) the device's <strong>Client Group</strong>.</li>
+    <li>Under <strong>Installers</strong>, build one for the platform (Windows / macOS / Linux). It's pre-configured with your server, key and the group's settings — nothing to type on the client.</li>
+    <li>Share it via a <strong>download link</strong> or the built file, and run it on the machine.</li>
+    <li>Within a minute the device appears on <strong>Devices</strong> and in its group, reporting name, OS, user, CPU, memory and version.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="s4">
+  <h2><span class="n">4</span> Devices</h2>
+  <ul>
+    <li>Lists every machine with live <strong>online / in&nbsp;session / offline</strong> status, computer, OS, IP and group. A <strong>Recently registered</strong> panel at the top highlights machines added in the last 7 days.</li>
+    <li><strong>Filter</strong> with the search box; <strong>ⓘ Details</strong> shows full reported details and recent sessions.</li>
+    <li><strong>Connect</strong> (video icon) launches your local RustDesk app to that device.</li>
+    <li><strong>Edit</strong> sets a label and moves the device between groups. <strong>Delete</strong> removes it from the dashboard (use for duplicates/decommissioned machines) — if that client ever communicates again, it reappears automatically.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="s5">
+  <h2><span class="n">5</span> Client Groups</h2>
+  <ul>
+    <li>Groups organize devices (per customer, internal vs. external). A group is a label plus its own installers and settings — not separate infrastructure.</li>
+    <li><strong>Create</strong> a group with a name and optional unattended password (baked into its installers). <strong>Open</strong> it to manage devices, installers, links and settings.</li>
+    <li><strong>Managed client settings</strong> (each Not managed / On / Off): <strong>Automatic RustDesk updates</strong>, and <strong>Remote settings changes</strong> (whether a connected tech can change RustDesk's own settings on the device).</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="s6">
+  <h2><span class="n">6</span> Download links</h2>
+  <ul>
+    <li>Share a link from a group page instead of a binary — with optional <strong>expiry</strong> and <strong>download limit</strong>.</li>
+    <li><strong>Email</strong> it to the client directly, or <strong>revoke</strong> it anytime.</li>
+    <li>The public page always serves the group's newest installer and is unlisted.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="s7">
+  <h2><span class="n">7</span> Roles &amp; permissions</h2>
+  <ul>
+    <li>Access is controlled by <strong>roles</strong>. Viewing is always allowed; capabilities gate who can change things.</li>
+    <li>Built-in: <strong>Administrator</strong> (everything, locked), <strong>Technician</strong> (devices + groups), <strong>Viewer</strong> (read-only).</li>
+    <li>Admins can create <strong>custom roles</strong> with a capability checkbox matrix under <strong>Admin → Roles &amp; permissions</strong>, and assign them on the Users page. The UI hides actions a role can't use; the server enforces them regardless.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="s8">
+  <h2><span class="n">8</span> Admin tools</h2>
+  <ul>
+    <li><strong>Backup &amp; Restore</strong> — off-site destination (S3 / Wasabi / Backblaze B2 / Spaces / MinIO), encryption, test, back up, download, restore.</li>
+    <li><strong>Roles &amp; permissions</strong>, <strong>Export device inventory (CSV)</strong>, <strong>Restart relay</strong> (brief session drop), <strong>Prune logs</strong>.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="s9">
+  <h2><span class="n">9</span> Users</h2>
+  <ul>
+    <li><strong>Add a user</strong> — email, name, role, group access; auto or manual password, optionally emailed.</li>
+    <li>Change a user's <strong>role</strong> or <strong>group access</strong>, <strong>reset password</strong>, and manage <strong>passkeys / MFA</strong> (revoke, reset to password, send a setup reminder).</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="s10">
+  <h2><span class="n">10</span> Logs</h2>
+  <ul>
+    <li>Audit trail in category tabs: All, Clients, <strong>Remote sessions</strong>, Installers, Groups, Users &amp; auth, Server — each with a filter.</li>
+    <li><strong>Remote sessions</strong> shows each connection to a device: which device, when, and how long. (The client reports the device side, not which technician connected.)</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="s11">
+  <h2><span class="n">11</span> Backups</h2>
+  <ul>
+    <li>Protect the server <strong>keypair</strong> (every client is tied to it) and the databases. A <strong>nightly</strong> backup runs automatically; you can also back up on demand.</li>
+    <li>Set an <strong>off-site destination</strong> and <strong>encryption passphrase</strong> under Admin → Backup &amp; Restore, then test and enable. Local-only backups don't survive losing the server.</li>
+    <li><strong>Restore</strong> takes a safety snapshot first, replaces the keypair + databases, and restarts the relay. Clients reconnect without reconfiguration (same key).</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="s12">
+  <h2><span class="n">12</span> Notifications &amp; alerts</h2>
+  <ul>
+    <li><strong>SMTP</strong> for outbound mail (send a test). <strong>Event triggers</strong> choose which events email you.</li>
+    <li><strong>Server health alerts</strong> — set memory and disk thresholds; you're emailed when usage crosses them (debounced). These are the markers on the Server Health tiles.</li>
+    <li><strong>Delivery log</strong> shows recent sends and whether they succeeded.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="s13">
+  <h2><span class="n">13</span> My account</h2>
+  <ul>
+    <li>Update your name/email, change your password, and register or remove <strong>passkeys</strong> (Touch ID, Windows Hello, security key) — choosing whether password sign-in stays enabled.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="tasks">
+  <h2><span class="n">★</span> Quick tasks</h2>
+  <table class="help-table">
+    <tr><td>Onboard a new machine</td><td>Client Groups → group → build/share installer</td></tr>
+    <tr><td>Connect to a device</td><td>Devices → Connect</td></tr>
+    <tr><td>Remove a duplicate/old device</td><td>Devices → Edit/Delete</td></tr>
+    <tr><td>Group devices by customer</td><td>Client Groups → create group, set device groups</td></tr>
+    <tr><td>Push auto-update / lock settings</td><td>Client Groups → group → Client Settings</td></tr>
+    <tr><td>Give a colleague access</td><td>Admin → Users → add user + role</td></tr>
+    <tr><td>Limit what a role can do</td><td>Admin → Roles &amp; permissions</td></tr>
+    <tr><td>Set up off-site backups</td><td>Admin → Backup &amp; Restore</td></tr>
+    <tr><td>Restore the server</td><td>Admin → Backup &amp; Restore → Restore</td></tr>
+    <tr><td>Get alerted on low disk/memory</td><td>Admin → Notifications → health thresholds</td></tr>
+    <tr><td>See who connected to what</td><td>Logs → Remote sessions</td></tr>
+    <tr><td>Export the device list</td><td>Admin → Export device inventory (CSV)</td></tr>
+  </table>
+</div>
+</div>
+{% endblock %}

@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -32,6 +32,17 @@ async def devices_list(
 ):
     devices, peer_count = get_devices(group)
 
+    # Newly-registered devices (last 7 days), newest first — shown as a
+    # highlighted group at the top of the page for an at-a-glance view.
+    recent_days = 7
+    cutoff = (date.today() - timedelta(days=recent_days)).isoformat()
+    recent = sorted(
+        [d for d in devices
+         if d.get("registered_at") and d["registered_at"] != "—" and d["registered_at"][:10] >= cutoff],
+        key=lambda d: (d["registered_at"], d.get("last_seen") or ""),
+        reverse=True,
+    )
+
     conn = get_db()
     groups = conn.execute(
         "SELECT id, slug, display_name FROM client_groups ORDER BY display_name"
@@ -43,6 +54,8 @@ async def devices_list(
         "devices.html",
         {
             "devices": devices,
+            "recent": recent,
+            "recent_days": recent_days,
             "groups": groups,
             "active_group": group,
             "current_user": current_user,
