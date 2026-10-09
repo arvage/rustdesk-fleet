@@ -16,7 +16,8 @@ cd rustdesk-fleet
 
 [`install.sh`](install.sh) installs everything (relay, dashboard, TLS,
 backup timer) and is idempotent. Full and manual steps:
-[`DEPLOYMENT.md`](DEPLOYMENT.md).
+[`DEPLOYMENT.md`](DEPLOYMENT.md). Using the dashboard day to day:
+[`USER_GUIDE.md`](USER_GUIDE.md).
 
 ## Current architecture: single-tenant
 
