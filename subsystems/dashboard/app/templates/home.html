@@ -1,0 +1,347 @@
+{% extends "base.html" %}
+{% block title %}Server Status — RustDesk Fleet{% endblock %}
+{% block page_title %}Server Status{% endblock %}
+
+{% block content %}
+{% if server %}
+<div class="section">
+  <div class="section-head"><h2>Server Health</h2>
+    <span class="text-sm text-muted" id="health-updated"></span>
+  </div>
+  <div class="stats" style="margin-bottom:0">
+    <div class="stat-card">
+      <div class="stat-label">Containers</div>
+      <div id="h-containers" style="margin-top:8px;display:flex;flex-direction:column;gap:7px">
+        <span class="text-muted text-sm">checking…</span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">CPU</div>
+      <div class="stat-value" id="h-cpu">…</div>
+      <div class="stat-sub" id="h-cpu-sub"></div>
+      <div class="meter"><span id="h-cpu-bar" style="width:0%"></span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Memory</div>
+      <div class="stat-value" id="h-mem">…</div>
+      <div class="stat-sub" id="h-mem-sub"></div>
+      <div class="meter"><span id="h-mem-bar" style="width:0%"></span><i class="meter-mark" id="h-mem-mark" style="display:none"></i></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Disk</div>
+      <div class="stat-value" id="h-disk">…</div>
+      <div class="stat-sub" id="h-disk-sub"></div>
+      <div class="meter"><span id="h-disk-bar" style="width:0%"></span><i class="meter-mark" id="h-disk-mark" style="display:none"></i></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Devices Online</div>
+      <div class="stat-value" id="h-devonline">…</div>
+      <div class="stat-sub">registered with the server</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Host Uptime</div>
+      <div class="stat-value" id="h-uptime" style="font-size:20px">…</div>
+      <div class="stat-sub" id="h-swap-sub"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const POLL_MS = 15000;
+  // With a configured threshold: red at/above it, amber within 10 points below,
+  // else green. Without one (CPU), fall back to generic 70/90 bands.
+  function meterColour(p, thr) {
+    if (p == null) return 'var(--border-md)';
+    if (thr != null) return p >= thr ? 'var(--danger)' : p >= thr - 10 ? 'var(--warning)' : 'var(--success)';
+    return p >= 90 ? 'var(--danger)' : p >= 70 ? 'var(--warning)' : 'var(--success)';
+  }
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  function setMeter(id, pct, thr) {
+    const b = document.getElementById(id);
+    if (!b) return;
+    b.style.width = (pct == null ? 0 : Math.min(pct, 100)) + '%';
+    b.style.background = meterColour(pct, thr);
+  }
+  function setMark(id, threshold) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (threshold == null) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.style.left = Math.min(Math.max(threshold, 0), 100) + '%';
+    el.title = 'Alert threshold: ' + threshold + '%';
+  }
+  function fmtKB(kb) {              // meminfo is in kB
+    const mb = kb / 1024;
+    return mb >= 1024 ? (mb / 1024).toFixed(mb >= 10240 ? 0 : 1) + ' GB' : Math.round(mb) + ' MB';
+  }
+  function fmtB(b) {
+    const gb = b / 1e9;
+    return gb >= 1 ? gb.toFixed(gb >= 10 ? 0 : 1) + ' GB' : Math.round(b / 1e6) + ' MB';
+  }
+  function fmtUptime(s) {
+    if (s == null) return '—';
+    const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+    return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+  }
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/server/health');
+      if (!r.ok) return;
+      const h = await r.json();
+
+      const cpu = h.cpu || {};
+      setText('h-cpu', cpu.pct == null ? '…' : cpu.pct + '%');
+      setText('h-cpu-sub',
+        [cpu.cores ? cpu.cores + (cpu.cores === 1 ? ' core' : ' cores') : '',
+         cpu.load1 != null ? `load ${cpu.load1} · ${cpu.load5} · ${cpu.load15}` : '']
+        .filter(Boolean).join(' · '));
+      setMeter('h-cpu-bar', cpu.pct);
+
+      const thr = h.thresholds || {};
+
+      const m = h.mem || {};
+      setText('h-mem', m.pct == null ? '—' : m.pct + '%');
+      setText('h-mem-sub',
+        [m.total_kb ? `${fmtKB(m.used_kb)} / ${fmtKB(m.total_kb)}` : '',
+         thr.mem != null ? `alert ≥ ${thr.mem}%` : ''].filter(Boolean).join(' · '));
+      setMeter('h-mem-bar', m.pct, thr.mem);
+      setMark('h-mem-mark', thr.mem);
+
+      const dk = h.disk || {};
+      setText('h-disk', dk.pct == null ? '—' : dk.pct + '%');
+      setText('h-disk-sub',
+        [dk.total_b ? `${fmtB(dk.used_b)} / ${fmtB(dk.total_b)}` : '',
+         thr.disk != null ? `alert ≥ ${thr.disk}%` : ''].filter(Boolean).join(' · '));
+      setMeter('h-disk-bar', dk.pct, thr.disk);
+      setMark('h-disk-mark', thr.disk);
+
+      const dv = h.devices || {};
+      setText('h-devonline', `${dv.online ?? '—'}${dv.total != null ? ' / ' + dv.total : ''}`);
+
+      setText('h-uptime', fmtUptime(h.uptime_s));
+      const sw = h.swap || {};
+      setText('h-swap-sub', sw.total_kb ? `swap ${sw.pct}% of ${fmtKB(sw.total_kb)}` : 'no swap configured');
+
+      const cont = h.containers || {};
+      document.getElementById('h-containers').innerHTML = ['hbbs', 'hbbr'].map(n => {
+        const c = cont[n] || {};
+        const colour = c.running ? '#10B981' : c.running === false ? '#EF4444' : '#94A3B8';
+        return `<div style="display:flex;align-items:center;gap:7px;font-size:13px">
+          <span style="width:8px;height:8px;border-radius:50%;background:${colour};flex-shrink:0"></span>
+          <strong style="font-weight:600">${n}</strong>
+          <span class="text-muted" style="font-size:12px">${(c.status || 'unknown')}</span>
+        </div>`;
+      }).join('');
+
+      setText('health-updated', 'updated ' + new Date().toLocaleTimeString('en-US',
+        { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    } catch (_) {}
+  }
+  refresh();
+  setInterval(refresh, POLL_MS);
+})();
+</script>
+
+<div class="section">
+  <div class="section-head"><h2>Server Info</h2></div>
+  <div class="stats">
+  <div class="stat-card">
+    <div class="stat-label">Status</div>
+    <div style="margin-top:6px"><span class="badge badge-{{ server.status }}">{{ server.status }}</span></div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Host</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+      <span class="stat-value" style="font-size:16px">{{ server.host }}</span>
+      <button class="btn-copy" onclick="copyText('{{ server.host }}', this)" title="Copy host">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">hbbs Port</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+      <span class="stat-value">{{ server.hbbs_port }}</span>
+      <button class="btn-copy" onclick="copyText('{{ server.hbbs_port }}', this)" title="Copy port">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">hbbr Port</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+      <span class="stat-value">{{ server.hbbr_port }}</span>
+      <button class="btn-copy" onclick="copyText('{{ server.hbbr_port }}', this)" title="Copy port">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Server Version</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+      <span class="stat-value" style="font-size:16px">{{ current_version or 'unknown' }}</span>
+      {% if update_available %}
+      <span class="badge badge-pending" title="Latest release: {{ latest_version }}">update available</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Client Version</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
+      <span class="stat-value" style="font-size:16px" title="RustDesk client version new installers are built with">{{ client_version or 'unknown' }}</span>
+      {% if client_update_available %}
+      <span class="badge badge-pending" title="Latest release: {{ latest_client }}">update available</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+  <div class="card">
+    <div class="card-body">
+      <p class="text-sm text-muted" style="margin-bottom:10px">
+        Share this key with every client device when configuring RustDesk. It is not secret.
+      </p>
+      <div style="position:relative">
+        <div class="pubkey-box">{{ server.pubkey }}</div>
+        <button class="btn-copy btn-copy-abs" onclick="copyText('{{ server.pubkey }}', this)" title="Copy public key"
+                style="position:absolute;top:8px;right:8px;background:#1E293B;border-color:#334155;color:#94A3B8">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          Copy
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-head" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <h2>Backups</h2>
+    {% set p = current_user.permissions or [] %}
+    {% if 'manage_backups' in p %}
+    <div style="display:flex;align-items:center;gap:8px">
+      {% if backup_status and backup_status.file %}
+      <a href="/server/backup/download/latest" class="btn btn-ghost btn-sm">Download latest</a>
+      {% endif %}
+      <form method="post" action="/server/backup" style="margin:0"
+            onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Backing up…'">
+        <button type="submit" class="btn btn-primary btn-sm">Back up now</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+  <div class="card"><div class="card-body">
+    {% if backup_status %}
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+        {% if backup_status.ok %}
+        <span class="badge badge-active">last backup ok</span>
+        {% else %}
+        <span class="badge badge-failed">last backup failed</span>
+        {% endif %}
+        <span class="text-muted text-sm">{{ backup_status.at | localtime }}</span>
+        {% if backup_status.offsite and backup_status.offsite.attempted %}
+          {% if backup_status.offsite.ok %}
+          <span class="badge badge-active">offsite ok</span>
+          {% else %}
+          <span class="badge badge-failed" title="{{ backup_status.offsite.error or '' }}">offsite failed</span>
+          {% endif %}
+        {% else %}
+          <span class="badge badge-pending" title="Local-only backups don't survive loss of this box. Set BACKUP_OFFSITE_CMD in /etc/rustdesk-fleet/backup.env.">offsite not configured</span>
+        {% endif %}
+        {% if backup_status.encrypted %}<span class="badge badge-built">encrypted</span>{% endif %}
+      </div>
+      {% if backup_status.ok %}
+      <div class="kv-grid">
+        <div class="kv-row"><div class="kv-key">Latest archive</div><div class="kv-val"><code>{{ backup_status.file }}</code> &nbsp;<span class="text-muted">{{ backup_status.size_human }}</span></div></div>
+        <div class="kv-row"><div class="kv-key">Archives kept</div><div class="kv-val text-muted">{{ backup_status.retained }} (nightly at 03:30 UTC, keypair + databases)</div></div>
+        {% if backup_status.skipped %}
+        <div class="kv-row"><div class="kv-key">Skipped</div><div class="kv-val text-muted">{{ backup_status.skipped | length }} root-only file(s) — captured by the nightly root backup</div></div>
+        {% endif %}
+      </div>
+      {% else %}
+      <p class="text-sm" style="color:var(--danger);margin:0">{{ backup_status.error }}</p>
+      {% endif %}
+    {% else %}
+      <p class="text-muted text-sm" style="margin:0">
+        No backup has run yet. The nightly timer backs up the server keypair and databases at 03:30 UTC;
+        use <strong>Back up now</strong> to create one immediately.
+      </p>
+    {% endif %}
+    <p class="text-muted" style="font-size:11px;margin:14px 0 0">
+      Backs up the hbbs/hbbr keypair, the hbbs peer registry and the dashboard database — the data that
+      can't be regenerated. Installer binaries are excluded.
+      {% if 'manage_backups' in (current_user.permissions or []) %}
+      Configure an off-site destination (Amazon S3, Wasabi, Backblaze B2, Spaces, MinIO) and restore from
+      <a href="/admin/backup" style="color:var(--accent);text-decoration:none">Admin → Backup &amp; Restore</a>.
+      {% else %}
+      For off-box safety, an admin can configure a destination under Admin → Backup &amp; Restore.
+      {% endif %}
+    </p>
+  </div></div>
+</div>
+
+{% if update_available and 'update_server' in (current_user.permissions or []) %}
+<div class="section">
+  <div class="card"><div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+    <div>
+      <p style="margin:0"><strong>RustDesk server {{ latest_version }} is available</strong> (currently running {{ current_version }}).</p>
+      <p class="text-sm text-muted" style="margin:4px 0 0">Updating pulls the new image and restarts hbbs/hbbr — active remote sessions will be dropped briefly.</p>
+    </div>
+    <form method="post" action="/server/update"
+          onsubmit="return confirm('Update the RustDesk server from {{ current_version }} to {{ latest_version }}?\n\nThis restarts hbbs/hbbr and will drop any active remote sessions.')">
+      <button type="submit" class="btn btn-primary">Update to {{ latest_version }}</button>
+    </form>
+  </div></div>
+</div>
+{% endif %}
+
+{% if rebuild_running %}
+<div class="section">
+  <div class="flash success" style="margin:0">Rebuilding every group's installers in the background… refresh in a minute or two.</div>
+</div>
+{% elif client_update_available and 'update_server' in (current_user.permissions or []) %}
+<div class="section">
+  <div class="card"><div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+    <div>
+      <p style="margin:0"><strong>RustDesk client {{ latest_client }} is available</strong> (installers currently use {{ client_version }}).</p>
+      <p class="text-sm text-muted" style="margin:4px 0 0">
+        Downloads the new client and builds new installers with it. Devices that are already installed keep
+        their version until they're reinstalled — download links always serve the newest build.
+      </p>
+    </div>
+    <form method="post" action="/installers/update-version" style="display:flex;flex-direction:column;align-items:flex-end;gap:8px"
+          onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Downloading…'">
+      <button type="submit" class="btn btn-primary">Update installers to {{ latest_client }}</button>
+      <label class="text-sm text-muted" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" name="rebuild" value="1" checked>
+        Also rebuild every group's installers
+      </label>
+    </form>
+  </div></div>
+</div>
+{% endif %}
+
+
+<div class="section">
+  <div class="section-head"><h2>Configuration Details</h2></div>
+  <div class="card">
+    <div class="kv-grid">
+      <div class="kv-row"><div class="kv-key">Data directory</div><div class="kv-val"><code>{{ server.data_dir }}</code></div></div>
+      <div class="kv-row"><div class="kv-key">Compose file</div><div class="kv-val"><code>{{ server.compose_path }}</code></div></div>
+      <div class="kv-row"><div class="kv-key">Initialised</div><div class="kv-val text-muted">{{ server.created_at | localtime }}</div></div>
+      <div class="kv-row"><div class="kv-key">Last updated</div><div class="kv-val text-muted">{{ server.updated_at | localtime }}</div></div>
+    </div>
+  </div>
+</div>
+
+{% else %}
+<div class="card"><div class="card-body">
+  <div class="empty">
+    <div class="empty-icon">⚙️</div>
+    <p>Server not initialised.</p>
+    <p>Run <code>python3 setup_server.py init --host &lt;your-host&gt;</code> on the box.</p>
+  </div>
+</div></div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Logs — RustDesk Fleet{% endblock %}
+{% block page_title %}Logs{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% set cat_colors = {
+  'clients': '#3B82F6', 'sessions': '#8B5CF6', 'installers': '#0EA5E9',
+  'groups': '#10B981', 'users': '#F59E0B', 'notifications': '#EC4899',
+  'server': '#64748B', 'other': '#94A3B8'
+} %}
+
+{% macro cat_pill(key) -%}
+  <span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-2)">
+    <span style="width:7px;height:7px;border-radius:50%;background:{{ cat_colors.get(key, '#94A3B8') }};flex-shrink:0"></span>
+    {{ tab_labels.get(key, key) }}
+  </span>
+{%- endmacro %}
+
+{% block content %}
+
+<!-- Category tabs -->
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">
+  {% for key, label in tabs %}
+  <a href="/audit?cat={{ key }}"
+     style="display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;
+            font-size:13px;text-decoration:none;border:1px solid
+            {% if cat == key %}var(--accent);background:var(--accent);color:#fff{% else %}var(--border-md);background:var(--surface);color:var(--text-2){% endif %}">
+    {% if key not in ('all',) %}
+    <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;
+                 background:{% if cat == key %}#fff{% else %}{{ cat_colors.get(key, '#94A3B8') }}{% endif %}"></span>
+    {% endif %}
+    {{ label }}
+    {% if counts.get(key) %}
+    <span style="font-size:11px;font-weight:600;padding:0 6px;border-radius:999px;
+                 {% if cat == key %}background:rgba(255,255,255,.25);color:#fff{% else %}background:var(--border);color:var(--text-3){% endif %}">
+      {{ counts.get(key) }}
+    </span>
+    {% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+{# ── Remote sessions tab ──────────────────────────────────────────────── #}
+{% if cat == 'sessions' %}
+
+<div style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <span class="text-muted text-sm">
+    {% if filter_rid %}
+      Sessions for device <code>{{ filter_rid | format_rid }}</code> &nbsp;·&nbsp;
+      <a href="/audit?cat=sessions" style="color:var(--accent);text-decoration:none">show all</a>
+    {% else %}
+      Remote-access sessions across the fleet
+    {% endif %}
+    {% if active_count %}&nbsp;·&nbsp; <strong style="color:var(--success)">{{ active_count }} active now</strong>{% endif %}
+  </span>
+  <input id="log-filter" type="search" placeholder="Filter by device, group…"
+         oninput="filterLogRows()" class="filter-input" style="width:260px">
+</div>
+
+{% if sessions %}
+<div class="card"><div class="table-wrap">
+  <table>
+    <thead><tr><th>Device</th><th>Client Group</th><th>Started</th><th>Ended</th><th>Duration</th><th>Status</th></tr></thead>
+    <tbody id="log-tbody">
+    {% for s in sessions %}
+      <tr data-search="{{ s.rustdesk_id }} {{ s.device_name }} {{ s.group_name or '' }}">
+        <td style="white-space:nowrap">
+          {% if s.device_name %}<span style="font-weight:500">{{ s.device_name }}</span>
+          <a href="/audit?cat=sessions&rid={{ s.rustdesk_id }}" style="font-size:11px;display:block;text-decoration:none;color:var(--text-3)"><code>{{ s.rustdesk_id | format_rid }}</code></a>
+          {% else %}<a href="/audit?cat=sessions&rid={{ s.rustdesk_id }}" style="text-decoration:none"><code>{{ s.rustdesk_id | format_rid }}</code></a>{% endif %}
+        </td>
+        <td>{% if s.group_name %}<a href="/groups/{{ s.group_slug }}" style="color:var(--accent);text-decoration:none;font-size:13px">{{ s.group_name }}</a>{% else %}<span class="text-muted text-sm">—</span>{% endif %}</td>
+        <td class="text-muted text-sm mono" style="white-space:nowrap">{{ s.started_at | localtime }}</td>
+        <td class="text-muted text-sm mono" style="white-space:nowrap">{{ s.ended_at | localtime if s.ended_at else '—' }}</td>
+        <td class="text-sm" style="white-space:nowrap;color:#475569">{{ s.duration_str }}</td>
+        <td>{% if s.active %}<span class="badge badge-active">active</span>{% else %}<span class="badge badge-offline">ended</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div id="no-log-results" style="display:none;padding:40px;text-align:center;color:var(--text-3);font-size:13px">No sessions match your filter.</div>
+</div>
+<p class="text-muted text-sm" style="margin-top:12px">
+  A session is one remote connection to a device, as reported by the device's RustDesk client — which device was
+  accessed and for how long. The OSS client does not report which technician connected.
+</p>
+{% else %}
+<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🕑</div>
+  <p>No sessions recorded yet.</p><p>Remote connections to your devices will appear here as they happen.</p>
+</div></div></div>
+{% endif %}
+
+{# ── Event-log tabs (everything else) ─────────────────────────────────── #}
+{% else %}
+
+<div style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <span class="text-muted text-sm">
+    {{ tab_labels.get(cat) }} &nbsp;·&nbsp; showing up to 200 most recent
+  </span>
+  <input id="log-filter" type="search" placeholder="Filter by user, event, detail…"
+         oninput="filterLogRows()" class="filter-input" style="width:260px">
+</div>
+
+{% if events %}
+<div class="card"><div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Time</th><th>User</th>{% if cat == 'all' %}<th>Category</th>{% endif %}<th>Event</th><th>Detail</th></tr>
+    </thead>
+    <tbody id="log-tbody">
+    {% for e in events %}
+      <tr data-search="{{ e.user_email or '' }} {{ e.event }} {{ e.detail or '' }} {{ tab_labels.get(e.category, '') }}">
+        <td class="text-muted text-sm mono" style="white-space:nowrap">{{ e.created_at | localtime }}</td>
+        <td class="text-sm" style="white-space:nowrap;color:#475569">{{ e.user_email or '—' }}</td>
+        {% if cat == 'all' %}<td style="white-space:nowrap">{{ cat_pill(e.category) }}</td>{% endif %}
+        <td><code>{{ e.event }}</code></td>
+        <td class="text-sm" style="color:#475569;max-width:400px;word-break:break-all">{{ e.detail or '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div id="no-log-results" style="display:none;padding:40px;text-align:center;color:var(--text-3);font-size:13px">No entries match your filter.</div>
+</div>
+{% else %}
+<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">📋</div>
+  <p>No {{ tab_labels.get(cat) | lower }} entries recorded yet.</p>
+</div></div></div>
+{% endif %}
+
+{% endif %}
+
+<script>
+function filterLogRows() {
+  const q = (document.getElementById('log-filter')?.value || '').toLowerCase();
+  const tbody = document.getElementById('log-tbody');
+  if (!tbody) return;
+  let visible = 0;
+  tbody.querySelectorAll('tr').forEach(row => {
+    const match = !q || (row.dataset.search || '').toLowerCase().includes(q);
+    row.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  const empty = document.getElementById('no-log-results');
+  if (empty) empty.style.display = visible ? 'none' : 'block';
+}
+</script>
+{% endblock %}

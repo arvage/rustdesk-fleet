@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Backup &amp; Restore — RustDesk Fleet{% endblock %}
+{% block page_title %}Backup &amp; Restore{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% block content %}
+<style>
+.bk-form input, .bk-form select {
+  width:100%; min-width:0; padding:7px 11px; border:1px solid var(--border-md);
+  border-radius:var(--radius-sm); font-size:13px; color:var(--text-1);
+  background:var(--surface); font-family:inherit; box-sizing:border-box; outline:none;
+}
+.bk-form input:focus, .bk-form select:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(99,102,241,.12); }
+.bk-form .field label { display:block; font-size:12px; font-weight:500; color:var(--text-2); margin-bottom:5px; }
+.bk-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media (max-width:620px){ .bk-grid { grid-template-columns:1fr; } }
+</style>
+
+<p style="margin:0 0 18px"><a href="/admin" style="color:var(--accent);text-decoration:none;font-size:13px">← Admin</a></p>
+
+<div style="display:flex;flex-direction:column;gap:20px">
+
+  <!-- Destination -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 style="font-size:13px;font-weight:600;margin:0">Off-site backup destination</h2>
+        <div style="font-size:12px;color:var(--text-3);margin-top:2px">
+          Where encrypted backups of the keypair and databases are copied. Local snapshots always run; a
+          destination protects you against losing the whole server.
+        </div>
+      </div>
+      <form method="post" action="/admin/backup/test" style="margin:0;flex-shrink:0">
+        <button type="submit" class="btn btn-ghost btn-sm">Test connection</button>
+      </form>
+    </div>
+
+    <form method="post" action="/admin/backup/save" class="bk-form">
+      <div style="padding:18px;display:flex;flex-direction:column;gap:16px">
+
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#0F172A;border-radius:8px">
+          <label style="position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;margin:0">
+            <input type="checkbox" name="enabled" value="1" {% if cfg.enabled %}checked{% endif %}
+                   style="opacity:0;width:0;height:0">
+            <span style="position:absolute;inset:0;cursor:pointer;background:{{ '#3B82F6' if cfg.enabled else '#334155' }};border-radius:20px"></span>
+          </label>
+          <div>
+            <div style="font-weight:600;font-size:13px;color:#F1F5F9">Off-site copy {{ 'enabled' if cfg.enabled else 'disabled' }}</div>
+            <div style="font-size:11px;color:#64748B;margin-top:2px">When on, each backup is uploaded to the destination below</div>
+          </div>
+        </div>
+
+        <input type="hidden" name="provider" value="s3">
+
+        <!-- S3-compatible object storage — configured entirely here, no server access needed -->
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div id="provider-help" style="font-size:12px;color:var(--text-2);line-height:1.6;background:#F8FAFC;border:1px solid var(--border-md);border-radius:8px;padding:10px 12px"></div>
+          <div class="bk-grid">
+            <div class="field">
+              <label>S3 provider</label>
+              <select name="s3_provider" id="s3_provider" onchange="syncS3Preset()">
+                <option value="aws" {% if cfg.s3_provider=='aws' %}selected{% endif %}>Amazon S3</option>
+                <option value="wasabi" {% if cfg.s3_provider=='wasabi' %}selected{% endif %}>Wasabi</option>
+                <option value="b2" {% if cfg.s3_provider=='b2' %}selected{% endif %}>Backblaze B2 (S3)</option>
+                <option value="spaces" {% if cfg.s3_provider=='spaces' %}selected{% endif %}>DigitalOcean Spaces</option>
+                <option value="minio" {% if cfg.s3_provider=='minio' %}selected{% endif %}>MinIO / custom</option>
+                <option value="custom" {% if cfg.s3_provider=='custom' %}selected{% endif %}>Other (custom endpoint)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Region</label>
+              <input type="text" name="s3_region" id="s3_region" value="{{ cfg.s3_region }}" placeholder="us-east-1">
+            </div>
+          </div>
+          <div class="field" id="endpoint-field">
+            <label>Endpoint URL <span style="font-weight:400;color:var(--text-3)">— leave blank for AWS / auto by region</span></label>
+            <input type="text" name="s3_endpoint" id="s3_endpoint" value="{{ cfg.s3_endpoint }}" placeholder="https://s3.us-east-1.wasabisys.com">
+          </div>
+          <div class="bk-grid">
+            <div class="field">
+              <label>Bucket</label>
+              <input type="text" name="s3_bucket" value="{{ cfg.s3_bucket }}" placeholder="my-rustdesk-backups">
+            </div>
+            <div class="field">
+              <label>Prefix / folder <span style="font-weight:400;color:var(--text-3)">— optional</span></label>
+              <input type="text" name="s3_prefix" value="{{ cfg.s3_prefix }}" placeholder="rustdesk/">
+            </div>
+          </div>
+          <div class="bk-grid">
+            <div class="field">
+              <label>Access key ID</label>
+              <input type="text" name="s3_access_key" value="{{ cfg.s3_access_key }}" autocomplete="off">
+            </div>
+            <div class="field">
+              <label>Secret access key <span style="font-weight:400;color:var(--text-3)">{% if cfg.s3_secret_set %}— leave blank to keep current{% endif %}</span></label>
+              <input type="password" name="s3_secret_key" autocomplete="off" placeholder="{{ '••••••••' if cfg.s3_secret_set else '' }}">
+            </div>
+          </div>
+        </div>
+
+        <div class="bk-grid">
+          <div class="field">
+            <label>Encryption passphrase <span style="font-weight:400;color:var(--text-3)">{% if cfg.passphrase_set %}— leave blank to keep current{% else %}— optional, recommended for off-site{% endif %}</span></label>
+            <input type="password" name="passphrase" autocomplete="off" placeholder="{{ '••••••••' if cfg.passphrase_set else 'gpg AES-256' }}">
+          </div>
+          <div class="field">
+            <label>Keep this many local archives</label>
+            <input type="number" name="retention" min="1" max="365" value="{{ cfg.retention }}">
+          </div>
+        </div>
+
+        <div><button type="submit" class="btn btn-primary btn-sm">Save destination</button></div>
+      </div>
+    </form>
+  </div>
+
+  <!-- Archives -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 style="font-size:13px;font-weight:600;margin:0">Local archives</h2>
+        <div style="font-size:12px;color:var(--text-3);margin-top:2px">
+          {% if backup_status and backup_status.ok %}Last backup {{ backup_status.at | localtime }} · {{ backup_status.size_human }}{% else %}Keypair + databases. Nightly at 03:30 UTC.{% endif %}
+        </div>
+      </div>
+      <form method="post" action="/admin/backup/run" style="margin:0;flex-shrink:0"
+            onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Backing up…'">
+        <button type="submit" class="btn btn-primary btn-sm">Back up now</button>
+      </form>
+    </div>
+    {% if archives %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Archive</th><th>Size</th><th>Created (UTC)</th><th></th></tr></thead>
+        <tbody>
+        {% for a in archives %}
+          <tr>
+            <td class="mono text-sm" style="word-break:break-all">{{ a.file }}{% if a.encrypted %} <span class="badge badge-built">encrypted</span>{% endif %}</td>
+            <td class="text-sm text-muted">{{ a.size_human }}</td>
+            <td class="text-sm text-muted mono" style="white-space:nowrap">{{ a.modified }}</td>
+            <td style="white-space:nowrap;text-align:right">
+              <a href="/admin/backup/download?archive={{ a.file }}" class="btn btn-ghost btn-sm">Download</a>
+              <form method="post" action="/admin/backup/restore" style="display:inline;margin:0"
+                    onsubmit="return confirm('Restore from {{ a.file }}?\n\nThis overwrites the server keypair and databases with this archive and restarts the relay. A safety snapshot of the current state is taken first. You may be logged out.\n\nProceed?')">
+                <input type="hidden" name="archive" value="{{ a.file }}">
+                <input type="hidden" name="confirm" value="yes">
+                <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--warning)">Restore</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card-body"><p class="text-muted text-sm" style="margin:0">No archives yet — use <strong>Back up now</strong>.</p></div>
+    {% endif %}
+    <div class="card-body" style="border-top:1px solid var(--border);padding-top:14px">
+      <p class="text-muted" style="font-size:11px;margin:0">
+        Restore takes a safety snapshot first, replaces the keypair + hbbs peer DB + dashboard DB, and restarts
+        hbbs/hbbr. Keeping the same keypair means existing clients reconnect without reconfiguration.
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function syncS3Preset() {
+  const sp = document.getElementById('s3_provider').value;
+  const ep = document.getElementById('s3_endpoint');
+  const endpointField = document.getElementById('endpoint-field');
+  const help = document.getElementById('provider-help');
+  // Endpoint placeholder hint; the server derives the real one when left blank.
+  const hints = {
+    aws: '', wasabi: 'https://s3.<region>.wasabisys.com',
+    b2: 'https://s3.<region>.backblazeb2.com', spaces: 'https://<region>.digitaloceanspaces.com',
+    minio: 'https://minio.example.com', custom: 'https://…'
+  };
+  ep.placeholder = hints[sp] || '';
+  // Per-provider setup guidance + whether the endpoint field matters.
+  const guide = {
+    aws: 'Create an S3 bucket, then an IAM user with access to it; paste its access key ID and secret below. Region = the bucket’s region (e.g. us-east-1). Leave Endpoint blank.',
+    wasabi: 'In Wasabi: create a bucket and an access key (Access Keys page). Set Region to the bucket’s region (e.g. us-east-1). Endpoint is auto-derived — leave it blank.',
+    b2: 'In Backblaze B2: create a bucket and an Application Key scoped to it. Set Region to your B2 region (e.g. us-west-004). Endpoint is auto-derived — leave it blank.',
+    spaces: 'In DigitalOcean: create a Space and a Spaces access key. Set Region to the Space’s region (e.g. nyc3). Endpoint is auto-derived — leave it blank.',
+    minio: 'Enter your MinIO (or other S3-compatible) Endpoint URL, Region if required, bucket, and access/secret keys.',
+    custom: 'Enter the S3-compatible Endpoint URL, Region, bucket, and access/secret keys for your provider.'
+  };
+  help.textContent = guide[sp] || '';
+  // Endpoint is only needed for minio/custom; show-but-optional otherwise.
+  endpointField.style.display = (sp === 'minio' || sp === 'custom') ? '' : 'none';
+}
+syncS3Preset();
+</script>
+{% endblock %}

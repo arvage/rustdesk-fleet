@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Client Groups — RustDesk Fleet{% endblock %}
+{% block page_title %}Client Groups{% endblock %}
+{% block topbar_actions %}
+  {% if 'manage_groups' in (current_user.permissions or []) %}
+  <button onclick="document.getElementById('create-modal').style.display='flex'" class="btn btn-primary btn-sm">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    New Group
+  </button>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{% if groups %}
+<div style="margin-bottom:14px">
+  <input id="group-filter" type="search" placeholder="Filter by name…"
+         oninput="filterGroups()"
+         class="filter-input" style="width:240px">
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table id="groups-table">
+      <thead>
+        <tr>
+          <th class="sortable" data-col="0" onclick="sortTable(0)">
+            Name <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="1" onclick="sortTable(1)">
+            Status <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="2" onclick="sortTable(2)">
+            Devices <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="3" onclick="sortTable(3)">
+            Online <span class="sort-icon">↕</span>
+          </th>
+          <th class="sortable" data-col="4" onclick="sortTable(4)">
+            Created <span class="sort-icon">↕</span>
+          </th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="groups-tbody">
+      {% for g in groups %}
+        <tr data-name="{{ g.display_name | lower }}">
+          <td style="font-weight:500" data-val="{{ g.display_name | lower }}">{{ g.display_name }}</td>
+          <td data-val="{{ g.status }}"><span class="badge badge-{{ g.status }}">{{ g.status }}</span></td>
+          <td data-val="{{ '%010d' % g.device_count }}">
+            <span style="font-weight:600">{{ g.device_count }}</span>
+            <span class="text-muted text-sm"> device{{ 's' if g.device_count != 1 }}</span>
+          </td>
+          <td class="group-online" data-val="0000000000" data-rids="{{ g.rustdesk_ids or '' }}">
+            <span class="badge badge-offline">
+              <span class="online-count">…</span>&nbsp;/&nbsp;<span class="online-total">{{ (g.rustdesk_ids or '').split(',') | select | list | length }}</span>&nbsp;online
+            </span>
+          </td>
+          <td data-val="{{ g.created_at | localtime('%Y-%m-%d') }}" class="text-muted text-sm">{{ g.created_at | localtime("%Y-%m-%d") }}</td>
+          <td><a href="/groups/{{ g.slug }}" class="btn btn-ghost btn-sm">View →</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div id="no-results" style="display:none;padding:40px;text-align:center;color:var(--text-3);font-size:13px">
+    No groups match your filter.
+  </div>
+</div>
+{% else %}
+<div class="card"><div class="card-body">
+  <div class="empty">
+    <div class="empty-icon">👥</div>
+    <p>No client groups yet.</p>
+    <p>Create one to start building installers.</p>
+  </div>
+</div></div>
+{% endif %}
+
+<!-- Create group modal -->
+<div id="create-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h2 style="font-size:16px;font-weight:700">Create Client Group</h2>
+      <button onclick="document.getElementById('create-modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">✕</button>
+    </div>
+    <form method="post" action="/groups">
+      <div class="field" style="margin-bottom:14px">
+        <label for="slug">Slug</label>
+        <input type="text" id="slug" name="slug" placeholder="acme-corp"
+               pattern="[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]" required style="width:100%">
+        <span class="hint">Lowercase letters, digits, hyphens · 3–50 chars</span>
+      </div>
+      <div class="field" style="margin-bottom:14px">
+        <label for="display_name">Display Name</label>
+        <input type="text" id="display_name" name="display_name" placeholder="Acme Corp" required style="width:100%">
+      </div>
+      <div class="field" style="margin-bottom:20px">
+        <label for="create-pw">Unattended Access Password</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="password" id="create-pw" name="unattended_password"
+                 placeholder="Optional — embedded in installer"
+                 autocomplete="new-password" style="width:100%">
+          <button type="button" onclick="var f=document.getElementById('create-pw');f.type=f.type==='password'?'text':'password'"
+                  title="Show/hide"
+                  style="background:none;border:1px solid var(--border-md);border-radius:var(--radius-sm);
+                         padding:6px 8px;cursor:pointer;color:var(--text-3);flex-shrink:0">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                 style="width:16px;height:16px;display:block">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+        <span class="hint">Leave blank if not needed. Can be set later in group settings.</span>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" onclick="document.getElementById('create-modal').style.display='none'" class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Group</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+let sortCol = -1, sortAsc = true;
+
+// ── Real-time online counts per group (same source as the Devices page) ──────
+const STATUS_POLL_MS = 10000;
+
+async function refreshGroupStatus() {
+  try {
+    const res = await fetch('/api/devices/status');
+    if (!res.ok) return;
+    const { devices } = await res.json();
+    document.querySelectorAll('td.group-online').forEach(td => {
+      const rids = td.dataset.rids ? td.dataset.rids.split(',').filter(Boolean) : [];
+      const online = rids.filter(id => devices[id] === 'online' || devices[id] === 'in session').length;
+      td.querySelector('.online-count').textContent = online;
+      td.querySelector('.badge').className = online > 0 ? 'badge badge-active' : 'badge badge-offline';
+      td.dataset.val = String(online).padStart(10, '0');
+    });
+  } catch (_) {}
+}
+
+refreshGroupStatus();
+setInterval(refreshGroupStatus, STATUS_POLL_MS);
+
+function filterGroups() {
+  const q = document.getElementById('group-filter').value.toLowerCase();
+  const rows = document.querySelectorAll('#groups-tbody tr');
+  let visible = 0;
+  rows.forEach(row => {
+    const match = row.dataset.name.includes(q);
+    row.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  document.getElementById('no-results').style.display = visible ? 'none' : 'block';
+}
+
+function sortTable(col) {
+  if (sortCol === col) {
+    sortAsc = !sortAsc;
+  } else {
+    sortCol = col;
+    sortAsc = true;
+  }
+
+  // Update header icons
+  document.querySelectorAll('#groups-table th.sortable').forEach((th, i) => {
+    const icon = th.querySelector('.sort-icon');
+    if (i === col) {
+      icon.textContent = sortAsc ? '↑' : '↓';
+      th.style.color = 'var(--text-1)';
+    } else {
+      icon.textContent = '↕';
+      th.style.color = '';
+    }
+  });
+
+  const tbody = document.getElementById('groups-tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  rows.sort((a, b) => {
+    const av = a.querySelectorAll('td')[col]?.dataset.val ?? '';
+    const bv = b.querySelectorAll('td')[col]?.dataset.val ?? '';
+    return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+  rows.forEach(r => tbody.appendChild(r));
+}
+</script>
+{% endblock %}

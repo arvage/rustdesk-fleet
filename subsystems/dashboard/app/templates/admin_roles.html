@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Roles &amp; Permissions — RustDesk Fleet{% endblock %}
+{% block page_title %}Roles &amp; Permissions{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% block content %}
+<style>
+.perm-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:8px 20px; }
+.perm-item { display:flex; gap:8px; align-items:flex-start; padding:6px 0; }
+.perm-item input { margin-top:3px; flex-shrink:0; }
+.perm-item .lbl { font-size:13px; color:var(--text-1); font-weight:500; }
+.perm-item .desc { font-size:11px; color:var(--text-3); }
+.perm-sec { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3); margin:14px 0 4px; }
+.role-card input[type=text], .role-card textarea {
+  width:100%; padding:7px 11px; border:1px solid var(--border-md); border-radius:var(--radius-sm);
+  font-size:13px; background:var(--surface); color:var(--text-1); box-sizing:border-box; font-family:inherit;
+}
+</style>
+
+<p style="margin:0 0 18px"><a href="/admin" style="color:var(--accent);text-decoration:none;font-size:13px">← Admin</a></p>
+
+<p class="text-muted text-sm" style="margin:0 0 18px;max-width:720px">
+  A role is a permission level you assign to users on the <a href="/users" style="color:var(--accent);text-decoration:none">Users</a> page.
+  Viewing the fleet, sessions and logs is always allowed; the capabilities below gate who can <em>change</em> things.
+  A role with nothing checked is effectively read-only.
+</p>
+
+{% for r in roles %}
+<div class="card role-card" style="margin-bottom:16px">
+  <div class="card-header">
+    <div>
+      <h2 style="font-size:14px;font-weight:600;margin:0;display:flex;align-items:center;gap:8px">
+        {{ r.name }}
+        {% if r.is_system %}<span class="badge badge-offline">built-in</span>{% endif %}
+        {% if r.locked %}<span class="badge badge-pending">all permissions</span>{% endif %}
+      </h2>
+      <div style="font-size:12px;color:var(--text-3);margin-top:2px">
+        key <code>{{ r.key }}</code> · {{ r.users }} user{{ 's' if r.users != 1 }}{% if r.description %} · {{ r.description }}{% endif %}
+      </div>
+    </div>
+    {% if not r.is_system %}
+    <form method="post" action="/admin/roles/{{ r.key }}/delete" style="margin:0"
+          onsubmit="return confirm('Delete the role {{ r.name }}?')">
+      <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)"
+              {% if r.users %}disabled title="Reassign its {{ r.users }} user(s) first"{% endif %}>Delete</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if r.locked %}
+  <div class="card-body">
+    <p class="text-muted text-sm" style="margin:0">
+      The Administrator role always has every capability and can't be edited — so you can never lock yourself out of managing roles or users.
+    </p>
+  </div>
+  {% else %}
+  <form method="post" action="/admin/roles/{{ r.key }}/update">
+    <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:14px">
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:5px">Name</label>
+          <input type="text" name="name" value="{{ r.name }}"></div>
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:5px">Description</label>
+          <input type="text" name="description" value="{{ r.description }}"></div>
+      </div>
+      {% for section, caps in sections %}
+      <div class="perm-sec">{{ section }}</div>
+      <div class="perm-grid">
+        {% for key, label, desc, sec in caps %}
+        <label class="perm-item">
+          <input type="checkbox" name="perms" value="{{ key }}" {% if key in r.perms %}checked{% endif %}>
+          <span><span class="lbl">{{ label }}</span><br><span class="desc">{{ desc }}</span></span>
+        </label>
+        {% endfor %}
+      </div>
+      {% endfor %}
+      <div><button type="submit" class="btn btn-primary btn-sm">Save {{ r.name }}</button></div>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endfor %}
+
+<!-- Create role -->
+<div class="card" style="margin-top:4px">
+  <div class="card-header"><div><h2 style="font-size:14px;font-weight:600;margin:0">Create a role</h2>
+    <div style="font-size:12px;color:var(--text-3);margin-top:2px">A new permission level you can assign to users.</div></div></div>
+  <form method="post" action="/admin/roles">
+    <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:14px">
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:5px">Name</label>
+          <input type="text" name="name" placeholder="e.g. Senior technician" required></div>
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:5px">Description</label>
+          <input type="text" name="description" placeholder="optional"></div>
+      </div>
+      {% for section, caps in sections %}
+      <div class="perm-sec">{{ section }}</div>
+      <div class="perm-grid">
+        {% for key, label, desc, sec in caps %}
+        <label class="perm-item">
+          <input type="checkbox" name="perms" value="{{ key }}">
+          <span><span class="lbl">{{ label }}</span><br><span class="desc">{{ desc }}</span></span>
+        </label>
+        {% endfor %}
+      </div>
+      {% endfor %}
+      <div><button type="submit" class="btn btn-primary btn-sm">Create role</button></div>
+    </div>
+  </form>
+</div>
+{% endblock %}

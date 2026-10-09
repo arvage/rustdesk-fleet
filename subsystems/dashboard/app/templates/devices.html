@@ -1,0 +1,613 @@
+{% extends "base.html" %}
+{% block title %}Devices — RustDesk Fleet{% endblock %}
+{% block page_title %}Devices{% endblock %}
+{% block topbar_actions %}
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span id="status-indicator" class="text-muted text-sm" style="display:flex;align-items:center;gap:5px">
+      <span id="status-dot" style="width:7px;height:7px;border-radius:50%;background:#94A3B8;flex-shrink:0;display:inline-block"></span>
+      <span id="status-label">Checking…</span>
+    </span>
+    <select onchange="window.location='/devices'+(this.value?'?group='+this.value:'')"
+            style="padding:5px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);color:var(--text-1);cursor:pointer">
+      <option value="" {% if not active_group %}selected{% endif %}>All groups</option>
+      {% for g in groups %}
+      <option value="{{ g.slug }}" {% if active_group == g.slug %}selected{% endif %}>{{ g.display_name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+{% endblock %}
+
+{% block content_class %}content-wide{% endblock %}
+
+{% block content %}
+{% set can_devices = 'manage_devices' in (current_user.permissions or []) %}
+<div style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <span class="text-muted text-sm" id="device-count-label">
+    {{ devices|length }} device{{ 's' if devices|length != 1 }}{% if active_group %} in <strong>{{ active_group }}</strong>{% endif %}
+    &nbsp;·&nbsp; <span id="peer-count">{{ peer_count }}</span> registered with server
+  </span>
+  <input id="device-filter" type="search" placeholder="Filter by ID, IP, label, group…"
+         oninput="filterDevices()"
+         class="filter-input" style="width:280px">
+</div>
+
+<div class="card" id="devices-card">
+  <div class="table-wrap">
+    <table id="devices-table" class="device-table">
+      <thead>
+        <tr>
+          <th class="sortable" onclick="sortDevices(0)">RustDesk ID <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(1)">Label <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(2)">Computer <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(3)">OS <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(4)">IP <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(5)">Status <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(6)">Client Group <span class="sort-icon">↕</span></th>
+          <th class="sortable col-registered" onclick="sortDevices(7)">Registered <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(8)">Last Seen <span class="sort-icon">↕</span></th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="devices-tbody">
+      {% for d in devices %}
+        <tr data-rid="{{ d.rustdesk_id }}"
+            data-search="{{ d.rustdesk_id }} {{ d.label }} {{ d.ip }} {{ d.group_name or '' }} {{ d.hostname }} {{ d.username }} {{ d.os_name }}"
+            data-info="{{ d | tojson | forceescape }}">
+          <td data-val="{{ d.rustdesk_id }}" style="white-space:nowrap">
+            <code>{{ d.rustdesk_id | format_rid }}</code>
+            <button class="btn-copy" onclick="copyText('{{ d.rustdesk_id }}', this)" title="Copy ID">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </td>
+          <td data-val="{{ d.label | lower }}">
+            {% if d.label %}<span style="font-weight:500">{{ d.label }}</span>
+            {% else %}<span class="text-muted text-sm">—</span>{% endif %}
+          </td>
+          <td data-val="{{ d.hostname | lower }}"></td>
+          <td data-val="{{ d.os_name | lower }}"></td>
+          <td data-val="{{ d.ip }}" class="text-muted text-sm mono">{{ d.ip }}</td>
+          <td data-val="{{ d.status or 'unknown' }}">
+            <span id="status-{{ d.rustdesk_id }}"
+                  class="badge badge-{{ 'active' if d.status == 'registered' else (d.status or 'unknown') }}">
+              {{ d.status or 'unknown' }}
+            </span>
+          </td>
+          <td data-val="{{ d.group_name | lower if d.group_name else 'zzz' }}">
+            {% if d.group_name %}
+            <a href="/groups/{{ d.group_slug }}" style="color:var(--accent);text-decoration:none;font-size:13px">{{ d.group_name }}</a>
+            {% else %}<span class="text-muted text-sm">—</span>{% endif %}
+          </td>
+          <td data-val="{{ d.registered_at or '' }}" class="text-muted text-sm col-registered">{{ d.registered_at | localtime if d.registered_at else '—' }}</td>
+          <td data-val="{{ d.last_seen or '' }}" class="text-muted text-sm">{{ d.last_seen | localtime if d.last_seen else '—' }}</td>
+          <td style="white-space:nowrap">
+            <button onclick="openDetailModal('{{ d.rustdesk_id }}')"
+                    class="btn btn-ghost btn-sm" title="View all details" aria-label="Details">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
+                <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+              </svg>
+            </button>
+            <a href="rustdesk://{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm"
+               title="Connect via RustDesk" aria-label="Connect" style="color:#2563EB">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
+                <path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.82v6.36a1 1 0 0 1-1.447.894L15 14"/>
+                <rect x="1" y="6" width="15" height="12" rx="2"/>
+              </svg>
+            </a>
+            {% if can_devices %}
+            <button data-edit onclick="openDeviceModal('{{ d.rustdesk_id }}', '{{ d.label | e }}', '{{ d.group_id or '' }}')"
+                    class="btn btn-ghost btn-sm">Edit</button>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div id="no-device-results" style="display:none;padding:40px;text-align:center;color:var(--text-3);font-size:13px">
+    No devices match your filter.
+  </div>
+</div>
+
+<!-- Device edit modal -->
+<div id="device-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px"
+     onclick="if(event.target===this)closeDeviceModal()">
+  <div style="background:#fff;border-radius:14px;padding:28px 28px 22px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.22)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <h2 style="font-size:16px;font-weight:700;margin:0">Edit Device</h2>
+      <button onclick="closeDeviceModal()"
+              style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1;padding:0">✕</button>
+    </div>
+    <div style="margin-bottom:18px;padding:9px 12px;background:#F8FAFC;border:1px solid var(--border-lt);border-radius:8px">
+      <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Device ID</span>
+      <div><code id="modal-rid" style="font-size:13px;color:var(--text-1);letter-spacing:.04em"></code></div>
+    </div>
+    <div id="modal-info" hidden
+         style="margin:-8px 0 18px;padding:9px 12px;background:#F8FAFC;border:1px solid var(--border-lt);border-radius:8px;font-size:12px">
+      <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Reported by device</span>
+      <table id="modal-info-table" style="width:100%;margin-top:4px;font-size:12px"></table>
+    </div>
+    <form id="device-edit-form" method="post">
+      <div class="field" style="margin-bottom:14px">
+        <label for="modal-label">Label</label>
+        <input type="text" id="modal-label" name="label"
+               placeholder="e.g. Reception, HR, Server Room…"
+               style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);box-sizing:border-box">
+      </div>
+      <div class="field" style="margin-bottom:22px">
+        <label for="modal-group">Client Group</label>
+        <select id="modal-group" name="group_id"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);box-sizing:border-box">
+          <option value="">— Unassigned —</option>
+          {% for g in groups %}
+          <option value="{{ g.id }}">{{ g.display_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button type="button" onclick="confirmDelete()"
+                class="btn btn-ghost btn-sm" style="color:#EF4444;padding:7px 12px">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+               style="width:13px;height:13px;display:inline;vertical-align:-2px;margin-right:3px">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            <path d="M10 11v6m4-6v6"/>
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+          </svg>
+          Delete
+        </button>
+        <div style="flex:1"></div>
+        <button type="button" onclick="closeDeviceModal()" class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+<form id="device-delete-form" method="post" style="display:none"></form>
+
+<!-- Device detail (read-only) modal -->
+<div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px"
+     onclick="if(event.target===this)closeDetailModal()">
+  <div style="background:#fff;border-radius:14px;padding:28px 28px 22px;width:100%;max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,.22);max-height:90vh;overflow:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <h2 style="font-size:16px;font-weight:700;margin:0">Device Details</h2>
+      <button onclick="closeDetailModal()"
+              style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1;padding:0">✕</button>
+    </div>
+    <div style="margin-bottom:16px;padding:9px 12px;background:#F8FAFC;border:1px solid var(--border-lt);border-radius:8px">
+      <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Device ID</span>
+      <div style="display:flex;align-items:center;gap:6px">
+        <code id="detail-rid" style="font-size:13px;color:var(--text-1);letter-spacing:.04em"></code>
+        <button class="btn-copy" id="detail-rid-copy" title="Copy ID">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </div>
+    </div>
+    <div id="detail-notreporting" hidden
+         style="margin-bottom:16px;padding:9px 12px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;font-size:12px;color:#92400E">
+      This device hasn't reported its details yet — it may be offline, or running an older client that doesn't report over the current channel.
+    </div>
+    <table id="detail-table" style="width:100%;font-size:13px;border-collapse:collapse"></table>
+    <div id="detail-sessions"></div>
+  </div>
+</div>
+
+
+
+<script>
+// ── SVG snippets reused when building rows ───────────────────────────────────
+const SVG_COPY = `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+const SVG_VIDEO = `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.82v6.36a1 1 0 0 1-1.447.894L15 14"/><rect x="1" y="6" width="15" height="12" rx="2"/></svg>`;
+const SVG_INFO = `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`;
+const CAN_EDIT = {{ 'true' if can_devices else 'false' }};
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) { return esc(s).replace(/'/g,'&#39;'); }
+function toLA(utcStr) {
+  if (!utcStr || utcStr === '—') return utcStr || '—';
+  try {
+    const d = new Date(String(utcStr).replace(' ', 'T').replace(/Z?$/, 'Z'));
+    return d.toLocaleString('sv-SE', { timeZone: 'America/Los_Angeles' }).slice(0, 16);
+  } catch(e) { return utcStr; }
+}
+function formatRid(id) {
+  return /^\d+$/.test(id) ? id.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') : id;
+}
+
+// ── Client-reported details (hostname, OS, …) ────────────────────────────────
+function searchText(d) {
+  return [d.rustdesk_id, d.label, d.ip, d.group_name, d.hostname, d.username, d.os_name]
+    .filter(Boolean).join(' ');
+}
+const NOT_REPORTING = `<span class="text-muted text-sm" title="This device hasn't reported its details (offline, or an older client)">—</span>`;
+function computerCell(d) {
+  if (!d.hostname) return NOT_REPORTING;
+  const hw = [d.cpu_name, d.cores, d.ram && d.ram + ' RAM'].filter(Boolean).join('\n');
+  return `<div style="font-weight:500" title="${esc(hw)}">${esc(d.hostname)}</div>`
+    + (d.username ? `<div class="text-muted" style="font-size:11px">${esc(d.username)}</div>` : '');
+}
+function osCell(d) {
+  if (!d.os_name) return NOT_REPORTING;
+  const ver = d.client_version
+    ? (d.client_outdated
+        ? `<span style="color:#B45309" title="Older than the version your installers use — rebuild and reinstall to update">RustDesk ${esc(d.client_version)} ⚠</span>`
+        : `RustDesk ${esc(d.client_version)}`)
+    : '';
+  const sub = [d.os_build && 'build ' + esc(d.os_build), ver].filter(Boolean).join(' · ');
+  return `<div class="text-sm">${esc(d.os_name)}</div>`
+    + (sub ? `<div class="text-muted" style="font-size:11px">${sub}</div>` : '');
+}
+
+// Fill the client-reported cells of server-rendered rows
+document.querySelectorAll('#devices-tbody tr[data-info]').forEach(tr => {
+  try {
+    const d = JSON.parse(tr.dataset.info);
+    const cells = tr.querySelectorAll('td');
+    cells[2].innerHTML = computerCell(d);
+    cells[3].innerHTML = osCell(d);
+  } catch (_) {}
+});
+
+// ── Build a table row HTML string from a device object ───────────────────────
+function buildRow(d) {
+  const rid = d.rustdesk_id;
+  const label = d.label || '';
+  const ip = d.ip || '—';
+  const st = d.status || 'unknown';
+  const stClass = st === 'registered' ? 'active' : st;
+  const groupCell = d.group_name
+    ? `<a href="/groups/${esc(d.group_slug)}" style="color:var(--accent);text-decoration:none;font-size:13px">${esc(d.group_name)}</a>`
+    : `<span class="text-muted text-sm">—</span>`;
+
+  return `<tr data-rid="${rid}" data-search="${esc(searchText(d))}" data-info="${esc(JSON.stringify(d))}">
+    <td data-val="${rid}" style="white-space:nowrap">
+      <code>${formatRid(rid)}</code>
+      <button class="btn-copy" onclick="copyText('${rid}', this)" title="Copy ID">${SVG_COPY}</button>
+    </td>
+    <td data-val="${esc(label.toLowerCase())}">
+      ${label ? `<span style="font-weight:500">${esc(label)}</span>` : `<span class="text-muted text-sm">—</span>`}
+    </td>
+    <td data-val="${esc((d.hostname || '').toLowerCase())}">${computerCell(d)}</td>
+    <td data-val="${esc((d.os_name || '').toLowerCase())}">${osCell(d)}</td>
+    <td data-val="${esc(ip)}" class="text-muted text-sm mono">${esc(ip)}</td>
+    <td data-val="${st}">
+      <span id="status-${rid}" class="badge badge-${stClass}">${st}</span>
+    </td>
+    <td data-val="${d.group_name ? esc(d.group_name.toLowerCase()) : 'zzz'}">${groupCell}</td>
+    <td data-val="${esc(d.registered_at)}" class="text-muted text-sm col-registered">${toLA(d.registered_at)}</td>
+    <td data-val="${esc(d.last_seen)}" class="text-muted text-sm">${toLA(d.last_seen)}</td>
+    <td style="white-space:nowrap">
+      <button onclick="openDetailModal('${rid}')" class="btn btn-ghost btn-sm" title="View all details" aria-label="Details">${SVG_INFO}</button>
+      <a href="rustdesk://${rid}" class="btn btn-ghost btn-sm" title="Connect via RustDesk" aria-label="Connect" style="color:#2563EB">${SVG_VIDEO}</a>
+      ${CAN_EDIT ? `<button data-edit onclick="openDeviceModal('${rid}','${escAttr(label)}','${d.group_id ?? ''}')" class="btn btn-ghost btn-sm">Edit</button>` : ''}
+    </td>
+  </tr>`;
+}
+
+// ── Update a row's non-status cells in place ─────────────────────────────────
+function patchRow(tr, d) {
+  const label = d.label || '';
+  const ip = d.ip || '—';
+  tr.dataset.search = searchText(d);
+  tr.dataset.info = JSON.stringify(d);
+
+  const cells = tr.querySelectorAll('td');
+
+  // Computer / OS (client-reported)
+  cells[2].dataset.val = (d.hostname || '').toLowerCase();
+  cells[2].innerHTML = computerCell(d);
+  cells[3].dataset.val = (d.os_name || '').toLowerCase();
+  cells[3].innerHTML = osCell(d);
+
+  // Label
+  cells[1].dataset.val = label.toLowerCase();
+  cells[1].innerHTML = label
+    ? `<span style="font-weight:500">${esc(label)}</span>`
+    : `<span class="text-muted text-sm">—</span>`;
+
+  // IP
+  cells[4].textContent = ip;
+  cells[4].dataset.val = ip;
+
+  // Group (skip status cell[5] — status poller owns it)
+  cells[6].dataset.val = d.group_name ? d.group_name.toLowerCase() : 'zzz';
+  cells[6].innerHTML = d.group_name
+    ? `<a href="/groups/${esc(d.group_slug)}" style="color:var(--accent);text-decoration:none;font-size:13px">${esc(d.group_name)}</a>`
+    : `<span class="text-muted text-sm">—</span>`;
+
+  // Registered
+  cells[7].textContent = toLA(d.registered_at);
+  cells[7].dataset.val = d.registered_at || '';
+
+  // Last seen
+  cells[8].textContent = toLA(d.last_seen);
+  cells[8].dataset.val = d.last_seen || '';
+
+  // Edit button onclick (label or group may have changed)
+  const editBtn = cells[9].querySelector('button[data-edit]');
+  if (editBtn) editBtn.setAttribute('onclick',
+    `openDeviceModal('${d.rustdesk_id}','${escAttr(label)}','${d.group_id ?? ''}')`);
+}
+
+// ── Main table refresh ───────────────────────────────────────────────────────
+const DEVICES_POLL_MS = 30000;
+const activeGroup = new URLSearchParams(location.search).get('group') || '';
+
+async function refreshDevices() {
+  try {
+    const url = '/api/devices' + (activeGroup ? `?group=${encodeURIComponent(activeGroup)}` : '');
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const { devices, peer_count } = await res.json();
+
+    const tbody = document.getElementById('devices-tbody');
+    if (!tbody) return;
+
+    // Index new data
+    const newMap = new Map(devices.map(d => [d.rustdesk_id, d]));
+
+    // Remove rows that disappeared
+    tbody.querySelectorAll('tr[data-rid]').forEach(tr => {
+      if (!newMap.has(tr.dataset.rid)) tr.remove();
+    });
+
+    // Update existing / add new
+    const existing = new Map(
+      Array.from(tbody.querySelectorAll('tr[data-rid]')).map(tr => [tr.dataset.rid, tr])
+    );
+    devices.forEach(d => {
+      const tr = existing.get(d.rustdesk_id);
+      if (tr) {
+        patchRow(tr, d);
+      } else {
+        tbody.insertAdjacentHTML('beforeend', buildRow(d));
+      }
+    });
+
+    // Update peer count
+    const pc = document.getElementById('peer-count');
+    if (pc) pc.textContent = peer_count;
+
+    // Update device count label
+    const cl = document.getElementById('device-count-label');
+    if (cl) {
+      const n = devices.length;
+      const suffix = activeGroup ? ` in <strong>${esc(activeGroup)}</strong>` : '';
+      cl.innerHTML = `${n} device${n !== 1 ? 's' : ''}${suffix} &nbsp;·&nbsp; <span id="peer-count">${peer_count}</span> registered with server`;
+    }
+
+    // Re-apply status badges from cache
+    applyStatuses(_statusCache);
+
+    // Re-apply active sort
+    if (sortCol >= 0) _applySort();
+
+    // Re-apply filter
+    filterDevices();
+
+    // Show/hide empty state
+    const empty = tbody.querySelectorAll('tr[data-rid]').length === 0;
+    document.getElementById('no-device-results').style.display =
+      (empty && !document.getElementById('device-filter').value) ? 'none' : '';
+  } catch (_) {}
+}
+
+setInterval(refreshDevices, DEVICES_POLL_MS);
+
+// ── Real-time status polling ─────────────────────────────────────────────────
+const STATUS_POLL_MS = 10000;
+let _statusCache = {};
+
+function applyStatuses(statusMap) {
+  let online = 0, total = 0;
+  for (const [id, st] of Object.entries(statusMap)) {
+    total++;
+    if (st === 'online' || st === 'in session') online++;
+    const el = document.getElementById('status-' + id);
+    if (el) {
+      el.className = st === 'online' ? 'badge badge-active'
+                   : st === 'in session' ? 'badge badge-signed' : 'badge badge-offline';
+      el.textContent = st;
+      const td = el.closest('td');
+      if (td) td.dataset.val = st;
+    }
+  }
+  const dot = document.getElementById('status-dot');
+  const lbl = document.getElementById('status-label');
+  if (dot && lbl) {
+    dot.style.background = online > 0 ? '#10B981' : '#94A3B8';
+    lbl.textContent = total ? `${online} / ${total} online` : 'No devices';
+  }
+}
+
+async function refreshStatus() {
+  try {
+    const res = await fetch('/api/devices/status');
+    if (!res.ok) return;
+    const { devices } = await res.json();
+    _statusCache = devices;
+    applyStatuses(_statusCache);
+  } catch (_) {}
+}
+
+refreshStatus();
+setInterval(refreshStatus, STATUS_POLL_MS);
+
+// ── Sort & filter ────────────────────────────────────────────────────────────
+let sortCol = -1, sortAsc = true;
+
+function filterDevices() {
+  const q = (document.getElementById('device-filter')?.value || '').toLowerCase();
+  const tbody = document.getElementById('devices-tbody');
+  if (!tbody) return;
+  let visible = 0;
+  tbody.querySelectorAll('tr[data-rid]').forEach(row => {
+    const match = !q || row.dataset.search.toLowerCase().includes(q);
+    row.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  document.getElementById('no-device-results').style.display = visible ? 'none' : 'block';
+}
+
+function _applySort() {
+  const tbody = document.getElementById('devices-tbody');
+  if (!tbody) return;
+  const rows = Array.from(tbody.querySelectorAll('tr[data-rid]'));
+  rows.sort((a, b) => {
+    const av = a.querySelectorAll('td')[sortCol]?.dataset.val ?? '';
+    const bv = b.querySelectorAll('td')[sortCol]?.dataset.val ?? '';
+    return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+  rows.forEach(r => tbody.appendChild(r));
+}
+
+function sortDevices(col) {
+  sortAsc = sortCol === col ? !sortAsc : true;
+  sortCol = col;
+  document.querySelectorAll('#devices-table th.sortable').forEach((th, i) => {
+    const icon = th.querySelector('.sort-icon');
+    icon.textContent = i === col ? (sortAsc ? '↑' : '↓') : '↕';
+    th.style.color = i === col ? 'var(--text-1)' : '';
+  });
+  _applySort();
+}
+
+// ── Device edit modal ────────────────────────────────────────────────────────
+let _modalRid = '';
+
+function openDeviceModal(rid, label, groupId) {
+  _modalRid = rid;
+  document.getElementById('modal-rid').textContent = formatRid(rid);
+  let info = {};
+  try { info = JSON.parse(document.querySelector(`tr[data-rid="${rid}"]`)?.dataset.info || '{}'); } catch (_) {}
+  const rows = [
+    ['Computer', info.hostname],
+    ['User', info.username || (info.hostname ? 'nobody logged in' : '')],
+    ['OS', [info.os_name, info.os_build && `(build ${info.os_build})`].filter(Boolean).join(' ')],
+    ['CPU', [info.cpu_name, info.cores].filter(Boolean).join(' · ')],
+    ['RAM', info.ram],
+    ['RustDesk', info.client_version && (info.client_version + (info.client_outdated ? ' — older than your installers' : ''))],
+    ['Registered', info.registered_at && info.registered_at !== '—' && toLA(info.registered_at)],
+    ['Last check-in', info.heartbeat_at && toLA(info.heartbeat_at)],
+  ].filter(([, v]) => v);
+  document.getElementById('modal-info-table').innerHTML = rows.map(([k, v]) =>
+    `<tr><td style="color:var(--text-3);padding:2px 10px 2px 0;white-space:nowrap;border:none;vertical-align:top">${k}</td>`
+    + `<td style="color:var(--text-1);padding:2px 0;border:none">${esc(v)}</td></tr>`).join('');
+  document.getElementById('modal-info').hidden = rows.length === 0;
+  document.getElementById('modal-label').value = label;
+  document.getElementById('modal-group').value = groupId || '';
+  document.getElementById('device-edit-form').action = '/devices/' + rid + '/edit';
+  document.getElementById('device-delete-form').action = '/devices/' + rid + '/delete';
+  document.getElementById('device-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('modal-label').focus(), 50);
+}
+
+function closeDeviceModal() {
+  document.getElementById('device-modal').style.display = 'none';
+}
+
+// ── Device detail (read-only) modal ──────────────────────────────────────────
+function openDetailModal(rid) {
+  let d = {};
+  try { d = JSON.parse(document.querySelector(`tr[data-rid="${rid}"]`)?.dataset.info || '{}'); } catch (_) {}
+
+  document.getElementById('detail-rid').textContent = formatRid(rid);
+  document.getElementById('detail-rid-copy').onclick = function () { copyText(rid, this); };
+
+  // `reporting` is false when the client has never POSTed its sysinfo.
+  document.getElementById('detail-notreporting').hidden = !!d.reporting;
+
+  const os = [d.os_name, d.os_build && `(build ${d.os_build})`].filter(Boolean).join(' ');
+  const cpu = [d.cpu_name, d.cores].filter(Boolean).join(' · ');
+  const client = d.client_version
+    ? d.client_version + (d.client_outdated ? ' — older than your installers' : '')
+    : '';
+  const conns = (d.active_conns ?? '') === '' ? '' : String(d.active_conns);
+
+  // [label, value, isSectionHeader]
+  const rows = [
+    ['Management', '', true],
+    ['Label', d.label || '—'],
+    ['Client group', d.group_name || 'Unassigned'],
+    ['Status', d.status || 'unknown'],
+    ['IP address', d.ip && d.ip !== '—' ? d.ip : '—'],
+
+    ['Hardware & OS', '', true],
+    ['Computer', d.hostname],
+    ['Logged-in user', d.username || (d.hostname ? 'nobody logged in' : '')],
+    ['Operating system', os],
+    ['CPU', cpu],
+    ['Memory', d.ram],
+    ['RustDesk client', client],
+
+    ['Activity', '', true],
+    ['Active connections', conns],
+    ['Registered', d.registered_at && d.registered_at !== '—' ? toLA(d.registered_at) : ''],
+    ['Last seen', d.last_seen && d.last_seen !== '—' ? toLA(d.last_seen) : ''],
+    ['Last check-in', d.heartbeat_at ? toLA(d.heartbeat_at) : ''],
+    ['Details reported', d.sysinfo_at ? toLA(d.sysinfo_at) : ''],
+  ];
+
+  const html = rows.map(([k, v, hdr]) => {
+    if (hdr) {
+      return `<tr><td colspan="2" style="padding:14px 0 4px;font-size:11px;color:var(--text-3);`
+        + `text-transform:uppercase;letter-spacing:.06em;font-weight:600;border:none;`
+        + `border-bottom:1px solid var(--border-lt)">${esc(k)}</td></tr>`;
+    }
+    if (v === '' || v == null) return '';   // hide empty, non-header rows
+    return `<tr><td style="color:var(--text-3);padding:5px 12px 5px 0;white-space:nowrap;`
+      + `border:none;vertical-align:top;width:40%">${esc(k)}</td>`
+      + `<td style="color:var(--text-1);padding:5px 0;border:none;word-break:break-word">${esc(v)}</td></tr>`;
+  }).join('');
+
+  document.getElementById('detail-table').innerHTML = html;
+  loadDetailSessions(rid);
+  document.getElementById('detail-modal').style.display = 'flex';
+}
+
+function loadDetailSessions(rid) {
+  const box = document.getElementById('detail-sessions');
+  if (!box) return;
+  const head = '<tr><td colspan="3" style="padding:14px 0 4px;font-size:11px;color:var(--text-3);'
+    + 'text-transform:uppercase;letter-spacing:.06em;font-weight:600;border:none;'
+    + 'border-bottom:1px solid var(--border-lt)">Recent sessions</td></tr>';
+  box.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse">' + head
+    + '<tr><td style="padding:8px 0;border:none" class="text-muted text-sm">Loading…</td></tr></table>';
+  fetch('/api/devices/' + encodeURIComponent(rid) + '/sessions')
+    .then(r => r.ok ? r.json() : { sessions: [] })
+    .then(d => {
+      const ss = d.sessions || [];
+      let rows;
+      if (!ss.length) {
+        rows = '<tr><td style="padding:8px 0;border:none" class="text-muted text-sm">No sessions recorded.</td></tr>';
+      } else {
+        rows = ss.map(s =>
+          '<tr><td style="color:var(--text-1);padding:4px 10px 4px 0;white-space:nowrap;border:none">' + esc(toLA(s.started_at)) + '</td>'
+          + '<td style="color:var(--text-3);padding:4px 10px 4px 0;white-space:nowrap;border:none">' + esc(s.duration_str) + '</td>'
+          + '<td style="padding:4px 0;border:none;text-align:right">'
+          + (s.active ? '<span class="badge badge-active">active</span>' : '<span class="badge badge-offline">ended</span>')
+          + '</td></tr>').join('');
+      }
+      box.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse">' + head + rows + '</table>';
+    })
+    .catch(() => { box.innerHTML = ''; });
+}
+
+function closeDetailModal() {
+  document.getElementById('detail-modal').style.display = 'none';
+}
+
+function confirmDelete() {
+  const label = document.getElementById('modal-label').value.trim();
+  const name = label ? `"${label}" (${_modalRid})` : _modalRid;
+  if (confirm(`Delete ${name}?\n\nIt will be removed from the dashboard. If the device ever communicates with the server again, it will reappear automatically.`)) {
+    document.getElementById('device-delete-form').submit();
+  }
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDeviceModal(); closeDetailModal(); } });
+
+</script>
+{% endblock %}

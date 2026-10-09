@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Admin — RustDesk Fleet{% endblock %}
+{% block page_title %}Admin{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% block content %}
+
+<div class="stats" style="margin-bottom:22px">
+  <div class="stat-card"><div class="stat-label">Devices</div><div class="stat-value">{{ device_count }}</div></div>
+  <div class="stat-card"><div class="stat-label">Active sessions</div><div class="stat-value">{{ active_sessions }}</div></div>
+  <div class="stat-card"><div class="stat-label">Users</div><div class="stat-value">{{ user_count }}</div></div>
+  <div class="stat-card">
+    <div class="stat-label">Last backup</div>
+    {% if backup_status and backup_status.ok %}
+    <div class="stat-value" style="font-size:16px">{{ backup_status.at | localtime }}</div>
+    <div class="stat-sub">{{ backup_status.size_human }}{% if backup_status.offsite and backup_status.offsite.attempted and backup_status.offsite.ok %} · off-site ok{% elif not (backup_status.offsite and backup_status.offsite.attempted) %} · local only{% endif %}</div>
+    {% elif backup_status %}
+    <div class="stat-value" style="font-size:16px;color:var(--danger)">failed</div>
+    {% else %}
+    <div class="stat-value" style="font-size:16px;color:var(--text-3)">none yet</div>
+    {% endif %}
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px">
+
+  <!-- Backup & restore -->
+  <div class="card"><div class="card-body">
+    <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Backup &amp; restore</h2>
+    <p class="text-muted text-sm" style="margin:0 0 14px">
+      Configure an off-site destination (Amazon S3, Wasabi, Backblaze B2, DigitalOcean Spaces, MinIO),
+      run or download a backup, or restore the keypair and databases.
+    </p>
+    <a href="/admin/backup" class="btn btn-primary btn-sm">Open backup settings</a>
+  </div></div>
+
+  <!-- Users -->
+  <div class="card"><div class="card-body">
+    <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Users &amp; access</h2>
+    <p class="text-muted text-sm" style="margin:0 0 14px">Manage accounts, assign roles, group access and passkeys.</p>
+    <a href="/users" class="btn btn-ghost btn-sm">Manage users</a>
+  </div></div>
+
+  <!-- Roles -->
+  <div class="card"><div class="card-body">
+    <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Roles &amp; permissions</h2>
+    <p class="text-muted text-sm" style="margin:0 0 14px">Define permission levels and choose exactly what each role can do.</p>
+    <a href="/admin/roles" class="btn btn-ghost btn-sm">Manage roles</a>
+  </div></div>
+
+  <!-- Notifications -->
+  <div class="card"><div class="card-body">
+    <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Notifications &amp; alerts</h2>
+    <p class="text-muted text-sm" style="margin:0 0 14px">SMTP, event triggers, and server health alert thresholds.</p>
+    <a href="/notifications" class="btn btn-ghost btn-sm">Notification settings</a>
+  </div></div>
+
+  <!-- Export -->
+  <div class="card"><div class="card-body">
+    <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Export device inventory</h2>
+    <p class="text-muted text-sm" style="margin:0 0 14px">Download all devices (id, host, OS, group, versions, last seen) as CSV.</p>
+    <a href="/admin/export/devices.csv" class="btn btn-ghost btn-sm">Download CSV</a>
+  </div></div>
+
+  <!-- Restart relay -->
+  <div class="card"><div class="card-body">
+    <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Restart relay</h2>
+    <p class="text-muted text-sm" style="margin:0 0 14px">Restart the hbbs/hbbr containers. Active remote sessions drop briefly.</p>
+    <form method="post" action="/admin/restart-relay" style="margin:0"
+          onsubmit="return confirm('Restart hbbs/hbbr now? Active remote sessions will drop for a few seconds.')">
+      <input type="hidden" name="confirm" value="yes">
+      <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--warning)">Restart hbbs/hbbr</button>
+    </form>
+  </div></div>
+
+  <!-- Prune logs -->
+  <div class="card"><div class="card-body">
+    <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Prune logs</h2>
+    <p class="text-muted text-sm" style="margin:0 0 14px">Delete audit events older than the chosen age. Currently {{ log_count }} entries.</p>
+    <form method="post" action="/admin/logs/prune" style="display:flex;gap:8px;align-items:center;margin:0"
+          onsubmit="return confirm('Permanently delete audit log entries older than the selected age?')">
+      <select name="days" style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);color:var(--text-1)">
+        <option value="30">older than 30 days</option>
+        <option value="90" selected>older than 90 days</option>
+        <option value="180">older than 180 days</option>
+        <option value="365">older than 1 year</option>
+      </select>
+      <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Prune</button>
+    </form>
+  </div></div>
+
+</div>
+{% endblock %}

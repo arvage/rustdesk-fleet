@@ -1,0 +1,20 @@
+[Unit]
+Description=RustDesk Fleet Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/rustdesk-fleet/subsystems/dashboard
+ExecStart=/usr/local/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+EnvironmentFile=/etc/rustdesk-fleet/dashboard.env
+Environment=PYTHONPATH=/home/ubuntu/rustdesk-fleet/subsystems/single-tenant
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rustdesk-dashboard
+
+[Install]
+WantedBy=multi-user.target

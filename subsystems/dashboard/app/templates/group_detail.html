@@ -1,0 +1,697 @@
+{% extends "base.html" %}
+{% block title %}{{ group.display_name }} — RustDesk Fleet{% endblock %}
+{% block page_title %}{{ group.display_name }}{% endblock %}
+{% block topbar_actions %}
+  <span class="badge badge-{{ group.status }}">{{ group.status }}</span>
+  {% if has_password %}
+  <span class="badge" style="background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+         style="width:12px;height:12px;display:inline;margin-right:3px;vertical-align:-1px">
+      <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+    Password set
+  </span>
+  {% else %}
+  <span class="text-muted text-sm" style="font-size:12px">No unattended password</span>
+  {% endif %}
+  <span class="text-muted text-sm">Created {{ group.created_at | localtime("%Y-%m-%d") }}</span>
+  {% if 'manage_groups' in (current_user.permissions or []) %}
+  <button onclick="document.getElementById('edit-group-modal').style.display='flex'"
+          class="btn btn-ghost btn-sm">Edit</button>
+  {% endif %}
+{% endblock %}
+
+{% block content_class %}content-wide{% endblock %}
+
+{% block content %}
+{% set can_groups = 'manage_groups' in (current_user.permissions or []) %}
+<p class="text-muted text-sm" style="margin-bottom:20px">
+  <a href="/groups" style="color:inherit">Client Groups</a> / <code>{{ group.slug }}</code>
+</p>
+
+<!-- Devices -->
+<div class="section">
+  <div class="section-head">
+    <h2>Devices
+      <span class="text-muted text-sm" style="font-weight:400;margin-left:6px">{{ devices|length }} registered</span>
+      {% if devices %}
+      <span id="status-indicator" class="text-muted text-sm" style="font-weight:400;margin-left:10px;display:inline-flex;align-items:center;gap:5px">
+        <span id="status-dot" style="width:7px;height:7px;border-radius:50%;background:#94A3B8;flex-shrink:0;display:inline-block"></span>
+        <span id="status-label">Checking…</span>
+      </span>
+      {% endif %}
+    </h2>
+  </div>
+  {% if devices %}
+  <div class="card">
+    <div class="table-wrap">
+      <table class="device-table">
+        <thead>
+          <tr><th>RustDesk ID</th><th>Label</th><th>Computer</th><th>OS</th><th>IP</th><th>Status</th><th class="col-registered">Registered</th><th>Last Seen</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for d in devices %}
+          <tr{% if d.rustdesk_id %} data-rid="{{ d.rustdesk_id }}" data-info="{{ d | tojson | forceescape }}"{% endif %}>
+          <td style="white-space:nowrap">
+            <code>{{ d.rustdesk_id | format_rid if d.rustdesk_id else '—' }}</code>
+            {% if d.rustdesk_id %}
+            <button class="btn-copy" onclick="copyText('{{ d.rustdesk_id }}', this)" title="Copy ID">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+            {% endif %}
+          </td>
+            <td style="font-weight:{{ '500' if d.label else 'normal' }}">{{ d.label or '—' }}</td>
+            <td>
+              {% if d.hostname %}
+              <div style="font-weight:500" title="{{ [d.cpu_name, d.cores, (d.ram ~ ' RAM') if d.ram else ''] | select | join('\n') }}">{{ d.hostname }}</div>
+              {% if d.username %}<div class="text-muted" style="font-size:11px">{{ d.username }}</div>{% endif %}
+              {% else %}<span class="text-muted text-sm" title="This device hasn't reported its details (offline, or an older client)">—</span>{% endif %}
+            </td>
+            <td>
+              {% if d.os_name %}
+              <div class="text-sm">{{ d.os_name }}</div>
+              <div class="text-muted" style="font-size:11px">
+                {% if d.os_build %}build {{ d.os_build }}{% endif %}
+                {% if d.client_version %} · {% if d.client_outdated %}<span style="color:#B45309" title="Older than the version your installers use — rebuild and reinstall to update">RustDesk {{ d.client_version }} ⚠</span>{% else %}RustDesk {{ d.client_version }}{% endif %}{% endif %}
+              </div>
+              {% else %}<span class="text-muted text-sm">—</span>{% endif %}
+            </td>
+            <td class="text-muted text-sm mono">{{ d.ip or '—' }}</td>
+            <td>
+              {% if d.rustdesk_id %}
+              <span class="badge badge-unknown group-device-status" data-rid="{{ d.rustdesk_id }}">checking…</span>
+              {% else %}
+              <span class="badge badge-unknown">unknown</span>
+              {% endif %}
+            </td>
+            <td class="text-muted text-sm col-registered">{{ d.registered_at | localtime if d.registered_at else '—' }}</td>
+            <td class="text-muted text-sm">{{ d.last_seen | localtime if d.last_seen else '—' }}</td>
+            <td style="white-space:nowrap">
+              {% if d.rustdesk_id %}
+              <button onclick="openDetailModal('{{ d.rustdesk_id }}')" class="btn btn-ghost btn-sm"
+                      title="View all details" aria-label="Details">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
+                  <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+                </svg>
+              </button>
+              <a href="rustdesk://{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm"
+                 title="Launch RustDesk and connect" aria-label="Connect" style="color:#2563EB">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                     style="width:14px;height:14px">
+                  <path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.82v6.36a1 1 0 0 1-1.447.894L15 14"/>
+                  <rect x="1" y="6" width="15" height="12" rx="2"/>
+                </svg>
+              </a>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <script>
+  // ── Real-time status polling (same source as the Devices page) ─────────────
+  (function () {
+    const STATUS_POLL_MS = 10000;
+    async function refreshStatus() {
+      try {
+        const res = await fetch('/api/devices/status');
+        if (!res.ok) return;
+        const { devices } = await res.json();
+        let online = 0, total = 0;
+        document.querySelectorAll('.group-device-status').forEach(el => {
+          const st = devices[el.dataset.rid] || 'offline';
+          total++;
+          if (st === 'online' || st === 'in session') online++;
+          el.className = 'badge group-device-status ' + (st === 'online' ? 'badge-active'
+                         : st === 'in session' ? 'badge-signed' : 'badge-offline');
+          el.textContent = st;
+        });
+        const dot = document.getElementById('status-dot');
+        const lbl = document.getElementById('status-label');
+        if (dot && lbl) {
+          dot.style.background = online > 0 ? '#10B981' : '#94A3B8';
+          lbl.textContent = total ? `${online} / ${total} online` : 'No devices';
+        }
+      } catch (_) {}
+    }
+    refreshStatus();
+    setInterval(refreshStatus, STATUS_POLL_MS);
+  })();
+  </script>
+
+  <!-- Device detail (read-only) modal -->
+  <div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px"
+       onclick="if(event.target===this)closeDetailModal()">
+    <div style="background:#fff;border-radius:14px;padding:28px 28px 22px;width:100%;max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,.22);max-height:90vh;overflow:auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+        <h2 style="font-size:16px;font-weight:700;margin:0">Device Details</h2>
+        <button onclick="closeDetailModal()"
+                style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1;padding:0">✕</button>
+      </div>
+      <div style="margin-bottom:16px;padding:9px 12px;background:#F8FAFC;border:1px solid var(--border-lt);border-radius:8px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Device ID</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <code id="detail-rid" style="font-size:13px;color:var(--text-1);letter-spacing:.04em"></code>
+          <button class="btn-copy" id="detail-rid-copy" title="Copy ID">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="detail-notreporting" hidden
+           style="margin-bottom:16px;padding:9px 12px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;font-size:12px;color:#92400E">
+        This device hasn't reported its details yet — it may be offline, or running an older client that doesn't report over the current channel.
+      </div>
+      <table id="detail-table" style="width:100%;font-size:13px;border-collapse:collapse"></table>
+      <div id="detail-sessions"></div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    const GROUP_NAME = {{ group.display_name | tojson }};
+    const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const formatRid = id => /^\d+$/.test(id) ? id.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') : id;
+    function toLA(utcStr) {
+      if (!utcStr || utcStr === '—') return utcStr || '—';
+      try {
+        const d = new Date(String(utcStr).replace(' ', 'T').replace(/Z?$/, 'Z'));
+        return d.toLocaleString('sv-SE', { timeZone: 'America/Los_Angeles' }).slice(0, 16);
+      } catch (e) { return utcStr; }
+    }
+
+    window.openDetailModal = function (rid) {
+      let d = {};
+      try { d = JSON.parse(document.querySelector(`tr[data-rid="${rid}"]`)?.dataset.info || '{}'); } catch (_) {}
+
+      document.getElementById('detail-rid').textContent = formatRid(rid);
+      document.getElementById('detail-rid-copy').onclick = function () { copyText(rid, this); };
+      document.getElementById('detail-notreporting').hidden = !!d.reporting;
+
+      const os = [d.os_name, d.os_build && `(build ${d.os_build})`].filter(Boolean).join(' ');
+      const cpu = [d.cpu_name, d.cores].filter(Boolean).join(' · ');
+      const client = d.client_version
+        ? d.client_version + (d.client_outdated ? ' — older than your installers' : '')
+        : '';
+      const conns = (d.active_conns ?? '') === '' ? '' : String(d.active_conns);
+
+      const rows = [
+        ['Management', '', true],
+        ['Label', d.label || '—'],
+        ['Client group', GROUP_NAME || 'Unassigned'],
+        ['IP address', d.ip && d.ip !== '—' ? d.ip : '—'],
+
+        ['Hardware & OS', '', true],
+        ['Computer', d.hostname],
+        ['Logged-in user', d.username || (d.hostname ? 'nobody logged in' : '')],
+        ['Operating system', os],
+        ['CPU', cpu],
+        ['Memory', d.ram],
+        ['RustDesk client', client],
+
+        ['Activity', '', true],
+        ['Active connections', conns],
+        ['Registered', d.registered_at && d.registered_at !== '—' ? toLA(d.registered_at) : ''],
+        ['Last seen', d.last_seen && d.last_seen !== '—' ? toLA(d.last_seen) : ''],
+        ['Last check-in', d.heartbeat_at ? toLA(d.heartbeat_at) : ''],
+        ['Details reported', d.sysinfo_at ? toLA(d.sysinfo_at) : ''],
+      ];
+
+      document.getElementById('detail-table').innerHTML = rows.map(([k, v, hdr]) => {
+        if (hdr) {
+          return `<tr><td colspan="2" style="padding:14px 0 4px;font-size:11px;color:var(--text-3);`
+            + `text-transform:uppercase;letter-spacing:.06em;font-weight:600;border:none;`
+            + `border-bottom:1px solid var(--border-lt)">${esc(k)}</td></tr>`;
+        }
+        if (v === '' || v == null) return '';
+        return `<tr><td style="color:var(--text-3);padding:5px 12px 5px 0;white-space:nowrap;`
+          + `border:none;vertical-align:top;width:40%">${esc(k)}</td>`
+          + `<td style="color:var(--text-1);padding:5px 0;border:none;word-break:break-word">${esc(v)}</td></tr>`;
+      }).join('');
+
+      loadDetailSessions(rid);
+      document.getElementById('detail-modal').style.display = 'flex';
+    };
+
+    function loadDetailSessions(rid) {
+      const box = document.getElementById('detail-sessions');
+      if (!box) return;
+      const head = '<tr><td colspan="3" style="padding:14px 0 4px;font-size:11px;color:var(--text-3);'
+        + 'text-transform:uppercase;letter-spacing:.06em;font-weight:600;border:none;'
+        + 'border-bottom:1px solid var(--border-lt)">Recent sessions</td></tr>';
+      box.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse">' + head
+        + '<tr><td style="padding:8px 0;border:none;color:var(--text-3)">Loading…</td></tr></table>';
+      fetch('/api/devices/' + encodeURIComponent(rid) + '/sessions')
+        .then(r => r.ok ? r.json() : { sessions: [] })
+        .then(d => {
+          const ss = d.sessions || [];
+          let rows;
+          if (!ss.length) {
+            rows = '<tr><td style="padding:8px 0;border:none;color:var(--text-3)">No sessions recorded.</td></tr>';
+          } else {
+            rows = ss.map(s =>
+              '<tr><td style="color:var(--text-1);padding:4px 10px 4px 0;white-space:nowrap;border:none">' + esc(toLA(s.started_at)) + '</td>'
+              + '<td style="color:var(--text-3);padding:4px 10px 4px 0;white-space:nowrap;border:none">' + esc(s.duration_str) + '</td>'
+              + '<td style="padding:4px 0;border:none;text-align:right">'
+              + (s.active ? '<span class="badge badge-active">active</span>' : '<span class="badge badge-offline">ended</span>')
+              + '</td></tr>').join('');
+          }
+          box.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse">' + head + rows + '</table>';
+        })
+        .catch(() => { box.innerHTML = ''; });
+    }
+
+    window.closeDetailModal = function () {
+      document.getElementById('detail-modal').style.display = 'none';
+    };
+
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetailModal(); });
+  })();
+  </script>
+  {% else %}
+  <div class="card"><div class="card-body">
+    <div class="empty">
+      <div class="empty-icon">💻</div>
+      <p>No devices registered yet.</p>
+      <p>Install the client on a machine to see it appear here.</p>
+    </div>
+  </div></div>
+  {% endif %}
+</div>
+
+<!-- Managed client settings -->
+{% macro policy_badge(v) -%}
+  {%- if v == 'Y' %}<span class="badge badge-active">on</span>
+  {%- elif v == 'N' %}<span class="badge badge-offline">off</span>
+  {%- else %}<span class="badge badge-unknown">not managed</span>{% endif -%}
+{%- endmacro %}
+{% macro policy_select(name, v) -%}
+  <select name="{{ name }}" class="btn btn-ghost btn-sm" style="padding-right:10px;flex-shrink:0">
+    <option value="" {% if not v %}selected{% endif %}>Not managed</option>
+    <option value="Y" {% if v == 'Y' %}selected{% endif %}>On</option>
+    <option value="N" {% if v == 'N' %}selected{% endif %}>Off</option>
+  </select>
+{%- endmacro %}
+<div class="section" id="client-settings">
+  <div class="section-head">
+    <h2>Client Settings
+      {% if auto_update or remote_config %}
+      <span class="text-muted text-sm" style="font-weight:400;margin-left:6px">
+        applied on {{ policy_applied }} of {{ policy_reporting }} reporting device{{ 's' if policy_reporting != 1 }}
+      </span>
+      {% endif %}
+    </h2>
+  </div>
+  <div class="card"><div class="card-body">
+    {% if can_groups %}<form method="post" action="/groups/{{ group.slug }}/client-settings">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid var(--border)">
+        <div style="flex:1;min-width:260px">
+          <p style="margin:0;display:flex;align-items:center;gap:8px"><strong>Automatic RustDesk updates</strong> {{ policy_badge(auto_update) }}</p>
+          <p class="text-sm text-muted" style="margin:4px 0 0">
+            Devices with it on install each new RustDesk release from GitHub within about a day — never during an
+            active session, and keeping their connection to this server.
+          </p>
+        </div>
+        {{ policy_select('auto_update', auto_update) }}
+      </div>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:14px 0">
+        <div style="flex:1;min-width:260px">
+          <p style="margin:0;display:flex;align-items:center;gap:8px"><strong>Remote settings changes</strong> {{ policy_badge(remote_config) }}</p>
+          <p class="text-sm text-muted" style="margin:4px 0 0">
+            Lets whoever is remotely controlling a device use RustDesk's own window and settings on it. When off, RustDesk
+            grays out and blocks its window as soon as the remote mouse is over it.
+            <span style="color:#B45309">With it on, anyone who connects can change the device's RustDesk password and server settings.</span>
+          </p>
+        </div>
+        {{ policy_select('remote_config', remote_config) }}
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <span class="text-sm text-muted">Not managed leaves devices as they are. New installers get both on unless set to off here.</span>
+        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      </div>
+    </form>
+    {% endif %}
+  </div></div>
+</div>
+
+<!-- Installers -->
+<div class="section">
+  <div class="section-head">
+    <h2>Installers</h2>
+    {% if can_groups %}<form method="post" action="/groups/{{ group.slug }}/build" style="display:flex;gap:6px;align-items:center">
+      <select name="platform" class="btn btn-ghost btn-sm"
+              style="padding-right:28px;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748B' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\");background-repeat:no-repeat;background-position:right 6px center;background-size:14px;appearance:none;-webkit-appearance:none">
+        <option value="windows-x64">Windows x64</option>
+        <option value="windows-arm64">Windows ARM64</option>
+        <option value="linux">Linux (.sh)</option>
+        <option value="macos">macOS (.command)</option>
+      </select>
+      <button type="submit" class="btn btn-primary btn-sm">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Build
+      </button>
+    </form>
+    {% endif %}
+  </div>
+  {% if installers %}
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Platform</th><th>Version</th><th>Status</th><th>SHA256</th><th>Built (UTC)</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for i in installers %}
+          <tr>
+            <td style="font-weight:500">{{ i.platform }}</td>
+            <td><code>v{{ i.rustdesk_version }}</code></td>
+            <td><span class="badge badge-{{ i.status }}">{{ i.status }}</span></td>
+            <td>
+              {% if i.sha256_unsigned %}
+              <span class="mono text-sm" title="{{ i.sha256_unsigned }}">{{ i.sha256_unsigned[:16] }}…</span>
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td class="text-muted text-sm" style="white-space:nowrap">{{ i.created_at | localtime }}</td>
+            <td style="white-space:nowrap;display:flex;gap:6px;align-items:center;border:none">
+              {% if i.status == 'built' and i.filename %}
+              <a href="/download/{{ i.filename }}" class="btn btn-ghost btn-sm">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download
+              </a>
+              {% elif i.error_message %}
+              <span class="text-muted text-sm" title="{{ i.error_message }}">Failed</span>
+              {% endif %}
+              {% if can_groups %}
+              <form method="post" action="/groups/{{ group.slug }}/build" style="margin:0">
+                <input type="hidden" name="platform" value="{{ i.platform }}">
+                <button type="submit" class="btn btn-ghost btn-sm" title="Rebuild {{ i.platform }}">
+                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                  Rebuild
+                </button>
+              </form>
+              <form method="post" action="/groups/{{ group.slug }}/installers/{{ i.id }}/delete" style="margin:0"
+                    onsubmit="return confirm('Delete this installer build? The file will be removed from disk.')">
+                <button type="submit" class="btn btn-ghost btn-sm" title="Delete this build"
+                        style="color:#EF4444">
+                  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                </button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="card"><div class="card-body">
+    <div class="empty">
+      <div class="empty-icon">📦</div>
+      <p>No installers built yet.</p>
+      <p>Select a platform above and click <strong>Build</strong> to generate one.</p>
+    </div>
+  </div></div>
+  {% endif %}
+</div>
+
+<!-- Download links -->
+<div class="section" id="download-links">
+  <div class="section-head">
+    <h2>Download Links
+      <span class="text-muted text-sm" style="font-weight:400;margin-left:6px">send to clients so they can install it themselves</span>
+      {% if shareable %}
+      <div class="text-muted text-sm" style="font-weight:400;margin-top:4px">
+        Links currently serve:
+        {% for i in shareable %}{{ i.label }} · RustDesk <strong style="color:var(--text-1)">{{ i.rustdesk_version }}</strong>{% if pinned_version and i.rustdesk_version != pinned_version %} <span style="color:#B45309" title="Installers now use {{ pinned_version }} — rebuild this platform above to update the link">⚠ rebuild for {{ pinned_version }}</span>{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+      </div>
+      {% endif %}
+    </h2>
+    {% if can_groups %}<button onclick="document.getElementById('create-link-modal').style.display='flex'"
+            class="btn btn-primary btn-sm" {% if not shareable_platforms %}disabled title="Build an installer first"{% endif %}>
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      New Link
+    </button>
+    {% endif %}
+  </div>
+  {% if links %}
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Link</th><th>Note</th><th>Status</th><th>Downloads</th><th>Expires</th><th>Created</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for l in links %}
+          <tr {% if l.is_new %}style="background:#EEF2FF"{% endif %}>
+            <td style="white-space:nowrap">
+              {% if l.state == 'active' %}
+              <code class="text-sm" title="{{ l.url }}">…/d/{{ l.token[:8] }}…</code>
+              <button class="btn-copy" onclick="copyText('{{ l.url }}', this)" title="Copy link">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy
+              </button>
+              {% else %}
+              <code class="text-sm text-muted">…/d/{{ l.token[:8] }}…</code>
+              {% endif %}
+            </td>
+            <td class="text-sm">{{ l.note or '—' }}
+              {% if l.emailed_to %}<div class="text-muted" style="font-size:11px" title="Emailed {{ l.emailed_at | localtime }}">✉ {{ l.emailed_to }}</div>{% endif %}
+            </td>
+            <td>
+              {% if l.state == 'active' %}<span class="badge badge-active">active</span>
+              {% elif l.state == 'used_up' %}<span class="badge badge-offline">limit reached</span>
+              {% else %}<span class="badge badge-offline">{{ l.state }}</span>{% endif %}
+            </td>
+            <td class="text-sm">
+              {{ l.use_count }}{% if l.max_uses %} / {{ l.max_uses }}{% endif %}
+              {% if l.last_used_at %}<div class="text-muted" style="font-size:11px">last {{ l.last_used_at | localtime }}</div>{% endif %}
+            </td>
+            <td class="text-muted text-sm" style="white-space:nowrap">{{ l.expires_at | localtime if l.expires_at else 'Never' }}</td>
+            <td class="text-muted text-sm" style="white-space:nowrap">{{ l.created_at | localtime("%Y-%m-%d") }}
+              {% if l.created_by %}<div style="font-size:11px">{{ l.created_by }}</div>{% endif %}
+            </td>
+            <td>
+              {% if l.state == 'active' and can_groups %}
+              <div style="display:flex;gap:4px;align-items:center">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="openEmailLink({{ l.id }})">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>
+                Email
+              </button>
+              <form method="post" action="/groups/{{ group.slug }}/links/{{ l.id }}/revoke" style="margin:0"
+                    onsubmit="return confirm('Revoke this link? Anyone who has it will no longer be able to download.')">
+                <button type="submit" class="btn btn-ghost btn-sm" style="color:#EF4444">Revoke</button>
+              </form>
+              </div>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="card"><div class="card-body">
+    <div class="empty">
+      <div class="empty-icon">🔗</div>
+      {% if shareable_platforms %}
+      <p>No download links yet.</p>
+      <p>Create one and send it to your client — they can download and install without you remoting in first.</p>
+      {% else %}
+      <p>Build an installer above first, then create a link to share it.</p>
+      {% endif %}
+    </div>
+  </div></div>
+  {% endif %}
+</div>
+
+<!-- Create link modal -->
+<div id="create-link-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h2 style="font-size:16px;font-weight:700">New Download Link</h2>
+      <button onclick="document.getElementById('create-link-modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">✕</button>
+    </div>
+    <p class="text-muted text-sm" style="margin-bottom:16px">
+      The link always serves this group's latest installer. Right now that's:
+    </p>
+    <ul class="text-sm" style="margin:-8px 0 16px;padding-left:18px;line-height:1.7">
+      {% for i in shareable %}
+      <li><strong>{{ i.label }}</strong> — RustDesk {{ i.rustdesk_version }}
+        <span class="text-muted">(built {{ i.created_at | localtime("%Y-%m-%d") }})</span>
+        {% if pinned_version and i.rustdesk_version != pinned_version %}
+        <span style="color:#B45309">— older than {{ pinned_version }}, rebuild to update</span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="text-muted text-sm" style="margin-bottom:16px">
+      If you rebuild later, the link switches to the new build automatically.
+      {% if has_password %}It includes the group's unattended password, so only send it to people you trust and keep the expiry short.{% endif %}
+    </p>
+    <form method="post" action="/groups/{{ group.slug }}/links">
+      <div class="field" style="margin-bottom:14px">
+        <label for="link-note">Note</label>
+        <input type="text" id="link-note" name="note" maxlength="120" placeholder="e.g. Jane at front desk" style="width:100%">
+        <span class="hint">Optional — helps you tell links apart.</span>
+      </div>
+      <div class="field" style="margin-bottom:14px">
+        <label for="link-expiry">Expires after</label>
+        <select id="link-expiry" name="expiry" style="width:100%">
+          {% set expiry_labels = {'24h': '24 hours', '3d': '3 days', '7d': '7 days', '30d': '30 days', 'never': 'Never'} %}
+          {% for key in expiry_options %}
+          <option value="{{ key }}" {% if key == default_expiry %}selected{% endif %}>{{ expiry_labels.get(key, key) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:14px">
+        <label for="link-max">Download limit</label>
+        <input type="number" id="link-max" name="max_uses" min="1" placeholder="Unlimited" style="width:100%">
+        <span class="hint">Optional — the link stops working after this many downloads.</span>
+      </div>
+      <div class="field" style="margin-bottom:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <label for="link-email">Email link to client</label>
+        <input type="email" id="link-email" name="email_to" placeholder="client@example.com" style="width:100%"
+               oninput="document.getElementById('link-email-extra').style.display=this.value?'block':'none'">
+        <span class="hint">Optional — leave blank to just copy the link yourself.</span>
+      </div>
+      <div id="link-email-extra" style="display:none">
+        <div class="field" style="margin-bottom:14px">
+          <label for="link-rname">Client name</label>
+          <input type="text" id="link-rname" name="recipient_name" maxlength="80" placeholder="e.g. Jane" style="width:100%">
+        </div>
+        <div class="field" style="margin-bottom:14px">
+          <label for="link-msg">Message</label>
+          <textarea id="link-msg" name="message" rows="3" maxlength="1000" placeholder="Optional personal note" style="width:100%"></textarea>
+        </div>
+      </div>
+      <div style="margin-bottom:6px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" onclick="document.getElementById('create-link-modal').style.display='none'" class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Link</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Email link modal -->
+<div id="email-link-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h2 style="font-size:16px;font-weight:700">Email Download Link</h2>
+      <button onclick="document.getElementById('email-link-modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">✕</button>
+    </div>
+    <p class="text-muted text-sm" style="margin-bottom:16px">
+      The client gets a short email with a download button and how long the link stays valid.
+      Replies come back to {{ current_user.email or 'you' }}.
+    </p>
+    <form method="post" id="email-link-form">
+      <div class="field" style="margin-bottom:14px">
+        <label for="email-to">Client email</label>
+        <input type="email" id="email-to" name="email_to" required placeholder="client@example.com" style="width:100%">
+      </div>
+      <div class="field" style="margin-bottom:14px">
+        <label for="email-rname">Client name</label>
+        <input type="text" id="email-rname" name="recipient_name" maxlength="80" placeholder="Optional, e.g. Jane" style="width:100%">
+      </div>
+      <div class="field" style="margin-bottom:20px">
+        <label for="email-msg">Message</label>
+        <textarea id="email-msg" name="message" rows="3" maxlength="1000" placeholder="Optional personal note" style="width:100%"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" onclick="document.getElementById('email-link-modal').style.display='none'" class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Send Email</button>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+function openEmailLink(linkId) {
+  const form = document.getElementById('email-link-form');
+  form.action = '/groups/{{ group.slug }}/links/' + linkId + '/email';
+  form.reset();
+  document.getElementById('email-link-modal').style.display = 'flex';
+  document.getElementById('email-to').focus();
+}
+// Avoid double-sends from a second click while SMTP is working
+document.querySelectorAll('#email-link-form, #create-link-modal form').forEach(f =>
+  f.addEventListener('submit', () => {
+    const b = f.querySelector('button[type=submit]');
+    b.disabled = true; b.textContent = 'Please wait…';
+  }));
+</script>
+
+<!-- Edit group modal -->
+<div id="edit-group-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h2 style="font-size:16px;font-weight:700">Edit Group</h2>
+      <button onclick="document.getElementById('edit-group-modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">✕</button>
+    </div>
+    <form method="post" action="/groups/{{ group.slug }}/edit" id="edit-group-form">
+      <div class="field" style="margin-bottom:14px">
+        <label for="edit-slug">Slug</label>
+        <input type="text" id="edit-slug" name="new_slug" value="{{ group.slug }}" required
+               pattern="[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]" style="width:100%">
+        <span class="hint">Lowercase letters, digits, hyphens · 3–50 chars</span>
+      </div>
+      <div class="field" style="margin-bottom:14px">
+        <label for="edit-name">Display Name</label>
+        <input type="text" id="edit-name" name="display_name" value="{{ group.display_name }}" required style="width:100%">
+      </div>
+      <div class="field" style="margin-bottom:6px">
+        <label for="edit-pw">Unattended Access Password</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="password" id="edit-pw" name="unattended_password"
+                 value="{{ unattended_password }}"
+                 placeholder="Set a password…"
+                 autocomplete="new-password" style="width:100%">
+          <button type="button" onclick="togglePw()" title="Show/hide"
+                  style="background:none;border:1px solid var(--border-md);border-radius:var(--radius-sm);
+                         padding:6px 8px;cursor:pointer;color:var(--text-3);flex-shrink:0">
+            <svg id="eye-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                 style="width:16px;height:16px;display:block">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+        <span class="hint">Leave blank to keep existing password. Embedded in the installer EXE.</span>
+      </div>
+      {% if has_password %}
+      <div style="margin-bottom:18px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text-2)">
+          <input type="checkbox" name="clear_password" value="1" onchange="document.getElementById('edit-pw').disabled=this.checked">
+          Remove password (disable unattended access)
+        </label>
+      </div>
+      {% else %}
+      <div style="margin-bottom:18px"></div>
+      {% endif %}
+      <input type="hidden" name="clear_password" value="">
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button type="button" onclick="document.getElementById('edit-group-modal').style.display='none'"
+                class="btn btn-ghost">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save changes</button>
+      </div>
+    </form>
+<script>
+function togglePw() {
+  const f = document.getElementById('edit-pw');
+  f.type = f.type === 'password' ? 'text' : 'password';
+}
+// Prevent the hidden clear_password from overriding the checkbox value
+document.getElementById('edit-group-form').addEventListener('submit', function() {
+  const cb = this.querySelector('input[type=checkbox][name=clear_password]');
+  const hidden = this.querySelector('input[type=hidden][name=clear_password]');
+  if (cb) hidden.disabled = true;
+});
+</script>
+  </div>
+</div>
+{% endblock %}

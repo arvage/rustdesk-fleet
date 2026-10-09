@@ -1,0 +1,20 @@
+.claude/settings.local.json
+__pycache__/
+*.pyc
+*.pyo
+
+# Never commit secrets, keys, or runtime data (these live under /opt and /etc)
+*.env
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+id_ed25519
+id_ed25519.pub
+*.key
+*.crt
+*.pem
+*.pid
+data/
+backups/
+installer-assets/
+installers/

@@ -1,0 +1,12 @@
+[Unit]
+Description=RustDesk Fleet backup (keypair + databases)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=root
+# Optional config (BACKUP_RETENTION / BACKUP_PASSPHRASE / BACKUP_OFFSITE_CMD).
+# The leading '-' makes it optional if the file doesn't exist.
+EnvironmentFile=-/etc/rustdesk-fleet/backup.env
+ExecStart=/usr/bin/python3 /home/ubuntu/rustdesk-fleet/subsystems/single-tenant/backup.py run
