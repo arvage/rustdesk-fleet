@@ -84,6 +84,27 @@ The **Devices** page lists every machine, with live status
 
 Status updates live; no need to refresh.
 
+### Customizing tables (sorting & columns)
+
+The tables throughout the dashboard can be adjusted to show what you care about:
+
+- **Sort** — click any column header to sort by it; click again to reverse.
+  Numbers, data sizes (e.g. `16 GB`), percentages and session durations sort
+  by value, not alphabetically. Action columns (Connect, Edit, View) aren't
+  sortable. Available on every table: Devices, Client Groups, the device list
+  inside a group, Installers, Download Links, Logs, Users, the Notifications
+  delivery log and Admin backups.
+- **Columns** (Devices and the device list inside a group) — click the
+  **Columns** button above the table to show or hide columns. The extra
+  client-reported detail columns (**User, OS Build, CPU, Cores, Memory, Client
+  Version**) are hidden by default; tick them on to see them inline instead of
+  opening ⓘ Details. The **Client Groups** list has the same button for its
+  own columns. **Reset** restores the defaults.
+
+Your sort order and column choices are remembered **per browser** (stored
+locally on your machine), and each table remembers its own layout. They don't
+affect other users or other devices you sign in from.
+
 ---
 
 ## 5. Client Groups
@@ -96,6 +117,9 @@ separate infrastructure.
   optional **unattended password** that gets baked into its installers.
 - **Open a group** to see its devices, build installers, manage download
   links, and set managed client settings.
+
+Both the groups list and the device list inside a group support sorting and
+column show/hide — see [Customizing tables](#customizing-tables-sorting--columns).
 
 ### Managed client settings (per group)
 
