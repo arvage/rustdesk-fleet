@@ -751,6 +751,7 @@ document.querySelectorAll('#email-link-form, #create-link-modal form').forEach(f
         <label for="edit-pw">Unattended Access Password</label>
         <div style="display:flex;gap:6px;align-items:center">
           <input type="password" id="edit-pw" name="unattended_password"
+                 pattern="[^&quot;'`$\\]*" title="Can't contain &quot; ' ` $ or \ — these break the installers"
                  value="{{ unattended_password }}"
                  placeholder="Set a password…"
                  autocomplete="new-password" style="width:100%">
@@ -765,6 +766,7 @@ document.querySelectorAll('#email-link-form, #create-link-modal form').forEach(f
           </button>
         </div>
         <span class="hint">Leave blank to keep existing password. Embedded in the installer EXE.</span>
+        <div class="hint" style="display:block;margin-top:6px;line-height:1.5">Tip: use 12+ characters mixing upper/lowercase, numbers and symbols (e.g. <code>Blue-Harbor-27!</code>). Avoid <code>"</code> <code>'</code> <code>`</code> <code>$</code> <code>\</code> — they break the installers. Anyone with the installer can read this password, so don't reuse one from another system. A change only reaches computers after you rebuild the installers and reinstall.</div>
       </div>
       {% if has_password %}
       <div style="margin-bottom:18px">

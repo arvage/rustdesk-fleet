@@ -178,6 +178,12 @@ async def group_edit(
     if not display_name:
         _set_flash(request, "error", "Display name cannot be empty.")
         return RedirectResponse(f"/groups/{slug}", status_code=303)
+    if clear_password != "1":
+        from setup_server import password_problem
+        problem = password_problem(unattended_password)
+        if problem:
+            _set_flash(request, "error", problem)
+            return RedirectResponse(f"/groups/{slug}", status_code=303)
 
     conn = get_db()
     group = conn.execute("SELECT id FROM client_groups WHERE slug = ?", (slug,)).fetchone()

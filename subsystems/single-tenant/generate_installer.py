@@ -301,12 +301,16 @@ def _build_nsis(
             f'  FileWrite $R0 \'password = "{pw}"$\\r$\\n\'\n'
             f'  FileClose $R0\n'
             f'  SetShellVarContext current\n'
-            f'  ${{DisableX64FSRedirection}}\n'
-            f'  CreateDirectory "$WINDIR\\System32\\config\\systemprofile\\AppData\\Roaming\\RustDesk\\config"\n'
-            f'  FileOpen $R0 "$WINDIR\\System32\\config\\systemprofile\\AppData\\Roaming\\RustDesk\\config\\RustDesk.toml" w\n'
-            f'  FileWrite $R0 \'password = "{pw}"$\\r$\\n\'\n'
-            f'  FileClose $R0\n'
-            f'  ${{EnableX64FSRedirection}}\n'
+            # Service (SYSTEM) profile: RustDesk maps it to ServiceProfiles\LocalService.
+            # Fresh installs only — on an upgrade this file holds the device's
+            # id + key_pair, and overwriting it would change the device's ID.
+            # The --password CLI call after start sets the password either way.
+            f'  ${{IfNot}} ${{FileExists}} "${{SVC_CONFIG}}\\RustDesk.toml"\n'
+            f'    CreateDirectory "${{SVC_CONFIG}}"\n'
+            f'    FileOpen $R0 "${{SVC_CONFIG}}\\RustDesk.toml" w\n'
+            f'    FileWrite $R0 \'password = "{pw}"$\\r$\\n\'\n'
+            f'    FileClose $R0\n'
+            f'  ${{EndIf}}\n'
         )
 
     # After service starts, call --password via CLI (Sleep 3000 in template gives
@@ -405,6 +409,12 @@ def build_installer(group_slug: str, platform: str = "windows-x64", user_email: 
     ).fetchone()
     if group is None:
         raise InstallerError(f"Client group '{group_slug}' not found.")
+    # Groups saved before the dashboard validated passwords could still hold one
+    # that breaks the generated script — refuse rather than build a bad installer.
+    from setup_server import password_problem
+    problem = password_problem(group["unattended_password"] if "unattended_password" in group.keys() else None)
+    if problem:
+        raise InstallerError(f"{problem} Change it on the group page, then rebuild.")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     version = get_pinned_version()

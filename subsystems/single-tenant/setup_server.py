@@ -37,6 +37,25 @@ COMPOSE_DST = FLEET_ROOT / "docker-compose.yml"
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$")
 
 
+# Characters that can't be embedded safely in the installers: the password is
+# pasted inside NSIS strings ("'` delimit, $ expands), shell PW="..." ($ ` \
+# expand) and RustDesk.toml password = "..." (" \ end/escape the string).
+PASSWORD_FORBIDDEN = set('"\'`$\\')
+
+
+def password_problem(pw: str | None) -> str | None:
+    """Why an unattended password can't go into an installer, or None if it's fine."""
+    if not pw:
+        return None
+    bad = sorted({c for c in pw if c in PASSWORD_FORBIDDEN})
+    if bad:
+        return ("Unattended password can't contain " + " ".join(bad)
+                + " — these break the installers. Other symbols and spaces are fine.")
+    if any(ord(c) < 32 or ord(c) == 127 for c in pw):
+        return "Unattended password can't contain line breaks or other control characters."
+    return None
+
+
 class ProvisioningError(RuntimeError):
     pass
 
@@ -215,6 +234,9 @@ def create_group(
 ) -> dict:
     if not SLUG_RE.match(slug):
         raise ProvisioningError(f"Invalid slug '{slug}'. Use lowercase letters, digits, hyphens; 3-50 chars.")
+    problem = password_problem(unattended_password)
+    if problem:
+        raise ProvisioningError(problem)
 
     conn = get_db()
     ensure_schema(conn)
