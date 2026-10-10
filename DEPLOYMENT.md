@@ -409,6 +409,80 @@ Restore: extract an archive, put `data/` and `fleet.sqlite3` back under
 `cd /opt/rustdesk-fleet && docker compose up -d`. Keeping the same keypair
 means existing clients reconnect without reconfiguration.
 
+## 9. Backup & restore runbook
+
+Day-to-day operation of backups, from the dashboard. The keypair is the one
+thing that cannot be regenerated — every client is pinned to it — so the goal
+is: an encrypted copy exists off this server, and you can restore it.
+
+### One-time setup (do these once, then verify)
+
+1. **Enable off-site copy.** Admin → Backup & Restore: pick the S3 provider,
+   enter region / bucket / access key / secret, **Save & test connection**,
+   then switch **Off-site copy ON** and Save. The toggle saves immediately.
+2. **Set an encryption passphrase** (Local archives card). Every local and
+   off-site archive is then gpg-encrypted. **Store the passphrase somewhere
+   off this server** (password manager). Without it, no backup can be
+   restored — losing the server would lose the backups too.
+3. **Set retention.** *Keep this many local archives* (default 14) and *Keep
+   this many off-site copies* (0 = keep all). Off-site pruning needs
+   `s3:DeleteObject`; with 0, add an S3 lifecycle rule instead.
+4. **Scope the IAM user to the bucket** — only these four actions:
+   `s3:ListBucket`, `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`
+   (drop DeleteObject if you prune with a lifecycle rule and want a leaked
+   key unable to erase backups). If the bucket uses a customer-managed KMS
+   key, also grant `kms:GenerateDataKey`.
+5. **(Recommended) protect against deletion** — enable bucket versioning +
+   a lifecycle rule that expires noncurrent versions after ~30 days, so a
+   deleted or overwritten backup stays recoverable for a month.
+
+### Routine checks
+
+- **Daily/weekly:** Home page backup card shows **last backup ok**,
+  **offsite ok**, **encrypted**, and the kept-on-server / kept-off-site
+  counts. Nightly run is 03:30 UTC (`systemctl list-timers rustdesk-backup.timer`).
+- **Off-site list:** Admin → Backup & Restore → **Off-site archives** lists
+  what's actually in the bucket, with Restore and Delete per archive.
+- **After any config change to a group's backup settings** the count on the
+  page catches up on the next run.
+
+### Restore (dashboard)
+
+Both local and off-site restore take a **local safety snapshot first**,
+replace the keypair + hbbs peer DB + dashboard DB, and restart the relay.
+You may be logged out; sign back in.
+
+- **From a local archive:** Local archives card → **Restore**.
+- **From the bucket:** Off-site archives card → **Restore** (downloads it
+  first; needs `s3:GetObject`). If the archive is encrypted, the passphrase
+  must be set or the restore fails.
+- **Restoring an older backup also restores the backup settings** it
+  contains (they live in the dashboard DB) — re-check the Backup page after.
+
+### Restore (manual, server shell)
+
+If the dashboard is unavailable:
+
+```bash
+cd /opt/rustdesk-fleet
+# fetch the archive (e.g. from S3) then, if it ends in .gpg:
+gpg -d -o backup.tar.gz backup.tar.gz.gpg      # prompts for the passphrase
+tar xzf backup.tar.gz                           # yields rustdesk-fleet/
+cp -a rustdesk-fleet/data/. data/ && cp rustdesk-fleet/fleet.sqlite3 .
+docker compose up -d
+```
+
+### Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---|---|
+| Test connection fails, `AccessDenied` on list | `s3:ListBucket` must be on the **bucket** ARN, not `bucket/*`. |
+| Home shows **offsite incomplete** | Toggle is on but bucket/keys missing — finish the destination and Save. |
+| Home shows **offsite failed** | Upload error; hover the badge for the message (often keys or `s3:PutObject`). |
+| Restore from bucket fails, `403` | Access key lacks `s3:GetObject`. |
+| Off-site cleanup error on Home | Retention > 0 but key lacks `s3:DeleteObject` — grant it or set retention 0 + lifecycle rule. |
+| "encrypted but no passphrase is configured" | Set the passphrase that archive was made with before restoring. |
+
 ## Verify everything
 
 ```bash
