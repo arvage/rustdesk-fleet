@@ -105,6 +105,12 @@
           <th class="sortable" onclick="sortDevices(6)">Client Group <span class="sort-icon">↕</span></th>
           <th class="sortable col-registered" onclick="sortDevices(7)">Registered <span class="sort-icon">↕</span></th>
           <th class="sortable" onclick="sortDevices(8)">Last Seen <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(9)">User <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(10)">OS Build <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(11)">CPU <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(12)">Cores <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(13)">Memory <span class="sort-icon">↕</span></th>
+          <th class="sortable" onclick="sortDevices(14)">Client Version <span class="sort-icon">↕</span></th>
           <th></th>
         </tr>
       </thead>
@@ -139,6 +145,12 @@
           </td>
           <td data-val="{{ d.registered_at or '' }}" class="text-muted text-sm col-registered">{{ d.registered_at | localtime if d.registered_at else '—' }}</td>
           <td data-val="{{ d.last_seen or '' }}" class="text-muted text-sm">{{ d.last_seen | localtime if d.last_seen else '—' }}</td>
+          <td data-val="{{ d.username | lower }}" class="text-sm">{{ d.username or '—' }}</td>
+          <td data-val="{{ d.os_build }}" class="text-muted text-sm">{{ d.os_build or '—' }}</td>
+          <td data-val="{{ d.cpu_name | lower }}" class="text-sm">{{ d.cpu_name or '—' }}</td>
+          <td data-val="{{ d.cores }}" class="text-muted text-sm">{{ d.cores or '—' }}</td>
+          <td data-val="{{ d.ram }}" class="text-muted text-sm">{{ d.ram or '—' }}</td>
+          <td data-val="{{ d.client_version }}" class="text-sm">{% if d.client_version %}{{ d.client_version }}{% if d.client_outdated %} <span style="color:#B45309" title="Older than your installers">⚠</span>{% endif %}{% else %}—{% endif %}</td>
           <td style="white-space:nowrap">
             <button onclick="openDetailModal('{{ d.rustdesk_id }}')"
                     class="btn btn-ghost btn-sm" title="View all details" aria-label="Details">
@@ -275,12 +287,20 @@ const COLS = [
   { n: 5, label: 'IP' },          { n: 6, label: 'Status' },
   { n: 7, label: 'Client Group' },{ n: 8, label: 'Registered' },
   { n: 9, label: 'Last Seen' },
+  // Client-reported details — hidden by default, toggle on as needed.
+  { n: 10, label: 'User' },       { n: 11, label: 'OS Build' },
+  { n: 12, label: 'CPU' },        { n: 13, label: 'Cores' },
+  { n: 14, label: 'Memory' },     { n: 15, label: 'Client Version' },
 ];
 const COL_KEY = 'rdf.devices.hiddenCols';
+const DEFAULT_HIDDEN = [10, 11, 12, 13, 14, 15];   // detail columns off by default
 
 function loadHiddenCols() {
-  try { return new Set(JSON.parse(localStorage.getItem(COL_KEY) || '[]')); }
-  catch (_) { return new Set(); }
+  try {
+    const stored = localStorage.getItem(COL_KEY);
+    if (stored === null) return new Set(DEFAULT_HIDDEN);   // first visit
+    return new Set(JSON.parse(stored));
+  } catch (_) { return new Set(DEFAULT_HIDDEN); }
 }
 function saveHiddenCols(set) {
   try { localStorage.setItem(COL_KEY, JSON.stringify([...set])); } catch (_) {}
@@ -325,7 +345,7 @@ function closeColumnMenuOnce(e) {
   const m = document.getElementById('column-menu');
   if (m && !m.contains(e.target)) { m.style.display = 'none'; document.removeEventListener('click', closeColumnMenuOnce); }
 }
-function resetColumns() { saveHiddenCols(new Set()); applyColumns(); renderColumnOptions(); }
+function resetColumns() { saveHiddenCols(new Set(DEFAULT_HIDDEN)); applyColumns(); renderColumnOptions(); }
 applyColumns();
 const CAN_EDIT = {{ 'true' if can_devices else 'false' }};
 
@@ -407,6 +427,12 @@ function buildRow(d) {
     <td data-val="${d.group_name ? esc(d.group_name.toLowerCase()) : 'zzz'}">${groupCell}</td>
     <td data-val="${esc(d.registered_at)}" class="text-muted text-sm col-registered">${toLA(d.registered_at)}</td>
     <td data-val="${esc(d.last_seen)}" class="text-muted text-sm">${toLA(d.last_seen)}</td>
+    <td data-val="${esc((d.username || '').toLowerCase())}" class="text-sm">${esc(d.username || '—')}</td>
+    <td data-val="${esc(d.os_build || '')}" class="text-muted text-sm">${esc(d.os_build || '—')}</td>
+    <td data-val="${esc((d.cpu_name || '').toLowerCase())}" class="text-sm">${esc(d.cpu_name || '—')}</td>
+    <td data-val="${esc(d.cores || '')}" class="text-muted text-sm">${esc(d.cores || '—')}</td>
+    <td data-val="${esc(d.ram || '')}" class="text-muted text-sm">${esc(d.ram || '—')}</td>
+    <td data-val="${esc(d.client_version || '')}" class="text-sm">${d.client_version ? esc(d.client_version) + (d.client_outdated ? ' <span style="color:#B45309" title="Older than your installers">⚠</span>' : '') : '—'}</td>
     <td style="white-space:nowrap">
       <button onclick="openDetailModal('${rid}')" class="btn btn-ghost btn-sm" title="View all details" aria-label="Details">${SVG_INFO}</button>
       <a href="rustdesk://${rid}" class="btn btn-ghost btn-sm" title="Connect via RustDesk" aria-label="Connect" style="color:#2563EB">${SVG_VIDEO}</a>
@@ -455,8 +481,19 @@ function patchRow(tr, d) {
   cells[8].textContent = toLA(d.last_seen);
   cells[8].dataset.val = d.last_seen || '';
 
+  // Client-reported detail columns (User, OS Build, CPU, Cores, Memory, Client Version)
+  cells[9].dataset.val = (d.username || '').toLowerCase();  cells[9].textContent = d.username || '—';
+  cells[10].dataset.val = d.os_build || '';                 cells[10].textContent = d.os_build || '—';
+  cells[11].dataset.val = (d.cpu_name || '').toLowerCase(); cells[11].textContent = d.cpu_name || '—';
+  cells[12].dataset.val = d.cores || '';                    cells[12].textContent = d.cores || '—';
+  cells[13].dataset.val = d.ram || '';                      cells[13].textContent = d.ram || '—';
+  cells[14].dataset.val = d.client_version || '';
+  cells[14].innerHTML = d.client_version
+    ? esc(d.client_version) + (d.client_outdated ? ' <span style="color:#B45309" title="Older than your installers">⚠</span>' : '')
+    : '—';
+
   // Edit button onclick (label or group may have changed)
-  const editBtn = cells[9].querySelector('button[data-edit]');
+  const editBtn = tr.querySelector('button[data-edit]');
   if (editBtn) editBtn.setAttribute('onclick',
     `openDeviceModal('${d.rustdesk_id}','${escAttr(label)}','${d.group_id ?? ''}')`);
 }
