@@ -239,14 +239,21 @@
         <span class="badge badge-failed">last backup failed</span>
         {% endif %}
         <span class="text-muted text-sm">{{ backup_status.at | localtime }}</span>
-        {% if backup_status.offsite and backup_status.offsite.attempted %}
+        {% if offsite and offsite.enabled and not offsite.configured %}
+          <span class="badge badge-failed" title="Off-site copy is on but the bucket or access keys are missing. Fix it in Admin → Backup &amp; Restore.">offsite incomplete</span>
+        {% elif backup_status.offsite and backup_status.offsite.attempted %}
           {% if backup_status.offsite.ok %}
-          <span class="badge badge-active">offsite ok</span>
+          <span class="badge badge-active" title="{{ offsite.target if offsite else '' }}">offsite ok</span>
           {% else %}
           <span class="badge badge-failed" title="{{ backup_status.offsite.error or '' }}">offsite failed</span>
           {% endif %}
+          {% if offsite and not offsite.enabled %}<span class="badge badge-pending">offsite now off</span>{% endif %}
+        {% elif offsite and offsite.enabled %}
+          <span class="badge badge-active" title="Uploads to {{ offsite.target }} starting with the next backup.">offsite on · uploads from next backup</span>
+        {% elif offsite and offsite.configured %}
+          <span class="badge badge-pending" title="A destination is saved but off-site copy is switched off. Turn it on in Admin → Backup &amp; Restore.">offsite off</span>
         {% else %}
-          <span class="badge badge-pending" title="Local-only backups don't survive loss of this box. Set BACKUP_OFFSITE_CMD in /etc/rustdesk-fleet/backup.env.">offsite not configured</span>
+          <span class="badge badge-pending" title="Local-only backups don't survive loss of this server. Configure a destination in Admin → Backup &amp; Restore.">offsite not configured</span>
         {% endif %}
         {% if backup_status.encrypted %}<span class="badge badge-built">encrypted</span>{% endif %}
       </div>

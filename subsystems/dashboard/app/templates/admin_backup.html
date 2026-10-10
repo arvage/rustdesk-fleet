@@ -30,23 +30,24 @@
           destination protects you against losing the whole server.
         </div>
       </div>
-      <form method="post" action="/admin/backup/test" style="margin:0;flex-shrink:0">
-        <button type="submit" class="btn btn-ghost btn-sm">Test connection</button>
-      </form>
+      <button type="submit" form="backup-form" formaction="/admin/backup/test"
+              class="btn btn-ghost btn-sm" style="flex-shrink:0"
+              title="Saves the settings below, then checks the bucket and keys">Save &amp; test connection</button>
     </div>
 
-    <form method="post" action="/admin/backup/save" class="bk-form">
+    <form method="post" action="/admin/backup/save" class="bk-form" id="backup-form">
       <div style="padding:18px;display:flex;flex-direction:column;gap:16px">
 
         <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#0F172A;border-radius:8px">
           <label style="position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;margin:0">
-            <input type="checkbox" name="enabled" value="1" {% if cfg.enabled %}checked{% endif %}
-                   style="opacity:0;width:0;height:0">
-            <span style="position:absolute;inset:0;cursor:pointer;background:{{ '#3B82F6' if cfg.enabled else '#334155' }};border-radius:20px"></span>
+            <input type="checkbox" name="enabled" value="1" id="offsite-toggle" {% if cfg.enabled %}checked{% endif %}
+                   style="opacity:0;width:0;height:0" onchange="toggleOffsite(this)">
+            <span style="position:absolute;inset:0;cursor:pointer;background:{{ '#3B82F6' if cfg.enabled else '#334155' }};border-radius:20px;transition:background .15s"></span>
+            <span style="position:absolute;top:2px;left:{{ '18px' if cfg.enabled else '2px' }};width:16px;height:16px;background:#fff;border-radius:50%;pointer-events:none;transition:left .15s"></span>
           </label>
           <div>
-            <div style="font-weight:600;font-size:13px;color:#F1F5F9">Off-site copy {{ 'enabled' if cfg.enabled else 'disabled' }}</div>
-            <div style="font-size:11px;color:#64748B;margin-top:2px">When on, each backup is uploaded to the destination below</div>
+            <div id="offsite-label" style="font-weight:600;font-size:13px;color:#F1F5F9">Off-site copy {{ 'ON' if cfg.enabled else 'OFF' }}</div>
+            <div style="font-size:11px;color:#64748B;margin-top:2px">When on, each backup is uploaded to the destination below. Saves immediately.</div>
           </div>
         </div>
 
@@ -166,6 +167,23 @@
 </div>
 
 <script>
+// Toggle saves the whole form right away, so the setting can't be lost by navigating off.
+let bkDirty = false;
+function toggleOffsite(cb) {
+  const track = cb.nextElementSibling, knob = track.nextElementSibling;
+  track.style.background = cb.checked ? '#3B82F6' : '#334155';
+  knob.style.left = cb.checked ? '18px' : '2px';
+  document.getElementById('offsite-label').textContent = 'Saving…';
+  bkDirty = false;
+  cb.form.submit();
+}
+(function () {
+  const form = document.getElementById('backup-form');
+  form.addEventListener('input', e => { if (e.target.id !== 'offsite-toggle') bkDirty = true; });
+  form.addEventListener('submit', () => { bkDirty = false; });
+  window.addEventListener('beforeunload', e => { if (bkDirty) { e.preventDefault(); e.returnValue = ''; } });
+})();
+
 function syncS3Preset() {
   const sp = document.getElementById('s3_provider').value;
   const ep = document.getElementById('s3_endpoint');

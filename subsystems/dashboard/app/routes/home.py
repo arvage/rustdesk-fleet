@@ -139,6 +139,11 @@ def home(request: Request, current_user: dict = Depends(require_auth)):
         backup_status = backup.status()
     except Exception:
         backup_status = None
+    try:
+        import backup_remote
+        offsite = backup_remote.offsite_summary()
+    except Exception:
+        offsite = None
     return templates.TemplateResponse(
         request,
         "home.html",
@@ -153,6 +158,7 @@ def home(request: Request, current_user: dict = Depends(require_auth)):
             "client_update_available": client_update_available,
             "rebuild_running": _rebuild_lock.locked(),
             "backup_status": backup_status,
+            "offsite": offsite,
         },
     )
 

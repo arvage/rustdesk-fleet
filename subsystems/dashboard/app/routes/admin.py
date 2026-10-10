@@ -70,6 +70,11 @@ async def admin_home(request: Request, current_user: dict = Depends(require_auth
         backup_status = backup.status()
     except Exception:
         backup_status = None
+    try:
+        import backup_remote
+        offsite = backup_remote.offsite_summary()
+    except Exception:
+        offsite = None
     return templates.TemplateResponse(
         request, "admin.html",
         {
@@ -79,6 +84,7 @@ async def admin_home(request: Request, current_user: dict = Depends(require_auth
             "log_count": log_count,
             "user_count": user_count,
             "backup_status": backup_status,
+            "offsite": offsite,
         },
     )
 
@@ -112,64 +118,73 @@ async def admin_backup(request: Request, current_user: dict = Depends(require_au
     )
 
 
-@router.post("/admin/backup/save")
-async def admin_backup_save(
-    request: Request,
-    enabled: str = Form(""),
-    provider: str = Form("s3"),
-    s3_provider: str = Form("aws"),
-    s3_endpoint: str = Form(""),
-    s3_region: str = Form(""),
-    s3_bucket: str = Form(""),
-    s3_prefix: str = Form(""),
-    s3_access_key: str = Form(""),
-    s3_secret_key: str = Form(""),
-    rclone_remote: str = Form(""),
-    passphrase: str = Form(""),
-    retention: str = Form("14"),
-    current_user: dict = Depends(require_auth),
-):
-    require_perm(current_user, "manage_backups")
+def _save_backup_form(form, current_user: dict) -> dict:
+    """Persist the destination form. Secret + passphrase: blank keeps the stored value."""
+    def f(name: str, default: str = "") -> str:
+        return (form.get(name) or default).strip()
+
+    provider = f("provider", "s3")
     provider = provider if provider in ("s3", "rclone") else "s3"
     try:
-        ret = max(1, min(365, int(retention)))
-    except (TypeError, ValueError):
+        ret = max(1, min(365, int(f("retention", "14"))))
+    except ValueError:
         ret = 14
-    is_enabled = 1 if enabled == "1" else 0
+    is_enabled = 1 if f("enabled") == "1" else 0
 
     conn = get_db()
     conn.execute("INSERT OR IGNORE INTO backup_config (id) VALUES (1)")
-    # Secret + passphrase: blank submission preserves the stored value.
     conn.execute(
         """UPDATE backup_config SET enabled=?, provider=?, s3_provider=?, s3_endpoint=?,
                s3_region=?, s3_bucket=?, s3_prefix=?, s3_access_key=?, rclone_remote=?,
                retention=?, updated_at=datetime('now') WHERE id=1""",
-        (is_enabled, provider, s3_provider.strip(), s3_endpoint.strip(), s3_region.strip(),
-         s3_bucket.strip(), s3_prefix.strip(), s3_access_key.strip(), rclone_remote.strip(), ret),
+        (is_enabled, provider, f("s3_provider", "aws"), f("s3_endpoint"), f("s3_region"),
+         f("s3_bucket"), f("s3_prefix"), f("s3_access_key"), f("rclone_remote"), ret),
     )
-    if s3_secret_key.strip():
-        conn.execute("UPDATE backup_config SET s3_secret_key=? WHERE id=1", (s3_secret_key.strip(),))
-    if passphrase.strip():
-        conn.execute("UPDATE backup_config SET passphrase=? WHERE id=1", (passphrase.strip(),))
+    if f("s3_secret_key"):
+        conn.execute("UPDATE backup_config SET s3_secret_key=? WHERE id=1", (f("s3_secret_key"),))
+    if f("passphrase"):
+        conn.execute("UPDATE backup_config SET passphrase=? WHERE id=1", (f("passphrase"),))
     log_event(conn, "backup_config_updated", f"provider={provider} enabled={is_enabled}", current_user["email"])
     conn.commit()
     conn.close()
-    _set_flash(request, "success", "Backup destination saved.")
+    return _backup_cfg()
+
+
+@router.post("/admin/backup/save")
+async def admin_backup_save(request: Request, current_user: dict = Depends(require_auth)):
+    require_perm(current_user, "manage_backups")
+    cfg = _save_backup_form(await request.form(), current_user)
+    try:
+        import backup_remote
+        summary = backup_remote.offsite_summary(cfg)
+    except Exception:
+        summary = {"enabled": bool(cfg["enabled"]), "configured": True}
+    if summary["enabled"] and not summary["configured"]:
+        _set_flash(request, "error",
+                   "Saved, but off-site copy is on without a bucket and access keys — uploads will fail.")
+    elif summary["enabled"]:
+        _set_flash(request, "success", "Saved. Off-site copy is ON — every backup will be uploaded.")
+    else:
+        _set_flash(request, "success", "Saved. Off-site copy is OFF — backups stay on this server only.")
     return RedirectResponse("/admin/backup", status_code=303)
 
 
 @router.post("/admin/backup/test")
 async def admin_backup_test(request: Request, current_user: dict = Depends(require_auth)):
+    """Save what's on screen, then test it — so the test matches the form and nothing is lost."""
     require_perm(current_user, "manage_backups")
+    cfg = _save_backup_form(await request.form(), current_user)
     try:
         import backup_remote
-        res = backup_remote.test(_backup_cfg())
+        res = backup_remote.test(cfg)
     except Exception as e:
         res = {"ok": False, "error": str(e)[:400]}
+    state = "ON" if cfg["enabled"] else "OFF (turn it on to upload backups)"
     if res["ok"]:
-        _set_flash(request, "success", "Destination reachable — credentials and bucket/remote look good.")
+        _set_flash(request, "success",
+                   f"Saved. Destination reachable — credentials and bucket look good. Off-site copy is {state}.")
     else:
-        _set_flash(request, "error", f"Destination test failed: {res['error']}")
+        _set_flash(request, "error", f"Saved, but the destination test failed: {res['error']}")
     return RedirectResponse("/admin/backup", status_code=303)
 
 

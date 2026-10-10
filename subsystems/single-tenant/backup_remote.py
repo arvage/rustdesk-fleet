@@ -57,6 +57,20 @@ def get_config() -> dict:
     return dict(_DEFAULTS)
 
 
+def offsite_summary(cfg: dict | None = None) -> dict:
+    """What the saved config means for the UI: is off-site on, and is it usable?"""
+    cfg = cfg if cfg is not None else get_config()
+    provider = cfg.get("provider") or "s3"
+    if provider == "rclone":
+        configured = ":" in (cfg.get("rclone_remote") or "")
+        target = (cfg.get("rclone_remote") or "").strip()
+    else:
+        configured = bool(cfg.get("s3_bucket") and cfg.get("s3_access_key") and cfg.get("s3_secret_key"))
+        target = "s3://" + "/".join(
+            p for p in ((cfg.get("s3_bucket") or "").strip(), (cfg.get("s3_prefix") or "").strip().strip("/")) if p)
+    return {"enabled": bool(cfg.get("enabled")), "configured": configured, "target": target}
+
+
 def _resolve_endpoint(cfg: dict) -> str:
     ep = (cfg.get("s3_endpoint") or "").strip()
     if ep:

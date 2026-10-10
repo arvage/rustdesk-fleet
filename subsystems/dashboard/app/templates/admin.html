@@ -13,7 +13,7 @@
     <div class="stat-label">Last backup</div>
     {% if backup_status and backup_status.ok %}
     <div class="stat-value" style="font-size:16px">{{ backup_status.at | localtime }}</div>
-    <div class="stat-sub">{{ backup_status.size_human }}{% if backup_status.offsite and backup_status.offsite.attempted and backup_status.offsite.ok %} · off-site ok{% elif not (backup_status.offsite and backup_status.offsite.attempted) %} · local only{% endif %}</div>
+    <div class="stat-sub">{{ backup_status.size_human }}{% if backup_status.offsite and backup_status.offsite.attempted %}{% if backup_status.offsite.ok %} · off-site ok{% else %} · <span style="color:var(--danger)">off-site failed</span>{% endif %}{% elif offsite and offsite.enabled %} · off-site on (next run){% else %} · local only{% endif %}</div>
     {% elif backup_status %}
     <div class="stat-value" style="font-size:16px;color:var(--danger)">failed</div>
     {% else %}
