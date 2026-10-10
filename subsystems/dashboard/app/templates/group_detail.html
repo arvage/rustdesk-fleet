@@ -43,11 +43,32 @@
     </h2>
   </div>
   {% if devices %}
+  <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+    <div style="position:relative">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="toggleColumnMenu(event)" title="Show/hide columns"
+              style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>
+        </svg>
+        Columns
+      </button>
+      <div id="column-menu" style="display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:30;
+           background:var(--surface);border:1px solid var(--border-md);border-radius:var(--radius-sm);
+           box-shadow:0 12px 32px rgba(0,0,0,.14);padding:8px;min-width:190px">
+        <div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;padding:4px 8px 6px">Show columns</div>
+        <div id="column-options"></div>
+        <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;text-align:right">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="resetColumns()">Reset</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <style id="col-style"></style>
   <div class="card">
     <div class="table-wrap">
-      <table class="device-table">
+      <table class="device-table js-sort" id="group-devices-table">
         <thead>
-          <tr><th>RustDesk ID</th><th>Label</th><th>Computer</th><th>OS</th><th>IP</th><th>Status</th><th class="col-registered">Registered</th><th>Last Seen</th><th></th></tr>
+          <tr><th>RustDesk ID</th><th>Label</th><th>Computer</th><th>OS</th><th>IP</th><th>Status</th><th class="col-registered">Registered</th><th>Last Seen</th><th>User</th><th>OS Build</th><th>CPU</th><th>Cores</th><th>Memory</th><th>Client Version</th><th></th></tr>
         </thead>
         <tbody>
         {% for d in devices %}
@@ -86,6 +107,12 @@
             </td>
             <td class="text-muted text-sm col-registered">{{ d.registered_at | localtime if d.registered_at else '—' }}</td>
             <td class="text-muted text-sm">{{ d.last_seen | localtime if d.last_seen else '—' }}</td>
+            <td class="text-sm">{{ d.username or '—' }}</td>
+            <td class="text-muted text-sm">{{ d.os_build or '—' }}</td>
+            <td class="text-sm">{{ d.cpu_name or '—' }}</td>
+            <td class="text-muted text-sm">{{ d.cores or '—' }}</td>
+            <td class="text-muted text-sm">{{ d.ram or '—' }}</td>
+            <td class="text-sm">{% if d.client_version %}{{ d.client_version }}{% if d.client_outdated %} <span style="color:#B45309" title="Older than your installers">⚠</span>{% endif %}{% else %}—{% endif %}</td>
             <td style="white-space:nowrap">
               {% if d.rustdesk_id %}
               <button onclick="openDetailModal('{{ d.rustdesk_id }}')" class="btn btn-ghost btn-sm"
@@ -118,6 +145,75 @@
     </div>
   </div>
   <script>
+  // ── Column show/hide (per-browser, persisted) ──────────────────────────────
+  // Columns are addressed by position (nth-child) so hiding survives the live
+  // status refresh. The last column (actions) is fixed.
+  const COLS = [
+    { n: 1, label: 'RustDesk ID' }, { n: 2, label: 'Label' },
+    { n: 3, label: 'Computer' },    { n: 4, label: 'OS' },
+    { n: 5, label: 'IP' },          { n: 6, label: 'Status' },
+    { n: 7, label: 'Registered' },  { n: 8, label: 'Last Seen' },
+    // Client-reported details — hidden by default, toggle on as needed.
+    { n: 9, label: 'User' },        { n: 10, label: 'OS Build' },
+    { n: 11, label: 'CPU' },        { n: 12, label: 'Cores' },
+    { n: 13, label: 'Memory' },     { n: 14, label: 'Client Version' },
+  ];
+  const COL_KEY = 'rdf.groupDevices.hiddenCols';
+  const DEFAULT_HIDDEN = [9, 10, 11, 12, 13, 14];   // detail columns off by default
+
+  function loadHiddenCols() {
+    try {
+      const stored = localStorage.getItem(COL_KEY);
+      if (stored === null) return new Set(DEFAULT_HIDDEN);
+      return new Set(JSON.parse(stored));
+    } catch (_) { return new Set(DEFAULT_HIDDEN); }
+  }
+  function saveHiddenCols(set) {
+    try { localStorage.setItem(COL_KEY, JSON.stringify([...set])); } catch (_) {}
+  }
+  function applyColumns() {
+    const hidden = loadHiddenCols();
+    const rules = [...hidden].map(n =>
+      `#group-devices-table thead th:nth-child(${n}),#group-devices-table tbody td:nth-child(${n}){display:none!important}`
+    ).join('');
+    const style = document.getElementById('col-style');
+    if (style) style.textContent = rules;
+  }
+  function renderColumnOptions() {
+    const hidden = loadHiddenCols();
+    const box = document.getElementById('column-options');
+    if (!box) return;
+    box.innerHTML = COLS.map(c =>
+      `<label style="display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:13px;cursor:pointer;border-radius:6px">
+         <input type="checkbox" data-col="${c.n}" ${hidden.has(c.n) ? '' : 'checked'}> ${c.label}
+       </label>`).join('');
+    box.querySelectorAll('input[data-col]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const h = loadHiddenCols();
+        const n = parseInt(cb.dataset.col, 10);
+        if (cb.checked) h.delete(n); else h.add(n);
+        saveHiddenCols(h); applyColumns();
+      });
+    });
+  }
+  function toggleColumnMenu(e) {
+    if (e) e.stopPropagation();
+    const m = document.getElementById('column-menu');
+    if (!m) return;
+    const show = m.style.display === 'none';
+    m.style.display = show ? 'block' : 'none';
+    if (show) {
+      renderColumnOptions();
+      setTimeout(() => document.addEventListener('click', closeColumnMenuOnce), 0);
+    }
+  }
+  function closeColumnMenuOnce(e) {
+    const m = document.getElementById('column-menu');
+    if (m && !m.contains(e.target)) { m.style.display = 'none'; document.removeEventListener('click', closeColumnMenuOnce); }
+  }
+  function resetColumns() { saveHiddenCols(new Set(DEFAULT_HIDDEN)); applyColumns(); renderColumnOptions(); }
+  applyColumns();
+
   // ── Real-time status polling (same source as the Devices page) ─────────────
   (function () {
     const STATUS_POLL_MS = 10000;
@@ -364,7 +460,7 @@
   {% if installers %}
   <div class="card">
     <div class="table-wrap">
-      <table>
+      <table class="js-sort">
         <thead>
           <tr><th>Platform</th><th>Version</th><th>Status</th><th>SHA256</th><th>Built (UTC)</th><th></th></tr>
         </thead>
@@ -445,7 +541,7 @@
   {% if links %}
   <div class="card">
     <div class="table-wrap">
-      <table>
+      <table class="js-sort">
         <thead>
           <tr><th>Link</th><th>Note</th><th>Status</th><th>Downloads</th><th>Expires</th><th>Created</th><th></th></tr>
         </thead>

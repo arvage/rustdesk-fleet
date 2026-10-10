@@ -125,6 +125,72 @@ function copyText(text, btn) {
     setTimeout(() => { btn.innerHTML = prev; btn.style.color = ''; }, 1500);
   });
 }
+
+// ── Generic column sorting ───────────────────────────────────────────────────
+// Any <table class="js-sort"> gets every column header clickable to sort, except
+// empty headers (e.g. action columns) or ones marked data-nosort. A cell's sort
+// key is its data-val when present, else its text — parsed as a duration, a
+// number (with commas/units), or compared case-insensitively as text.
+// Pages with their own bespoke sorter (Devices, Client Groups list) don't use
+// this class, so they're left untouched.
+function rdfSortKey(raw) {
+  const s = String(raw).trim();
+  const dm = s.match(/^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?$/i);
+  if (dm && (dm[1] || dm[2] || dm[3])) {
+    return { n: (+dm[1] || 0) * 3600 + (+dm[2] || 0) * 60 + (+dm[3] || 0) };
+  }
+  const t = s.replace(/[,\s]/g, '').replace(/(gb|mb|kb|tb|%|cores?|devices?)$/i, '');
+  if (/^-?\d*\.?\d+$/.test(t) && t !== '') return { n: parseFloat(t) };
+  return { s: s.toLowerCase() };
+}
+function rdfCellVal(row, idx) {
+  const td = row.cells[idx];
+  if (!td) return '';
+  return (td.dataset && td.dataset.val != null) ? td.dataset.val : td.textContent.trim();
+}
+function rdfSortTable(table, idx) {
+  const body = table.tBodies[0];
+  if (!body) return;
+  const asc = !(String(table.dataset.sortCol) === String(idx) && table.dataset.sortAsc === '1');
+  table.dataset.sortCol = idx;
+  table.dataset.sortAsc = asc ? '1' : '0';
+  Array.from(table.tHead.rows[0].cells).forEach((h, i) => {
+    const ic = h.querySelector('.sort-icon');
+    if (!ic) return;
+    if (i === idx) { ic.textContent = asc ? '↑' : '↓'; h.style.color = 'var(--text-1)'; }
+    else { ic.textContent = '↕'; h.style.color = ''; }
+  });
+  const rows = Array.from(body.rows);
+  rows.sort((a, b) => {
+    const va = rdfSortKey(rdfCellVal(a, idx)), vb = rdfSortKey(rdfCellVal(b, idx));
+    let r;
+    if ('n' in va && 'n' in vb) r = va.n - vb.n;
+    else if ('n' in va) r = -1;            // numbers before text
+    else if ('n' in vb) r = 1;
+    else r = va.s.localeCompare(vb.s);
+    return asc ? r : -r;
+  });
+  rows.forEach(r => body.appendChild(r));
+}
+function rdfInitSortableTables() {
+  document.querySelectorAll('table.js-sort').forEach(table => {
+    const headRow = table.tHead && table.tHead.rows[0];
+    if (!headRow || !table.tBodies[0]) return;
+    Array.from(headRow.cells).forEach((th, idx) => {
+      if (th.hasAttribute('data-nosort') || th.textContent.trim() === '') return;
+      th.classList.add('sortable');
+      if (!th.querySelector('.sort-icon')) {
+        const ic = document.createElement('span');
+        ic.className = 'sort-icon';
+        ic.textContent = '↕';
+        th.appendChild(document.createTextNode(' '));
+        th.appendChild(ic);
+      }
+      th.addEventListener('click', () => rdfSortTable(table, idx));
+    });
+  });
+}
+document.addEventListener('DOMContentLoaded', rdfInitSortableTables);
 </script>
 </body>
 </html>

@@ -59,7 +59,7 @@
 
 {% if sessions %}
 <div class="card"><div class="table-wrap">
-  <table>
+  <table class="js-sort">
     <thead><tr><th>Device</th><th>Client Group</th><th>Started</th><th>Ended</th><th>Duration</th><th>Status</th></tr></thead>
     <tbody id="log-tbody">
     {% for s in sessions %}
@@ -104,7 +104,7 @@
 
 {% if events %}
 <div class="card"><div class="table-wrap">
-  <table>
+  <table class="js-sort">
     <thead>
       <tr><th>Time</th><th>User</th>{% if cat == 'all' %}<th>Category</th>{% endif %}<th>Event</th><th>Detail</th></tr>
     </thead>
