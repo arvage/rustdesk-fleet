@@ -162,6 +162,7 @@ def run(
     retention: int | None = None,
     passphrase: str | None = None,
     offsite_cmd: str | None = None,
+    remote: bool = True,
 ) -> dict:
     """Create one backup archive. Returns the status dict (also persisted)."""
     # Destination/encryption config from the dashboard DB (falls back to env).
@@ -178,7 +179,7 @@ def run(
     if offsite_cmd is None:
         offsite_cmd = os.environ.get("BACKUP_OFFSITE_CMD") or ""
 
-    use_remote = bool(backup_remote and cfg.get("enabled"))
+    use_remote = bool(remote and backup_remote and cfg.get("enabled"))
 
     started = _now()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -227,6 +228,11 @@ def run(
         size = archive.stat().st_size
         if use_remote:
             offsite = backup_remote.ship(archive, cfg)
+            # Prune off-site copies only after a successful upload, so a failing
+            # destination never loses its older good archives.
+            if offsite["ok"]:
+                pr = backup_remote.prune(cfg)
+                offsite.update(kept=pr["kept"], pruned=pr["deleted"], prune_error=pr["error"])
         elif offsite_cmd:
             offsite = _offsite(archive, offsite_cmd)
         else:
@@ -248,6 +254,8 @@ def run(
         detail = f"{archive.name} ({status['size_human']}" + (
             ", encrypted" if encrypted else "") + (
             ", offsite ok" if offsite["ok"] else ", offsite FAILED" if offsite["attempted"] else "") + (
+            f", {offsite['pruned']} old offsite removed" if offsite.get("pruned") else "") + (
+            ", offsite prune FAILED" if offsite.get("prune_error") else "") + (
             f", {len(skipped)} unreadable skipped" if skipped else "") + ")"
         _log_event("backup_succeeded", detail)
         _write_status(status)
@@ -303,20 +311,27 @@ def restore(archive: str | Path, passphrase: str | None = None) -> dict:
         except Exception:
             passphrase = os.environ.get("BACKUP_PASSPHRASE") or ""
 
-    # Always snapshot current state before overwriting anything.
-    safety = run(offsite_cmd="")  # local-only safety snapshot
+    # Stage a private copy first: the safety snapshot below rotates local
+    # archives and could otherwise delete the very archive being restored.
+    stage_dir = Path(tempfile.mkdtemp(prefix="rdf-restore-"))
+    staged = stage_dir / archive.name
+    shutil.copy2(archive, staged)
+
+    # Always snapshot current state before overwriting anything. Local only:
+    # never upload (or prune off-site copies) in the middle of a restore.
+    safety = run(offsite_cmd="", remote=False)
     applied: list[str] = []
 
     try:
         with tempfile.TemporaryDirectory() as tmp:
             tmpd = Path(tmp)
-            tarball = archive
-            if archive.name.endswith(".gpg"):
+            tarball = staged
+            if staged.name.endswith(".gpg"):
                 if not passphrase:
                     return {"ok": False, "error": "Archive is encrypted but no passphrase is configured.",
                             "applied": [], "safety": safety.get("file")}
                 tarball = tmpd / "decrypted.tar.gz"
-                _decrypt(archive, passphrase, tarball)
+                _decrypt(staged, passphrase, tarball)
 
             extract = tmpd / "x"
             extract.mkdir()
@@ -382,6 +397,8 @@ def restore(archive: str | Path, passphrase: str | None = None) -> dict:
     except Exception as e:
         _log_event("backup_restore_failed", f"{archive.name}: {str(e)[:300]}")
         return {"ok": False, "error": str(e)[:400], "applied": applied, "safety": safety.get("file")}
+    finally:
+        shutil.rmtree(stage_dir, ignore_errors=True)
 
 
 def list_archives() -> list[dict]:

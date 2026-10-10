@@ -101,12 +101,12 @@
 
         <div class="bk-grid">
           <div class="field">
-            <label>Encryption passphrase <span style="font-weight:400;color:var(--text-3)">{% if cfg.passphrase_set %}— leave blank to keep current{% else %}— optional, recommended for off-site{% endif %}</span></label>
-            <input type="password" name="passphrase" autocomplete="off" placeholder="{{ '••••••••' if cfg.passphrase_set else 'gpg AES-256' }}">
-          </div>
-          <div class="field">
-            <label>Keep this many local archives</label>
-            <input type="number" name="retention" min="1" max="365" value="{{ cfg.retention }}">
+            <label>Keep this many off-site copies <span style="font-weight:400;color:var(--text-3)">— 0 = keep all</span></label>
+            <input type="number" name="offsite_retention" min="0" max="3650" value="{{ cfg.offsite_retention or 0 }}">
+            <div style="font-size:11px;color:var(--text-3);margin-top:5px;line-height:1.5">
+              After each successful upload, older copies beyond this number are deleted from the bucket
+              (needs <code>s3:DeleteObject</code>). With 0, nothing is ever deleted — use a bucket lifecycle rule instead.
+            </div>
           </div>
         </div>
 
@@ -129,6 +129,22 @@
         <button type="submit" class="btn btn-primary btn-sm">Back up now</button>
       </form>
     </div>
+    <!-- Local settings: fields belong to #backup-form so one save covers everything. -->
+    <div class="bk-form" style="padding:18px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:14px">
+      <div class="bk-grid">
+        <div class="field">
+          <label>Keep this many local archives</label>
+          <input type="number" name="retention" form="backup-form" min="1" max="365" value="{{ cfg.retention }}">
+          <div style="font-size:11px;color:var(--text-3);margin-top:5px">Stored on this server in <code>/opt/rustdesk-fleet/backups</code>; the oldest are deleted after each backup.</div>
+        </div>
+        <div class="field">
+          <label>Encryption passphrase <span style="font-weight:400;color:var(--text-3)">{% if cfg.passphrase_set %}— set; leave blank to keep{% else %}— optional, recommended{% endif %}</span></label>
+          <input type="password" name="passphrase" form="backup-form" autocomplete="off" placeholder="{{ '••••••••' if cfg.passphrase_set else 'gpg AES-256' }}">
+          <div style="font-size:11px;color:var(--text-3);margin-top:5px">Encrypts local and off-site archives. Keep a copy off this server — it's required to restore.</div>
+        </div>
+      </div>
+      <div><button type="submit" form="backup-form" class="btn btn-primary btn-sm">Save backup settings</button></div>
+    </div>
     {% if archives %}
     <div class="table-wrap">
       <table class="js-sort">
@@ -147,6 +163,12 @@
                 <input type="hidden" name="confirm" value="yes">
                 <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--warning)">Restore</button>
               </form>
+              <form method="post" action="/admin/backup/delete" style="display:inline;margin:0"
+                    onsubmit="return confirm('Delete {{ a.file }} from this server?{% if archives|length == 1 %}\n\nThis is the ONLY local archive — you will have no local backup until the next one runs.{% endif %}\n\nOff-site copies are not affected. This cannot be undone.')">
+                <input type="hidden" name="archive" value="{{ a.file }}">
+                <input type="hidden" name="confirm" value="yes">
+                <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Delete</button>
+              </form>
             </td>
           </tr>
         {% endfor %}
@@ -164,9 +186,65 @@
     </div>
   </div>
 
+  <!-- Off-site archives -->
+  {% if remote_configured or remote_error %}
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2 style="font-size:13px;font-weight:600;margin:0">Off-site archives</h2>
+        <div style="font-size:12px;color:var(--text-3);margin-top:2px">
+          Copies in the off-site destination{% if cfg.s3_bucket %} (<code>s3://{{ cfg.s3_bucket }}{% if cfg.s3_prefix %}/{{ cfg.s3_prefix.strip('/') }}{% endif %}</code>){% endif %}.
+          Use these to recover if this server's local archives are lost.
+        </div>
+      </div>
+    </div>
+    {% if remote_error %}
+    <div class="card-body"><p class="text-sm" style="margin:0;color:var(--danger)">Could not list the off-site destination: {{ remote_error }}</p></div>
+    {% elif remote_archives %}
+    <div class="table-wrap">
+      <table class="js-sort">
+        <thead><tr><th>Archive</th><th>Size</th><th>Uploaded (UTC)</th><th></th></tr></thead>
+        <tbody>
+        {% for a in remote_archives %}
+          <tr>
+            <td class="mono text-sm" style="word-break:break-all">{{ a.file }}{% if a.encrypted %} <span class="badge badge-built">encrypted</span>{% endif %}</td>
+            <td class="text-sm text-muted">{{ a.size_human }}</td>
+            <td class="text-sm text-muted mono" style="white-space:nowrap">{{ a.modified }}</td>
+            <td style="white-space:nowrap;text-align:right">
+              <form method="post" action="/admin/backup/offsite/restore" style="display:inline;margin:0"
+                    data-busy="Restoring…" data-confirm="Restore from off-site {{ a.file }}?\n\nIt is downloaded from the bucket, then overwrites the server keypair and databases and restarts the relay. A local safety snapshot of the current state is taken first. You may be logged out.{% if a.encrypted and not cfg.passphrase_set %}\n\nWARNING: this archive is encrypted but no passphrase is set — the restore will fail.{% endif %}\n\nProceed?">
+                <input type="hidden" name="archive" value="{{ a.file }}">
+                <input type="hidden" name="confirm" value="yes">
+                <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--warning)">Restore</button>
+              </form>
+              <form method="post" action="/admin/backup/offsite/delete" style="display:inline;margin:0"
+                    data-confirm="Delete {{ a.file }} from the off-site destination?{% if remote_archives|length == 1 %}\n\nThis is the ONLY off-site copy — nothing will survive loss of this server until the next upload.{% endif %}\n\nLocal copies are not affected. This cannot be undone.">
+                <input type="hidden" name="archive" value="{{ a.file }}">
+                <input type="hidden" name="confirm" value="yes">
+                <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card-body"><p class="text-muted text-sm" style="margin:0">No archives in the off-site destination yet.{% if not cfg.enabled %} Off-site copy is off — turn it on above to upload backups.{% endif %}</p></div>
+    {% endif %}
+  </div>
+  {% endif %}
+
 </div>
 
 <script>
+// data-confirm forms: ask first, then show a busy label while the request runs.
+document.querySelectorAll('form[data-confirm]').forEach(f => f.addEventListener('submit', e => {
+  if (!confirm(f.dataset.confirm.replace(/\\n/g, '\n'))) { e.preventDefault(); return; }
+  const b = f.querySelector('button');
+  if (f.dataset.busy) { b.disabled = true; b.textContent = f.dataset.busy; }
+}));
+
 // Toggle saves the whole form right away, so the setting can't be lost by navigating off.
 let bkDirty = false;
 function toggleOffsite(cb) {
@@ -179,7 +257,9 @@ function toggleOffsite(cb) {
 }
 (function () {
   const form = document.getElementById('backup-form');
-  form.addEventListener('input', e => { if (e.target.id !== 'offsite-toggle') bkDirty = true; });
+  document.addEventListener('input', e => {
+    if (e.target.form === form && e.target.id !== 'offsite-toggle') bkDirty = true;
+  });
   form.addEventListener('submit', () => { bkDirty = false; });
   window.addEventListener('beforeunload', e => { if (bkDirty) { e.preventDefault(); e.returnValue = ''; } });
 })();

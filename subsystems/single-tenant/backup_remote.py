@@ -41,6 +41,7 @@ _DEFAULTS = {
     "enabled": 0, "provider": "s3", "s3_provider": "aws", "s3_endpoint": "",
     "s3_region": "", "s3_bucket": "", "s3_prefix": "", "s3_access_key": "",
     "s3_secret_key": "", "rclone_remote": "", "passphrase": "", "retention": 14,
+    "offsite_retention": 0,
 }
 
 
@@ -137,6 +138,94 @@ def test(cfg: dict) -> dict:
         return {"ok": False, "error": "rclone is not installed on the server."}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:360]}"}
+
+
+ARCHIVE_PREFIX = "rustdesk-fleet-"   # must match backup._PREFIX; nothing else is listed or touched
+
+
+def _human(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+def list_remote(cfg: dict) -> list[dict]:
+    """Our archives at the S3 destination, newest first. Raises on S3 errors.
+
+    Only direct children of the prefix named like our archives are returned;
+    archive names embed a UTC timestamp, so name order = age order.
+    """
+    if (cfg.get("provider") or "s3") != "s3":
+        raise RuntimeError("Browsing off-site archives is only supported for S3 destinations.")
+    client = _s3_client(cfg)
+    list_prefix = _s3_key(cfg, ARCHIVE_PREFIX)
+    base = len(list_prefix) - len(ARCHIVE_PREFIX)
+    out = []
+    for page in client.get_paginator("list_objects_v2").paginate(Bucket=cfg["s3_bucket"], Prefix=list_prefix):
+        for obj in page.get("Contents", []):
+            name = obj["Key"][base:]
+            if "/" in name:
+                continue   # never reach into sub-folders under the prefix
+            out.append({
+                "file": name,
+                "key": obj["Key"],
+                "size_bytes": obj["Size"],
+                "size_human": _human(obj["Size"]),
+                "modified": obj["LastModified"].strftime("%Y-%m-%d %H:%M:%S"),
+                "encrypted": name.endswith(".gpg"),
+            })
+    out.sort(key=lambda a: a["file"], reverse=True)
+    return out
+
+
+def _find_remote(cfg: dict, filename: str) -> dict:
+    """Resolve a filename to one of our listed archives (no arbitrary keys)."""
+    for a in list_remote(cfg):
+        if a["file"] == filename:
+            return a
+    raise FileNotFoundError(f"{filename} is not in the off-site destination.")
+
+
+def download(cfg: dict, filename: str, dest_dir: Path) -> Path:
+    """Fetch one off-site archive into dest_dir. Needs s3:GetObject."""
+    a = _find_remote(cfg, filename)
+    dest = Path(dest_dir) / a["file"]
+    _s3_client(cfg).download_file(cfg["s3_bucket"], a["key"], str(dest))
+    return dest
+
+
+def delete_remote(cfg: dict, filename: str) -> None:
+    """Delete one off-site archive. Needs s3:DeleteObject."""
+    a = _find_remote(cfg, filename)
+    _s3_client(cfg).delete_object(Bucket=cfg["s3_bucket"], Key=a["key"])
+
+
+def prune(cfg: dict) -> dict:
+    """Keep only the newest `offsite_retention` archives at the destination (0 = keep all).
+
+    Returns {kept, deleted, error}.
+    """
+    keep = int(cfg.get("offsite_retention") or 0)
+    if keep <= 0:
+        return {"kept": None, "deleted": 0, "error": None}
+    if (cfg.get("provider") or "s3") != "s3":
+        return {"kept": None, "deleted": 0, "error": "Off-site retention is only supported for S3 destinations."}
+    try:
+        keys = [a["key"] for a in list_remote(cfg)]
+        client = _s3_client(cfg)
+        old = keys[keep:]
+        for i in range(0, len(old), 1000):
+            resp = client.delete_objects(
+                Bucket=cfg["s3_bucket"], Delete={"Objects": [{"Key": k} for k in old[i:i + 1000]], "Quiet": True})
+            if resp.get("Errors"):
+                e = resp["Errors"][0]
+                return {"kept": len(keys) - i, "deleted": i,
+                        "error": f"Could not delete old off-site copies ({e.get('Code')}): "
+                                 "the access key needs s3:DeleteObject for off-site retention."}
+        return {"kept": min(len(keys), keep), "deleted": len(old), "error": None}
+    except Exception as e:
+        return {"kept": None, "deleted": 0, "error": f"{type(e).__name__}: {str(e)[:360]}"}
 
 
 def ship(archive: Path, cfg: dict) -> dict:

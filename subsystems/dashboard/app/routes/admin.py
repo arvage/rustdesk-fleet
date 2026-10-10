@@ -1,6 +1,7 @@
 import csv
 import io
 import subprocess
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
@@ -101,6 +102,15 @@ async def admin_backup(request: Request, current_user: dict = Depends(require_au
         backup_status = backup.status()
     except Exception:
         archives, backup_status = [], None
+    # Off-site listing: shown whenever a destination is configured (even if the toggle is off).
+    remote_archives, remote_error, remote_configured = [], None, False
+    try:
+        import backup_remote
+        remote_configured = backup_remote.offsite_summary(cfg)["configured"]
+        if remote_configured:
+            remote_archives = backup_remote.list_remote(cfg)
+    except Exception as e:
+        remote_error = f"{type(e).__name__}: {str(e)[:300]}"
     # Never send secrets to the browser; show only whether they're set.
     cfg_view = dict(cfg)
     cfg_view["s3_secret_set"] = bool(cfg.get("s3_secret_key"))
@@ -113,6 +123,9 @@ async def admin_backup(request: Request, current_user: dict = Depends(require_au
             "current_user": current_user,
             "cfg": cfg_view,
             "archives": archives,
+            "remote_archives": remote_archives,
+            "remote_error": remote_error,
+            "remote_configured": remote_configured,
             "backup_status": backup_status,
         },
     )
@@ -129,6 +142,10 @@ def _save_backup_form(form, current_user: dict) -> dict:
         ret = max(1, min(365, int(f("retention", "14"))))
     except ValueError:
         ret = 14
+    try:
+        off_ret = max(0, min(3650, int(f("offsite_retention", "0") or "0")))
+    except ValueError:
+        off_ret = 0
     is_enabled = 1 if f("enabled") == "1" else 0
 
     conn = get_db()
@@ -136,9 +153,9 @@ def _save_backup_form(form, current_user: dict) -> dict:
     conn.execute(
         """UPDATE backup_config SET enabled=?, provider=?, s3_provider=?, s3_endpoint=?,
                s3_region=?, s3_bucket=?, s3_prefix=?, s3_access_key=?, rclone_remote=?,
-               retention=?, updated_at=datetime('now') WHERE id=1""",
+               retention=?, offsite_retention=?, updated_at=datetime('now') WHERE id=1""",
         (is_enabled, provider, f("s3_provider", "aws"), f("s3_endpoint"), f("s3_region"),
-         f("s3_bucket"), f("s3_prefix"), f("s3_access_key"), f("rclone_remote"), ret),
+         f("s3_bucket"), f("s3_prefix"), f("s3_access_key"), f("rclone_remote"), ret, off_ret),
     )
     if f("s3_secret_key"):
         conn.execute("UPDATE backup_config SET s3_secret_key=? WHERE id=1", (f("s3_secret_key"),))
@@ -223,20 +240,124 @@ def admin_backup_restore(
         return RedirectResponse("/admin/backup", status_code=303)
 
     res = backup.restore(backup.BACKUP_DIR / archive)
+    return _finish_restore(request, res, archive, current_user)
+
+
+def _finish_restore(request: Request, res: dict, label: str, current_user: dict) -> RedirectResponse:
+    """Shared tail of local + off-site restore: restart relay, audit, flash."""
     if not res["ok"]:
         _set_flash(request, "error", f"Restore failed: {res['error']} (a safety snapshot was taken: {res.get('safety')})")
         return RedirectResponse("/admin/backup", status_code=303)
 
     ok, relay_msg = _restart_relay()
     log_event_conn = get_db()
-    log_event(log_event_conn, "backup_restored", f"{archive} -> {', '.join(res['applied'])}", current_user["email"])
+    log_event(log_event_conn, "backup_restored", f"{label} -> {', '.join(res['applied'])}", current_user["email"])
     log_event_conn.commit()
     log_event_conn.close()
-    msg = (f"Restored {', '.join(res['applied'])} from {archive}. "
+    msg = (f"Restored {', '.join(res['applied'])} from {label}. "
            f"Safety snapshot: {res.get('safety')}. "
            + ("Relay restarted." if ok else f"Relay restart FAILED: {relay_msg} — restart it from the box.")
            + " If you get logged out, sign in again.")
     _set_flash(request, "success" if ok else "error", msg)
+    return RedirectResponse("/admin/backup", status_code=303)
+
+
+@router.post("/admin/backup/offsite/restore")
+def admin_backup_offsite_restore(
+    request: Request,
+    archive: str = Form(""),
+    confirm: str = Form(""),
+    current_user: dict = Depends(require_auth),
+):
+    """Download an off-site archive to a temp dir and restore from it."""
+    require_perm(current_user, "manage_backups")
+    import tempfile
+    import shutil
+    import backup
+    import backup_remote
+    if confirm != "yes":
+        _set_flash(request, "error", "Restore not confirmed.")
+        return RedirectResponse("/admin/backup", status_code=303)
+    tmp = Path(tempfile.mkdtemp(prefix="rdf-offsite-"))
+    try:
+        try:
+            # download() only accepts names in the off-site listing (no arbitrary keys).
+            path = backup_remote.download(_backup_cfg(), archive, tmp)
+        except FileNotFoundError:
+            _set_flash(request, "error", "Unknown off-site archive.")
+            return RedirectResponse("/admin/backup", status_code=303)
+        except Exception as e:
+            hint = " The access key needs s3:GetObject to restore." if "AccessDenied" in str(e) or "403" in str(e) else ""
+            _set_flash(request, "error", f"Could not download {archive}: {type(e).__name__}: {str(e)[:250]}.{hint}")
+            return RedirectResponse("/admin/backup", status_code=303)
+        res = backup.restore(path)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return _finish_restore(request, res, f"off-site {archive}", current_user)
+
+
+@router.post("/admin/backup/offsite/delete")
+def admin_backup_offsite_delete(
+    request: Request,
+    archive: str = Form(""),
+    confirm: str = Form(""),
+    current_user: dict = Depends(require_auth),
+):
+    """Delete one archive from the off-site destination. Local copies are not touched."""
+    require_perm(current_user, "manage_backups")
+    import backup_remote
+    if confirm != "yes":
+        _set_flash(request, "error", "Delete not confirmed.")
+        return RedirectResponse("/admin/backup", status_code=303)
+    try:
+        backup_remote.delete_remote(_backup_cfg(), archive)
+    except FileNotFoundError:
+        _set_flash(request, "error", "Unknown off-site archive.")
+        return RedirectResponse("/admin/backup", status_code=303)
+    except Exception as e:
+        hint = " The access key needs s3:DeleteObject to delete." if "AccessDenied" in str(e) or "403" in str(e) else ""
+        _set_flash(request, "error", f"Could not delete {archive}: {type(e).__name__}: {str(e)[:250]}.{hint}")
+        return RedirectResponse("/admin/backup", status_code=303)
+    conn = get_db()
+    log_event(conn, "backup_offsite_deleted", archive, current_user["email"])
+    conn.commit()
+    conn.close()
+    _set_flash(request, "success", f"Deleted {archive} from the off-site destination. Local copies are unchanged.")
+    return RedirectResponse("/admin/backup", status_code=303)
+
+
+@router.post("/admin/backup/delete")
+def admin_backup_delete(
+    request: Request,
+    archive: str = Form(""),
+    confirm: str = Form(""),
+    current_user: dict = Depends(require_auth),
+):
+    """Delete one local archive. Off-site copies are not touched."""
+    require_perm(current_user, "manage_backups")
+    import backup
+    if confirm != "yes":
+        _set_flash(request, "error", "Delete not confirmed.")
+        return RedirectResponse("/admin/backup", status_code=303)
+    # Only allow an archive that actually exists in the backup dir (no traversal).
+    names = {a["file"] for a in backup.list_archives()}
+    if archive not in names:
+        _set_flash(request, "error", "Unknown archive.")
+        return RedirectResponse("/admin/backup", status_code=303)
+    try:
+        (backup.BACKUP_DIR / archive).unlink()
+    except OSError as e:
+        _set_flash(request, "error", f"Could not delete {archive}: {e.strerror or e}")
+        return RedirectResponse("/admin/backup", status_code=303)
+    conn = get_db()
+    log_event(conn, "backup_deleted", archive, current_user["email"])
+    conn.commit()
+    conn.close()
+    left = len(names) - 1
+    _set_flash(request, "success" if left else "error",
+               f"Deleted {archive} from this server. "
+               + (f"{left} local archive(s) left." if left else
+                  "No local archives left — use Back up now to create one."))
     return RedirectResponse("/admin/backup", status_code=303)
 
 

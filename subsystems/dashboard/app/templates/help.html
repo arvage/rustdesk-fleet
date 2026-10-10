@@ -147,7 +147,9 @@
   <ul>
     <li>Protect the server <strong>keypair</strong> (every client is tied to it) and the databases. A <strong>nightly</strong> backup runs automatically; you can also back up on demand.</li>
     <li>Set an <strong>off-site destination</strong> and <strong>encryption passphrase</strong> under Admin → Backup &amp; Restore, then test and enable. Local-only backups don't survive losing the server.</li>
+    <li><strong>Retention</strong> is separate for each copy: <em>local archives</em> kept on the server (default 14), and <em>off-site copies</em> kept in the bucket (0 = keep all; pruning needs <code>s3:DeleteObject</code>).</li>
     <li><strong>Restore</strong> takes a safety snapshot first, replaces the keypair + databases, and restarts the relay. Clients reconnect without reconfiguration (same key).</li>
+    <li><strong>Off-site archives</strong> are listed too, with <strong>Restore</strong> (downloads from the bucket, then restores) and <strong>Delete</strong>. Restore needs <code>s3:GetObject</code>; delete needs <code>s3:DeleteObject</code>.</li>
   </ul>
 </div>
 

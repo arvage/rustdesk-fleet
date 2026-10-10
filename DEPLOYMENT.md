@@ -336,8 +336,19 @@ registry (`data/db_v2.sqlite3`) and the dashboard database
 Installer binaries and upstream assets are excluded (large, reproducible).
 Both live SQLite databases are copied with SQLite's online-backup API, so
 each archive is internally consistent. Archives land in
-`/opt/rustdesk-fleet/backups/` and the newest `BACKUP_RETENTION` (default
-14) are kept.
+`/opt/rustdesk-fleet/backups/` and the newest N are kept — set as *Keep this
+many local archives* under Admin → Backup & Restore (default 14; falls back to
+`BACKUP_RETENTION`). Off-site copies have their own limit, *Keep this many
+off-site copies* (default 0 = keep all): after each successful upload the
+oldest `rustdesk-fleet-*` objects under the prefix beyond that number are
+deleted, which requires `s3:DeleteObject` on the access key. With 0, use an
+S3 lifecycle rule to expire old copies instead.
+
+The Backup & Restore page also lists the **off-site archives** with Restore
+(downloaded to a temp dir, then restored like a local archive; needs
+`s3:GetObject`) and Delete (needs `s3:DeleteObject`). A restore's safety
+snapshot is always local-only — it is never uploaded and never triggers
+off-site pruning.
 
 A systemd timer runs it nightly **as root** (so it also captures the
 container's root-only `RustDesk.toml`):

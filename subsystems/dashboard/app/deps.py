@@ -360,6 +360,11 @@ def run_migrations() -> None:
         );
     """)
     conn.commit()
+    # retention = local archives kept; offsite_retention = off-site copies kept (0 = keep all).
+    backup_cols = {row[1] for row in conn.execute("PRAGMA table_info(backup_config)").fetchall()}
+    if "offsite_retention" not in backup_cols:
+        conn.execute("ALTER TABLE backup_config ADD COLUMN offsite_retention INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
 
     # Roles ("permission levels"): a named capability set users reference by key.
     # See app/permissions.py for the capability catalogue and seeded defaults.

@@ -52,7 +52,7 @@ _CATEGORY_EVENTS = {
     "server": [
         "server_updated", "server_update_start", "server_update_available",
         "stack_up", "stack_up_attempt", "compose_written", "key_captured",
-        "backup_succeeded", "backup_failed", "backup_restored", "backup_restore_failed",
+        "backup_succeeded", "backup_failed", "backup_restored", "backup_restore_failed", "backup_deleted", "backup_offsite_deleted",
         "backup_config_updated", "relay_restarted", "relay_restart_failed", "logs_pruned",
     ],
 }

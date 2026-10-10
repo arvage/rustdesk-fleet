@@ -221,10 +221,19 @@ Backups protect the one thing that can't be regenerated — the server keypair
   **encryption passphrase** under Admin → Backup & Restore, then **Test
   connection** and enable it. Local-only backups don't survive losing the
   server, so an off-site destination is strongly recommended.
+- **Retention** is set separately for each copy. *Keep this many local
+  archives* (Local archives card, default 14) controls what stays on the
+  server. *Keep this many off-site copies* (destination card, default 0 =
+  keep all) prunes the oldest copies from the bucket after each successful
+  upload; it needs the access key to have `s3:DeleteObject`.
 - **Restore** from any archive on the Backup & Restore page: it takes a safety
   snapshot first, replaces the keypair and databases, and restarts the relay.
   Because the keypair is preserved, existing clients reconnect without
   reconfiguration.
+- **Off-site archives** are listed on the same page, each with **Restore**
+  (downloads it from the bucket, then restores as above) and **Delete**.
+  Restoring needs `s3:GetObject` on the access key; deleting needs
+  `s3:DeleteObject`. Local archives can be deleted from their own list too.
 
 ---
 

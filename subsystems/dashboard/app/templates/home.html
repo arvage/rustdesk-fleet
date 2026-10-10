@@ -260,7 +260,13 @@
       {% if backup_status.ok %}
       <div class="kv-grid">
         <div class="kv-row"><div class="kv-key">Latest archive</div><div class="kv-val"><code>{{ backup_status.file }}</code> &nbsp;<span class="text-muted">{{ backup_status.size_human }}</span></div></div>
-        <div class="kv-row"><div class="kv-key">Archives kept</div><div class="kv-val text-muted">{{ backup_status.retained }} (nightly at 03:30 UTC, keypair + databases)</div></div>
+        <div class="kv-row"><div class="kv-key">Kept on this server</div><div class="kv-val text-muted">{{ backup_status.retained }} (nightly at 03:30 UTC, keypair + databases)</div></div>
+        {% if backup_status.offsite and backup_status.offsite.ok %}
+        <div class="kv-row"><div class="kv-key">Kept off-site</div><div class="kv-val text-muted">{% if backup_status.offsite.kept is not none %}{{ backup_status.offsite.kept }}{% if backup_status.offsite.pruned %} ({{ backup_status.offsite.pruned }} older removed){% endif %}{% else %}all (no off-site limit set){% endif %}</div></div>
+        {% endif %}
+        {% if backup_status.offsite and backup_status.offsite.prune_error %}
+        <div class="kv-row"><div class="kv-key">Off-site cleanup</div><div class="kv-val" style="color:var(--danger)">{{ backup_status.offsite.prune_error }}</div></div>
+        {% endif %}
         {% if backup_status.skipped %}
         <div class="kv-row"><div class="kv-key">Skipped</div><div class="kv-val text-muted">{{ backup_status.skipped | length }} root-only file(s) — captured by the nightly root backup</div></div>
         {% endif %}
