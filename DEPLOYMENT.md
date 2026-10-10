@@ -483,6 +483,87 @@ docker compose up -d
 | Off-site cleanup error on Home | Retention > 0 but key lacks `s3:DeleteObject` — grant it or set retention 0 + lifecycle rule. |
 | "encrypted but no passphrase is configured" | Set the passphrase that archive was made with before restoring. |
 
+## 10. Code signing (Azure Trusted Signing)
+
+Unsigned installers trigger a Windows SmartScreen "unknown publisher" warning.
+The dashboard signs Windows installers with **Azure Trusted Signing** (renamed
+**Azure Artifact Signing** in Jan 2026 — the portal may show either name),
+using `jsign` **on this Linux box** — no Windows runner or GitHub Actions
+needed. Signing is configured entirely in Admin → Signing once the Azure side
+is set up.
+
+### Server prerequisites (one-time, already done on this box)
+
+```bash
+sudo apt-get install -y default-jre-headless          # Java runtime for jsign
+sudo mkdir -p /opt/rustdesk-fleet/tools
+sudo curl -fsSL -o /opt/rustdesk-fleet/tools/jsign-7.1.jar \
+  https://repo1.maven.org/maven2/net/jsign/jsign/7.1/jsign-7.1.jar
+```
+
+The signing engine (`subsystems/single-tenant/sign_installer.py`) expects the
+jar at `/opt/rustdesk-fleet/tools/jsign-7.1.jar`. jsign 7.0+ is required (it
+added the `TRUSTEDSIGNING` store type).
+
+### Azure setup (one-time, in the Azure portal)
+
+Trusted Signing needs an **Azure subscription**. Identity validation can take
+days for the first certificate profile — start it early.
+
+1. **Register the provider:** Subscription → Resource providers → register
+   `Microsoft.CodeSigning`.
+2. **Create a Trusted Signing / Artifact Signing account.** Note its **region**
+   — the signing endpoint is regional.
+3. **Validate an identity:** in the account, create an **Identity validation**
+   (Public Trust for software shipped to customers). This is where the wait is.
+   It needs the **Trusted Signing Identity Verifier** role, which only works in
+   the portal.
+4. **Create a certificate profile** (Public Trust) under the account once the
+   identity is validated. Note its **name**.
+5. **Create a service principal:** Entra ID → App registrations → New. Note the
+   **Directory (tenant) ID** and **Application (client) ID**. Under the app →
+   Certificates & secrets, create a **client secret** and copy its value now
+   (shown once).
+6. **Grant the signer role:** on the signing **account** → Access control (IAM)
+   → Add role assignment → **Trusted Signing Certificate Profile Signer**
+   (a.k.a. *Artifact Signing Certificate Profile Signer*) → assign to the
+   service principal from step 5. This role is what actually permits signing.
+7. **Copy the endpoint URI** from the account's **Overview** page — it looks
+   like `https://eus.codesigning.azure.net` (the region host differs: `eus`,
+   `weu`, `wus2`, …).
+
+### Dashboard configuration
+
+Admin → **Signing**:
+
+| Field | Value |
+|---|---|
+| Directory (tenant) ID | step 5 |
+| Application (client) ID | step 5 |
+| Client secret | step 5 (blank on later saves keeps the stored one) |
+| Endpoint | the host from step 7, e.g. `eus.codesigning.azure.net` |
+| Account name | the signing account name (case-sensitive) |
+| Certificate profile | the profile name from step 4 |
+
+Turn **Code signing ON**, leave **auto-sign** on to sign every build, then
+**Save & test** — it mints an Azure token and checks jsign. With auto-sign on,
+`Back up now`–style rebuilds come out signed; otherwise use the **Sign** button
+on each installer (group page). Download links serve the signed file
+automatically (links prefer `signed_path`). Signing appends an RFC3161
+timestamp from `http://timestamp.acs.microsoft.com`, so signatures stay valid
+after the certificate rotates.
+
+### Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---|---|
+| Test fails, `AADSTS7000215` | Wrong client secret — recreate it and re-save. |
+| Test fails, `AADSTS700016` / `AADSTS90002` | Wrong client ID or tenant ID. |
+| Sign fails, `Unauthorized` / 403 | Service principal missing the **Certificate Profile Signer** role on the account. |
+| Sign fails, endpoint/account error | Endpoint host doesn't match the account's region, or account name case is wrong. |
+| Test fails, "jsign jar not found" | Install the jar (server prerequisites above). |
+| Signs but still warns on download | Identity validation / certificate profile not fully provisioned yet. |
+
 ## Verify everything
 
 ```bash

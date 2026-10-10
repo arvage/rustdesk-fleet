@@ -129,9 +129,15 @@ async def group_detail(
         }, info))
 
     installer_rows = [
-        {**dict(r), "filename": Path(r["unsigned_path"]).name if r["unsigned_path"] else None}
+        {**dict(r), "filename": Path(r["signed_path"] or r["unsigned_path"]).name
+                               if (r["signed_path"] or r["unsigned_path"]) else None}
         for r in installers
     ]
+    try:
+        import sign_installer
+        signing_enabled = bool(sign_installer.get_config().get("enabled"))
+    except Exception:
+        signing_enabled = False
 
     return templates.TemplateResponse(
         request,
@@ -153,6 +159,7 @@ async def group_detail(
             "current_user": current_user,
             "has_password": bool(group["unattended_password"]),
             "unattended_password": group["unattended_password"] or "",
+            "signing_enabled": signing_enabled,
         },
     )
 
@@ -336,9 +343,13 @@ async def group_build(
         return RedirectResponse(f"/groups/{slug}", status_code=303)
     try:
         result = build_installer(slug, platform, current_user["email"])
-        sha_short = (result["sha256_unsigned"] or "")[:16]
         label = PLATFORMS[platform]["label"]
-        _set_flash(request, "success", f"{label} installer ready. SHA256: {sha_short}…")
+        if result["status"] == "signed":
+            sha_short = (result["sha256_signed"] or "")[:16]
+            _set_flash(request, "success", f"{label} installer built and signed. SHA256: {sha_short}…")
+        else:
+            sha_short = (result["sha256_unsigned"] or "")[:16]
+            _set_flash(request, "success", f"{label} installer ready (unsigned). SHA256: {sha_short}…")
         conn = get_db()
         grp = conn.execute("SELECT display_name FROM client_groups WHERE slug=?", (slug,)).fetchone()
         log_event(conn, "installer_built", f"group={slug} platform={platform}", current_user["email"])
@@ -355,6 +366,21 @@ async def group_build(
     return RedirectResponse(f"/groups/{slug}", status_code=303)
 
 
+@router.post("/groups/{slug}/installers/{installer_id}/sign")
+async def group_sign_installer(
+    request: Request, slug: str, installer_id: int,
+    current_user: dict = Depends(require_auth),
+):
+    require_perm(current_user, "manage_groups")
+    from generate_installer import sign_existing, InstallerError
+    try:
+        row = sign_existing(installer_id, current_user["email"])
+        _set_flash(request, "success", f"Installer signed. SHA256: {(row['sha256_signed'] or '')[:16]}…")
+    except InstallerError as e:
+        _set_flash(request, "error", f"Signing failed: {e}")
+    return RedirectResponse(f"/groups/{slug}", status_code=303)
+
+
 @router.get("/download/{filename}")
 async def download(
     request: Request, filename: str, current_user: dict = Depends(require_auth)
@@ -366,8 +392,9 @@ async def download(
 
     conn = get_db()
     row = conn.execute(
-        "SELECT id FROM installers WHERE unsigned_path = ? AND status = 'built'",
-        (str(candidate),),
+        "SELECT id FROM installers WHERE (unsigned_path = ? OR signed_path = ?) "
+        "AND status IN ('built','signed')",
+        (str(candidate), str(candidate)),
     ).fetchone()
     conn.close()
     if row is None or not candidate.exists():

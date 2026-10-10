@@ -391,6 +391,50 @@ def _build_script(
     return output_path
 
 
+def sign_installer_row(conn, installer_id: int, path, scfg: dict, user_email: str = "") -> dict:
+    """Sign one installer in place and update its row. Raises on failure.
+
+    jsign signs with --replace, so the signed file keeps the same path; links
+    prefer signed_path, so serving picks up the signed build automatically.
+    """
+    import sign_installer
+    conn.execute("UPDATE installers SET status='signing' WHERE id=?", (installer_id,))
+    conn.commit()
+    res = sign_installer.sign(path, scfg)
+    if not res["ok"]:
+        conn.execute("UPDATE installers SET status='built', error_message=? WHERE id=?",
+                     (res["error"], installer_id))
+        conn.commit()
+        log_event(conn, "installer_sign_failed", f"installer_id={installer_id} {res['error'][:300]}", user_email)
+        raise InstallerError(res["error"])
+    conn.execute(
+        """UPDATE installers
+           SET status='signed', signed_path=?, sha256_signed=?, signed_at=datetime('now'),
+               error_message=NULL
+           WHERE id=?""",
+        (str(path), res["sha256"], installer_id),
+    )
+    conn.commit()
+    log_event(conn, "installer_signed", f"installer_id={installer_id} sha256={res['sha256'][:16]}...", user_email)
+    return dict(conn.execute("SELECT * FROM installers WHERE id=?", (installer_id,)).fetchone())
+
+
+def sign_existing(installer_id: int, user_email: str = "") -> dict:
+    """Manual sign/re-sign of a built installer, by id. Used by the dashboard."""
+    import sign_installer
+    conn = get_db()
+    row = conn.execute("SELECT * FROM installers WHERE id=?", (installer_id,)).fetchone()
+    if row is None:
+        raise InstallerError(f"Installer {installer_id} not found.")
+    path = row["signed_path"] or row["unsigned_path"]
+    if not path or not Path(path).exists():
+        raise InstallerError("Installer file is missing on disk — rebuild it first.")
+    scfg = sign_installer.get_config()
+    if not scfg.get("enabled"):
+        raise InstallerError("Code signing is not enabled. Configure it under Admin → Signing.")
+    return sign_installer_row(conn, installer_id, path, scfg, user_email)
+
+
 def build_installer(group_slug: str, platform: str = "windows-x64", user_email: str = "") -> dict:
     if platform not in PLATFORMS:
         raise InstallerError(
@@ -445,6 +489,17 @@ def build_installer(group_slug: str, platform: str = "windows-x64", user_email: 
         )
         conn.commit()
         log_event(conn, "installer_built", f"installer_id={installer_id} sha256={sha256[:16]}...", user_email)
+
+        # Auto-sign when signing is enabled with auto_sign on. A signing failure
+        # must not fail the build — the installer is still usable unsigned — so
+        # we log it and leave status='built' for a manual retry.
+        try:
+            import sign_installer
+            scfg = sign_installer.get_config()
+            if scfg.get("enabled") and scfg.get("auto_sign"):
+                sign_installer_row(conn, installer_id, output_path, scfg, user_email)
+        except Exception as e:
+            log_event(conn, "installer_sign_failed", f"installer_id={installer_id} {str(e)[:300]}", user_email)
 
     except Exception as e:
         conn.execute(

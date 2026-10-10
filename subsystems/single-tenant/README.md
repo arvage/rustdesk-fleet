@@ -258,8 +258,8 @@ policy. (Not yet verified on a live domain PC — see the dated entry above.)
 
 ## Not yet built
 
-- Signing subsystem (unchanged by this architecture shift) — needs Azure
-  Trusted Signing + GitHub Actions Windows runner
+- (Signing is now built — Azure Trusted Signing via jsign on this box; see
+  `subsystems/signing/README.md` and `DEPLOYMENT.md` → "Code signing".)
 
 ## Security note, stated plainly
 

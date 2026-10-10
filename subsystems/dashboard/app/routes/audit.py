@@ -33,6 +33,7 @@ _CATEGORY_EVENTS = {
     "installers": [
         "installer_built", "installer_build_start", "installer_build_failed",
         "installer_deleted", "installers_rebuilt", "client_version_updated",
+        "installer_signed", "installer_sign_failed", "signing_config_updated",
         "client_update_available", "installer_downloaded",
         "download_link_created", "download_link_emailed", "download_link_revoked",
     ],

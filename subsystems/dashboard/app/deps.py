@@ -366,6 +366,25 @@ def run_migrations() -> None:
         conn.execute("ALTER TABLE backup_config ADD COLUMN offsite_retention INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 
+    # Code-signing config (singleton). Azure Trusted Signing via jsign on this
+    # box; the client secret is stored here like the backup secret.
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS signing_config (
+            id            INTEGER PRIMARY KEY CHECK (id = 1),
+            enabled       INTEGER NOT NULL DEFAULT 0,
+            auto_sign     INTEGER NOT NULL DEFAULT 1,
+            provider      TEXT NOT NULL DEFAULT 'azure_trusted_signing',
+            azure_tenant_id     TEXT NOT NULL DEFAULT '',
+            azure_client_id     TEXT NOT NULL DEFAULT '',
+            azure_client_secret TEXT NOT NULL DEFAULT '',
+            endpoint      TEXT NOT NULL DEFAULT '',
+            account_name  TEXT NOT NULL DEFAULT '',
+            profile_name  TEXT NOT NULL DEFAULT '',
+            updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+    """)
+    conn.commit()
+
     # Roles ("permission levels"): a named capability set users reference by key.
     # See app/permissions.py for the capability catalogue and seeded defaults.
     conn.executescript("""

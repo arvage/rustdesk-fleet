@@ -92,6 +92,83 @@ async def admin_home(request: Request, current_user: dict = Depends(require_auth
 
 # ── Backup & restore ─────────────────────────────────────────────────────────
 
+def _signing_cfg() -> dict:
+    conn = get_db()
+    conn.execute("INSERT OR IGNORE INTO signing_config (id) VALUES (1)")
+    conn.commit()
+    row = conn.execute("SELECT * FROM signing_config WHERE id = 1").fetchone()
+    conn.close()
+    return dict(row)
+
+
+def _save_signing_form(form, current_user: dict) -> dict:
+    def f(name: str, default: str = "") -> str:
+        return (form.get(name) or default).strip()
+
+    enabled = 1 if f("enabled") == "1" else 0
+    auto_sign = 1 if f("auto_sign") == "1" else 0
+    conn = get_db()
+    conn.execute("INSERT OR IGNORE INTO signing_config (id) VALUES (1)")
+    conn.execute(
+        """UPDATE signing_config SET enabled=?, auto_sign=?, provider='azure_trusted_signing',
+               azure_tenant_id=?, azure_client_id=?, endpoint=?, account_name=?, profile_name=?,
+               updated_at=datetime('now') WHERE id=1""",
+        (enabled, auto_sign, f("azure_tenant_id"), f("azure_client_id"),
+         f("endpoint"), f("account_name"), f("profile_name")),
+    )
+    # Secret: blank submission preserves the stored value.
+    if f("azure_client_secret"):
+        conn.execute("UPDATE signing_config SET azure_client_secret=? WHERE id=1", (f("azure_client_secret"),))
+    log_event(conn, "signing_config_updated", f"enabled={enabled} auto_sign={auto_sign}", current_user["email"])
+    conn.commit()
+    conn.close()
+    return _signing_cfg()
+
+
+@router.get("/admin/signing", response_class=HTMLResponse)
+async def admin_signing(request: Request, current_user: dict = Depends(require_auth)):
+    require_perm(current_user, "manage_system")
+    cfg = _signing_cfg()
+    cfg_view = dict(cfg)
+    cfg_view["secret_set"] = bool(cfg.get("azure_client_secret"))
+    cfg_view.pop("azure_client_secret", None)
+    try:
+        import sign_installer
+        jsign_present = sign_installer.JSIGN_JAR.exists()
+    except Exception:
+        jsign_present = False
+    return templates.TemplateResponse(
+        request, "admin_signing.html",
+        {"current_user": current_user, "cfg": cfg_view, "jsign_present": jsign_present},
+    )
+
+
+@router.post("/admin/signing/save")
+async def admin_signing_save(request: Request, current_user: dict = Depends(require_auth)):
+    require_perm(current_user, "manage_system")
+    cfg = _save_signing_form(await request.form(), current_user)
+    state = "ON" if cfg["enabled"] else "OFF"
+    auto = " Auto-sign is on." if cfg["enabled"] and cfg["auto_sign"] else ""
+    _set_flash(request, "success", f"Signing settings saved. Code signing is {state}.{auto}")
+    return RedirectResponse("/admin/signing", status_code=303)
+
+
+@router.post("/admin/signing/test")
+async def admin_signing_test(request: Request, current_user: dict = Depends(require_auth)):
+    require_perm(current_user, "manage_system")
+    cfg = _save_signing_form(await request.form(), current_user)
+    try:
+        import sign_installer
+        res = sign_installer.test(cfg)
+    except Exception as e:
+        res = {"ok": False, "error": str(e)[:400]}
+    if res["ok"]:
+        _set_flash(request, "success", "Saved. Azure token acquired and jsign is present — signing is ready.")
+    else:
+        _set_flash(request, "error", f"Saved, but the signing test failed: {res['error']}")
+    return RedirectResponse("/admin/signing", status_code=303)
+
+
 @router.get("/admin/backup", response_class=HTMLResponse)
 async def admin_backup(request: Request, current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_backups")

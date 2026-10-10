@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Installer Signing — RustDesk Fleet{% endblock %}
+{% block page_title %}Installer Signing{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% block content %}
+<style>
+.sg-form input, .sg-form select {
+  width:100%; min-width:0; padding:7px 11px; border:1px solid var(--border-md);
+  border-radius:var(--radius-sm); font-size:13px; color:var(--text-1);
+  background:var(--surface); font-family:inherit; box-sizing:border-box; outline:none;
+}
+.sg-form input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(99,102,241,.12); }
+.sg-form .field label { display:block; font-size:12px; font-weight:500; color:var(--text-2); margin-bottom:5px; }
+.sg-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media (max-width:620px){ .sg-grid { grid-template-columns:1fr; } }
+</style>
+
+<p style="margin:0 0 18px"><a href="/admin" style="color:var(--accent);text-decoration:none;font-size:13px">← Admin</a></p>
+
+<div class="card">
+  <div class="card-header">
+    <div>
+      <h2 style="font-size:13px;font-weight:600;margin:0">Azure Trusted Signing</h2>
+      <div style="font-size:12px;color:var(--text-3);margin-top:2px">
+        Windows installers are signed on this server with jsign against Azure Trusted Signing.
+        Setup steps are in <code>DEPLOYMENT.md</code> → “Code signing”.
+      </div>
+    </div>
+    <button type="submit" form="signing-form" formaction="/admin/signing/test"
+            class="btn btn-ghost btn-sm" style="flex-shrink:0"
+            title="Saves these settings, then checks the Azure token and jsign">Save &amp; test</button>
+  </div>
+
+  {% if not jsign_present %}
+  <div class="card-body" style="border-bottom:1px solid var(--border)">
+    <p class="text-sm" style="margin:0;color:var(--warning)">
+      jsign is not installed on the server — signing will fail until it is. See DEPLOYMENT.md → Code signing.
+    </p>
+  </div>
+  {% endif %}
+
+  <form method="post" action="/admin/signing/save" class="sg-form" id="signing-form">
+    <div style="padding:18px;display:flex;flex-direction:column;gap:16px">
+
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#0F172A;border-radius:8px">
+        <label style="position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;margin:0">
+          <input type="checkbox" name="enabled" value="1" {% if cfg.enabled %}checked{% endif %}
+                 style="opacity:0;width:0;height:0">
+          <span style="position:absolute;inset:0;background:{{ '#3B82F6' if cfg.enabled else '#334155' }};border-radius:20px"></span>
+        </label>
+        <div>
+          <div style="font-weight:600;font-size:13px;color:#F1F5F9">Code signing {{ 'ON' if cfg.enabled else 'OFF' }}</div>
+          <div style="font-size:11px;color:#64748B;margin-top:2px">When on, installers can be signed from the group page.</div>
+        </div>
+      </div>
+
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);cursor:pointer">
+        <input type="checkbox" name="auto_sign" value="1" {% if cfg.auto_sign %}checked{% endif %}
+               style="width:auto;flex-shrink:0">
+        Sign automatically right after each build (recommended)
+      </label>
+
+      <div class="sg-grid">
+        <div class="field">
+          <label>Directory (tenant) ID</label>
+          <input type="text" name="azure_tenant_id" value="{{ cfg.azure_tenant_id }}" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Application (client) ID</label>
+          <input type="text" name="azure_client_id" value="{{ cfg.azure_client_id }}" placeholder="service-principal app id" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Client secret <span style="font-weight:400;color:var(--text-3)">{% if cfg.secret_set %}— leave blank to keep current{% endif %}</span></label>
+        <input type="password" name="azure_client_secret" autocomplete="off" placeholder="{{ '••••••••' if cfg.secret_set else 'service-principal secret' }}">
+      </div>
+
+      <div class="field">
+        <label>Endpoint <span style="font-weight:400;color:var(--text-3)">— your Trusted Signing region host</span></label>
+        <input type="text" name="endpoint" value="{{ cfg.endpoint }}" placeholder="eus.codesigning.azure.net">
+      </div>
+
+      <div class="sg-grid">
+        <div class="field">
+          <label>Account name</label>
+          <input type="text" name="account_name" value="{{ cfg.account_name }}" placeholder="Trusted Signing account">
+        </div>
+        <div class="field">
+          <label>Certificate profile</label>
+          <input type="text" name="profile_name" value="{{ cfg.profile_name }}" placeholder="certificate profile name">
+        </div>
+      </div>
+
+      <div><button type="submit" class="btn btn-primary btn-sm">Save signing settings</button></div>
+    </div>
+  </form>
+</div>
+{% endblock %}
