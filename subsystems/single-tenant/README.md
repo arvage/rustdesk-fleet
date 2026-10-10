@@ -146,18 +146,27 @@ verification.
 
 **What the Windows installer does on the end-user's machine** (current —
 see the sequence comment at the top of `installer.nsi.tmpl`):
-1. Pre-writes our config (`RustDesk2.toml` + `_local.toml`, and the
-   permanent password if the group has one) to the current user's
-   AppData, ProgramData, and the SYSTEM profile.
+1. Pre-writes our config (`RustDesk2.toml` + `RustDesk_local.toml`, and the
+   permanent password if the group has one) to **every real user profile**
+   on the machine (read from `HKLM\...\ProfileList`, `S-1-5-21-*`) plus the
+   **Default** profile for users who sign in later, and seeds the service
+   profile (`%WINDIR%\ServiceProfiles\LocalService\...`) on fresh installs.
 2. Runs the bundled `rustdesk-<version>-x86_64.exe --silent-install`,
    then **waits for RustDesk's background install script to finish**:
    the old service stopping (≤20 s), the registry's
    `HKLM\...\Uninstall\RustDesk\DisplayVersion` matching the version
    being installed, and the service running again (≤120 s in total,
    otherwise it shows "RustDesk did not install correctly").
-3. Stops the service and tray, re-writes the config, restarts the service,
-   then sets the permanent password via `rustdesk --password` and launches
-   the tray app.
+3. Stops the service and tray, re-writes the per-user config in every
+   profile, and restarts the service.
+4. **Pushes the server options into the running service over IPC** with
+   `rustdesk --option <key> <value>` (custom-rendezvous-server, relay-server,
+   api-server, key, allow-auto-update, allow-remote-config-modification).
+   This is the authoritative step: the service persists them and every
+   user's UI reads them from the service, so settings apply **no matter
+   which account ran the installer**. Then sets the permanent password via
+   `rustdesk --password`, and launches the tray app **as the signed-in
+   desktop user** (de-elevated, via `explorer.exe`).
 
 **Upgrades over an existing install** (fixed 2026-10-08, commit `8db6d42`):
 step 2 used to wait only for `C:\Program Files\RustDesk\rustdesk.exe` to
@@ -169,6 +178,31 @@ installer left it on 1.4.9). Fresh installs were unaffected. **Installers
 built before that commit can't upgrade an existing install — rebuild
 them.** Verified: `office-pc` upgraded 1.4.9 → 1.5.0 with a rebuilt
 installer.
+
+**Standard-user / domain-workstation fix (2026-10-10, commit `da5d1b2`)** —
+*not yet verified on a live domain PC.* On a domain workstation a standard
+user triggers a UAC credential prompt, so the installer runs as the **admin**
+account, not the person at the desk. The old installer wrote config only to
+the "current user" `%APPDATA%` (the admin's profile), wrote the service copy
+to `System32\config\systemprofile` (which the service never reads — RustDesk
+maps the SYSTEM profile to `ServiceProfiles\LocalService`), and named the UI
+file `_local.toml` (the client looks for `RustDesk_local.toml`). Result:
+installs fine, but the end user's RustDesk has no settings and they're set by
+hand. Fixes: write every profile + Default, use the correct service path and
+file name, and — authoritatively — push options into the service with
+`rustdesk --option` after it starts, so it works regardless of which account
+installed. Service `RustDesk2.toml`/`RustDesk.toml` are seeded only on fresh
+installs so upgrades keep the device's id + key_pair. Tray app now launches as
+the desktop user. **Rebuild all installers for this fix (done 2026-10-10,
+ids 57–62); test on one domain PC before wide rollout.**
+
+**Group unattended-password validation (2026-10-10, commit `da5d1b2`)** —
+the password is embedded inside NSIS strings, a shell `PW="..."`, and
+`RustDesk.toml`, so `"` `'` `` ` `` `$` `\` and control characters break the
+generated scripts. `setup_server.password_problem()` now rejects them on group
+create/edit (the dashboard shows the reason), `build_installer()` refuses a
+legacy bad password rather than emitting a broken installer, and the group
+forms show a tip + input pattern. Spaces and other symbols are allowed.
 
 **Config written to client machine** (`RustDesk2.toml`):
 ```toml
@@ -208,10 +242,13 @@ sent to clients pick up a rebuild automatically. Devices that are already
 installed keep their version until reinstalled or, with auto-update on,
 until RustDesk updates itself (within about a day).
 
-**Known limitation**: config writes to the *running user's* `%APPDATA%`.
-If an admin deploys this remotely under a different account, the config
-lands in the admin's profile, not the end-user's. Direct user-run
-installs (the expected flow) are fine.
+**Remote / cross-account deploys**: as of the 2026-10-10 fix the installer
+writes every user profile and pushes options into the service over IPC, so a
+deploy run under a different account (RMM, UAC-elevated admin) still configures
+the end user's client. **Caveat**: if the domain redirects user `%APPDATA%` to
+a network share, the per-user files won't reach it — but the service-level
+`--option` push still applies, so settings take effect. Test on a PC with that
+policy. (Not yet verified on a live domain PC — see the dated entry above.)
 
 **Prerequisites on the build box** (all already installed):
 - `nsis` (makensis) — `sudo apt install nsis`
