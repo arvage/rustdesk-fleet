@@ -253,6 +253,8 @@ async def client_heartbeat(request: Request):
     ).rowcount
     if unhidden:
         log_event(conn, "device_reappeared", rid, "")
+    # "Last seen" on the device lists; otherwise only a manual Sync moves it.
+    conn.execute("UPDATE devices SET last_seen = datetime('now') WHERE rustdesk_id = ?", (rid,))
     _reconcile_sessions(conn, rid, conns)
     policy = conn.execute(
         """SELECT cg.auto_update, cg.remote_config, cg.policy_ts
