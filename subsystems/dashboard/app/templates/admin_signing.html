@@ -45,13 +45,14 @@
 
       <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#0F172A;border-radius:8px">
         <label style="position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;margin:0">
-          <input type="checkbox" name="enabled" value="1" {% if cfg.enabled %}checked{% endif %}
-                 style="opacity:0;width:0;height:0">
-          <span style="position:absolute;inset:0;background:{{ '#3B82F6' if cfg.enabled else '#334155' }};border-radius:20px"></span>
+          <input type="checkbox" name="enabled" value="1" id="signing-toggle" {% if cfg.enabled %}checked{% endif %}
+                 style="opacity:0;width:0;height:0" onchange="toggleSigning(this)">
+          <span style="position:absolute;inset:0;cursor:pointer;background:{{ '#3B82F6' if cfg.enabled else '#334155' }};border-radius:20px;transition:background .15s"></span>
+          <span style="position:absolute;top:2px;left:{{ '18px' if cfg.enabled else '2px' }};width:16px;height:16px;background:#fff;border-radius:50%;pointer-events:none;transition:left .15s"></span>
         </label>
         <div>
-          <div style="font-weight:600;font-size:13px;color:#F1F5F9">Code signing {{ 'ON' if cfg.enabled else 'OFF' }}</div>
-          <div style="font-size:11px;color:#64748B;margin-top:2px">When on, installers can be signed from the group page.</div>
+          <div id="signing-label" style="font-weight:600;font-size:13px;color:#F1F5F9">Code signing {{ 'ON' if cfg.enabled else 'OFF' }}</div>
+          <div style="font-size:11px;color:#64748B;margin-top:2px">When on, installers can be signed from the group page. Saves immediately.</div>
         </div>
       </div>
 
@@ -97,4 +98,15 @@
     </div>
   </form>
 </div>
+
+<script>
+// Toggle saves the whole form right away, so the setting can't be lost by navigating off.
+function toggleSigning(cb) {
+  const track = cb.nextElementSibling, knob = track.nextElementSibling;
+  track.style.background = cb.checked ? '#3B82F6' : '#334155';
+  knob.style.left = cb.checked ? '18px' : '2px';
+  document.getElementById('signing-label').textContent = 'Saving…';
+  cb.form.submit();
+}
+</script>
 {% endblock %}

@@ -8,7 +8,7 @@ to jsign as the keystore password:
 
   java -jar jsign.jar --storetype TRUSTEDSIGNING \
        --keystore <region>.codesigning.azure.net --storepass <token> \
-       --alias <account>/<profile> --tsaurl http://timestamp.acs.microsoft.com \
+       --alias <account>/<profile> --tsaurl http://timestamp.acs.microsoft.com --tsmode RFC3161 \
        --replace <installer.exe>
 
 jsign 7.x (Jan 2025+) added the TRUSTEDSIGNING store type. Tokens are valid
@@ -109,13 +109,17 @@ def _run_jsign(path: Path, cfg: dict, token: str) -> None:
         "--storepass", token,
         "--alias", f"{(cfg.get('account_name') or '').strip()}/{(cfg.get('profile_name') or '').strip()}",
         "--tsaurl", TSA_URL,
+        "--tsmode", "RFC3161",   # ACS TSA is RFC3161-only; jsign defaults to Authenticode
         "--replace",
         str(path),
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if r.returncode != 0:
-        msg = (r.stderr or r.stdout or "jsign failed").strip().splitlines()
-        raise RuntimeError(msg[-1] if msg else "jsign failed")
+        # jsign prints "jsign: <reason>", then a stack trace, then a generic
+        # "Try --help" hint; surface the reason line, not the last line.
+        lines = (r.stderr or r.stdout or "").strip().splitlines()
+        reason = next((l for l in lines if l.startswith("jsign: ")), None)
+        raise RuntimeError(reason or (lines[0] if lines else "jsign failed"))
 
 
 def test(cfg: dict) -> dict:
