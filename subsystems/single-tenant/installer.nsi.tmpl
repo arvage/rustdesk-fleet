@@ -46,8 +46,17 @@ AutoCloseWindow true
 !include "x64.nsh"
 !include "LogicLib.nsh"
 
-Name "@@DISPLAY_NAME@@ Remote Support"
+Name "@@PRODUCT_NAME@@"
 OutFile "@@OUTPUT_PATH@@"
+
+; Branding of this installer file (icon, Properties → Details).
+@@INSTALLER_ICON@@
+VIProductVersion "@@VI_VERSION@@"
+VIAddVersionKey "ProductName" "@@PRODUCT_NAME@@"
+VIAddVersionKey "CompanyName" "@@DISPLAY_NAME@@"
+VIAddVersionKey "FileDescription" "@@PRODUCT_NAME@@ Setup"
+VIAddVersionKey "FileVersion" "@@RUSTDESK_VERSION@@"
+VIAddVersionKey "ProductVersion" "@@RUSTDESK_VERSION@@"
 
 ; RustDesk2.toml (Config2) — server options used for connections.
 !macro WriteConfig2 path
@@ -244,6 +253,7 @@ Section "Install"
 
   ; Upgrade the plaintext RustDesk.toml password to the proper hash format.
 @@PASSWORD_CLI_NSIS@@
+@@BRAND_SHORTCUTS@@
   ; Launch the tray app as the desktop user, not the elevated admin: explorer
   ; is the signed-in user's shell, so it starts the app de-elevated in their
   ; session (and their own profile/config).

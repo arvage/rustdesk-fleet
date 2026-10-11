@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from app.auth import require_auth
 from app.deps import get_db, get_device_info, get_hbbs_peers, log_event, merge_device_info
 from app.notifications import fire_notification
-from app.permissions import require_perm
+from app.permissions import require_perm, user_can
 from app.routes.links import DEFAULT_EXPIRY, EXPIRY_OPTIONS, latest_installers, link_state
 from app.templates_config import templates
 
@@ -138,6 +138,12 @@ async def group_detail(
         signing_enabled = bool(sign_installer.get_config().get("enabled"))
     except Exception:
         signing_enabled = False
+    try:
+        import branding
+        icon_png = branding.icon_paths(group["id"])[1]
+        brand_icon_v = int(icon_png.stat().st_mtime) if branding.has_icon(group["id"]) else None
+    except Exception:
+        brand_icon_v = None
 
     return templates.TemplateResponse(
         request,
@@ -158,8 +164,12 @@ async def group_detail(
             "default_expiry": DEFAULT_EXPIRY,
             "current_user": current_user,
             "has_password": bool(group["unattended_password"]),
-            "unattended_password": group["unattended_password"] or "",
+            # Only managers get the password itself (copy badge, edit form).
+            "unattended_password": (group["unattended_password"] or "")
+                                   if user_can(current_user, "manage_groups") else "",
             "signing_enabled": signing_enabled,
+            "brand_app_name": group["brand_app_name"] or "",
+            "brand_icon_v": brand_icon_v,
         },
     )
 
@@ -284,6 +294,60 @@ async def group_client_settings(
         conn.close()
         _set_flash(request, "success", "No changes.")
     return RedirectResponse(f"/groups/{slug}#client-settings", status_code=303)
+
+
+@router.post("/groups/{slug}/branding")
+async def group_branding(request: Request, slug: str, current_user: dict = Depends(require_auth)):
+    require_perm(current_user, "manage_groups")
+    import branding
+    form = await request.form()
+    app_name = (form.get("brand_app_name") or "").strip()
+    icon = form.get("icon")
+    remove_icon = form.get("remove_icon") == "1"
+
+    problem = branding.app_name_problem(app_name)
+    if problem:
+        _set_flash(request, "error", problem)
+        return RedirectResponse(f"/groups/{slug}#branding", status_code=303)
+
+    conn = get_db()
+    group = conn.execute("SELECT id FROM client_groups WHERE slug = ?", (slug,)).fetchone()
+    if group is None:
+        conn.close()
+        _set_flash(request, "error", "Group not found.")
+        return RedirectResponse("/groups", status_code=303)
+
+    changes = []
+    if hasattr(icon, "read") and icon.filename:
+        try:
+            branding.save_icon(group["id"], await icon.read(branding.MAX_UPLOAD_BYTES + 1))
+        except branding.BrandingError as e:
+            conn.close()
+            _set_flash(request, "error", str(e))
+            return RedirectResponse(f"/groups/{slug}#branding", status_code=303)
+        changes.append("icon updated")
+    elif remove_icon:
+        branding.delete_icon(group["id"])
+        changes.append("icon removed")
+
+    conn.execute("UPDATE client_groups SET brand_app_name = ? WHERE id = ?", (app_name or None, group["id"]))
+    changes.append(f"app name={app_name or 'default'}")
+    log_event(conn, "group_branding_updated", f"group={slug} " + ", ".join(changes), current_user["email"])
+    conn.commit()
+    conn.close()
+    _set_flash(request, "success", "Branding saved. Build new installers to apply it.")
+    return RedirectResponse(f"/groups/{slug}#branding", status_code=303)
+
+
+@router.get("/groups/{slug}/branding/icon.png")
+async def group_branding_icon(request: Request, slug: str, current_user: dict = Depends(require_auth)):
+    import branding
+    conn = get_db()
+    group = conn.execute("SELECT id FROM client_groups WHERE slug = ?", (slug,)).fetchone()
+    conn.close()
+    if group is None or not branding.has_icon(group["id"]):
+        return HTMLResponse("Not found", status_code=404)
+    return FileResponse(branding.icon_paths(group["id"])[1], media_type="image/png")
 
 
 @router.post("/groups/{slug}/installers/{installer_id}/delete")

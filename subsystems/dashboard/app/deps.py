@@ -466,6 +466,11 @@ def run_migrations() -> None:
         conn.execute("ALTER TABLE client_groups ADD COLUMN policy_ts INTEGER")
         conn.execute("UPDATE client_groups SET policy_ts = auto_update_ts WHERE auto_update_ts IS NOT NULL")
         conn.commit()
+    # Client branding: app name for the installer and shortcuts. The icon is
+    # a file, not a column — see single-tenant/branding.py.
+    if "brand_app_name" not in groups_cols:
+        conn.execute("ALTER TABLE client_groups ADD COLUMN brand_app_name TEXT")
+        conn.commit()
     info_cols = {row[1] for row in conn.execute("PRAGMA table_info(device_info)").fetchall()}
     if "policy_ts" not in info_cols:
         conn.execute("ALTER TABLE device_info ADD COLUMN policy_ts INTEGER")

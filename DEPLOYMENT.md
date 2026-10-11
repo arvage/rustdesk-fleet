@@ -44,11 +44,11 @@ this document explains what the script does, for manual or custom installs.
   sudo mkswap /swapfile && sudo swapon /swapfile
   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
   ```
-- Docker + Compose, Python 3.12, nsis (for installer builds), nginx +
-  certbot (for the dashboard's TLS):
+- Docker + Compose, Python 3.12, nsis (for installer builds), Pillow (for
+  client branding icons), nginx + certbot (for the dashboard's TLS):
   ```bash
   sudo apt update && sudo apt install -y docker.io docker-compose-v2 \
-      python3 python3-pip nsis nginx certbot python3-certbot-nginx
+      python3 python3-pip python3-pil nsis nginx certbot python3-certbot-nginx
   sudo systemctl enable --now docker
   sudo usermod -aG docker $USER   # re-login (or `sg docker -c ...`) to take effect
   ```

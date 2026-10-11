@@ -257,6 +257,104 @@ def _shell_password_substitutions(pw: str | None) -> dict[str, str]:
     }
 
 
+def _group_branding(group: sqlite3.Row) -> tuple[str | None, Path | None, Path | None]:
+    """(app name, .ico, .png) for a group; each None when not set."""
+    import branding
+    name = (group["brand_app_name"] or "").strip() if "brand_app_name" in group.keys() else ""
+    ico, png = branding.icon_paths(group["id"])
+    if not branding.has_icon(group["id"]):
+        ico = png = None
+    return name or None, ico, png
+
+
+def _vi_version(version: str) -> str:
+    """NSIS VIProductVersion needs exactly four numeric parts: 1.5.0 -> 1.5.0.0."""
+    parts = [int(p) if p.isdigit() else 0 for p in re.split(r"[.\-]", version)[:4]]
+    return ".".join(str(p) for p in (parts + [0, 0, 0, 0])[:4])
+
+
+def _nsis_brand_shortcuts(app_name: str | None, has_icon: bool) -> str:
+    """NSIS block replacing RustDesk's desktop + Start menu shortcuts with
+    branded ones. Same locations RustDesk uses (src/platform/windows.rs):
+    %PUBLIC%\\Desktop and %ProgramData%\\...\\Start Menu\\Programs\\RustDesk.
+    Only replaces shortcuts the RustDesk installer actually created.
+
+    The icon lives outside RustDesk's install dir: RustDesk's own updater
+    wipes that dir, which would leave a renamed desktop shortcut iconless.
+    """
+    if not app_name and not has_icon:
+        return ""
+    name = app_name or "RustDesk"
+    if has_icon:
+        icon_file = "$PROGRAMFILES64\\RustDesk Branding\\app.ico"
+        install_icon = (
+            '  CreateDirectory "$PROGRAMFILES64\\RustDesk Branding"\n'
+            '  SetOutPath "$PROGRAMFILES64\\RustDesk Branding"\n'
+            '  File "/oname=app.ico" "@@BRAND_ICO_SRC@@"\n'
+        )
+    else:
+        icon_file = "$PROGRAMFILES64\\RustDesk\\rustdesk.exe"
+        install_icon = ""
+    shortcut = (f'"$PROGRAMFILES64\\RustDesk\\rustdesk.exe" "" "{icon_file}" 0 '
+                f'SW_SHOWNORMAL "" "{name}"')
+    return (
+        "  ; ── Step 5: branded shortcuts ────────────────────────────────────────────\n"
+        "  SetShellVarContext all\n"
+        + install_icon +
+        '  ${If} ${FileExists} "$DESKTOP\\RustDesk.lnk"\n'
+        '    Delete "$DESKTOP\\RustDesk.lnk"\n'
+        f'    CreateShortCut "$DESKTOP\\{name}.lnk" {shortcut}\n'
+        "  ${EndIf}\n"
+        '  ${If} ${FileExists} "$SMPROGRAMS\\RustDesk\\RustDesk.lnk"\n'
+        '    Delete "$SMPROGRAMS\\RustDesk\\RustDesk.lnk"\n'
+        f'    CreateShortCut "$SMPROGRAMS\\RustDesk\\{name}.lnk" {shortcut}\n'
+        "  ${EndIf}\n"
+        "  SetShellVarContext current\n"
+    )
+
+
+def _shell_brand_block(app_name: str | None, png: Path | None) -> str:
+    """Shell block installing a branded copy of RustDesk's menu entry.
+
+    Same desktop-file ID (rustdesk.desktop) in /usr/local/share/applications,
+    which precedes /usr/share in XDG_DATA_DIRS — so it shadows the package's
+    entry and survives package updates. The icon is embedded as base64.
+    """
+    if not app_name and not png:
+        return ""
+    import base64
+    lines = [
+        "# ── Branded menu entry ───────────────────────────────────────────────────",
+        "# Shadows the package's rustdesk.desktop (/usr/local/share comes first in",
+        "# XDG_DATA_DIRS), so it survives RustDesk package updates.",
+        "if [ -f /usr/share/applications/rustdesk.desktop ]; then",
+        "  echo \"Applying branding…\"",
+        "  mkdir -p /usr/local/share/applications",
+    ]
+    sed = []
+    if app_name:
+        # "&" means "the match" in a sed replacement.
+        lines.append(f'  BRAND_NAME="{app_name.replace("&", chr(92) + "&")}"')
+        sed.append('-e "s|^Name=RustDesk$|Name=${BRAND_NAME}|"')
+    if png:
+        b64 = base64.encodebytes(png.read_bytes()).decode().rstrip("\n")
+        lines += [
+            "  mkdir -p /usr/local/share/rustdesk-branding",
+            "  base64 -d > /usr/local/share/rustdesk-branding/app.png <<'ICON'",
+            b64,
+            "ICON",
+        ]
+        sed.append('-e "s|^Icon=rustdesk$|Icon=/usr/local/share/rustdesk-branding/app.png|"')
+    lines += [
+        f"  sed {' '.join(sed)} /usr/share/applications/rustdesk.desktop \\",
+        "    > /usr/local/share/applications/rustdesk.desktop",
+        "  update-desktop-database /usr/local/share/applications 2>/dev/null || true",
+        "fi",
+        "",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def _build_nsis(
     conn: sqlite3.Connection,
     group: sqlite3.Row,
@@ -320,8 +418,16 @@ def _build_nsis(
         if pw else ""
     )
 
+    app_name, brand_ico, _ = _group_branding(group)
+
     nsi_script = (TMPL_DIR / "installer.nsi.tmpl").read_text()
     for marker, value in {
+        # Inserted blocks first: they contain markers of their own.
+        "@@BRAND_SHORTCUTS@@":          _nsis_brand_shortcuts(app_name, brand_ico is not None),
+        "@@INSTALLER_ICON@@":           f'Icon "{brand_ico}"' if brand_ico else "",
+        "@@BRAND_ICO_SRC@@":            str(brand_ico or ""),
+        "@@PRODUCT_NAME@@":             app_name or f"{group['display_name']} Remote Support",
+        "@@VI_VERSION@@":               _vi_version(version),
         "@@DISPLAY_NAME@@":             group["display_name"],
         "@@OUTPUT_PATH@@":              str(output_path),
         "@@RUSTDESK_EXE_SRC@@":         str(rustdesk_exe_src),
@@ -371,8 +477,16 @@ def _build_script(
 
     pw = group["unattended_password"] if "unattended_password" in group.keys() else None
 
+    # Branding: Linux menu entry only. macOS is left alone — changing the app
+    # bundle's icon would break RustDesk's code signature.
+    brand_block = ""
+    if platform == "linux":
+        app_name, _, brand_png = _group_branding(group)
+        brand_block = _shell_brand_block(app_name, brand_png)
+
     template = (TMPL_DIR / cfg["template"]).read_text()
     substitutions = {
+        "@@BRAND_DESKTOP_BLOCK@@": brand_block,
         "@@DISPLAY_NAME@@":    group["display_name"],
         "@@GROUP_SLUG@@":      group["slug"],
         "@@RUSTDESK_VERSION@@": version,
