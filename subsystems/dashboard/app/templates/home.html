@@ -335,18 +335,6 @@
 {% endif %}
 
 
-<div class="section">
-  <div class="section-head"><h2>Configuration Details</h2></div>
-  <div class="card">
-    <div class="kv-grid">
-      <div class="kv-row"><div class="kv-key">Data directory</div><div class="kv-val"><code>{{ server.data_dir }}</code></div></div>
-      <div class="kv-row"><div class="kv-key">Compose file</div><div class="kv-val"><code>{{ server.compose_path }}</code></div></div>
-      <div class="kv-row"><div class="kv-key">Initialised</div><div class="kv-val text-muted">{{ server.created_at | localtime }}</div></div>
-      <div class="kv-row"><div class="kv-key">Last updated</div><div class="kv-val text-muted">{{ server.updated_at | localtime }}</div></div>
-    </div>
-  </div>
-</div>
-
 {% else %}
 <div class="card"><div class="card-body">
   <div class="empty">

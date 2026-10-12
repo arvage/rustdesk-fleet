@@ -1,8 +1,9 @@
 """
-os_lifecycle.py — Windows end-of-support dates, kept current automatically.
+os_lifecycle.py — Windows and macOS end-of-support dates, kept current
+automatically.
 
 Dates come from endoflife.date (a public, community-maintained tracker of
-Microsoft's lifecycle pages), downloaded at most once a day by the update
+Microsoft's lifecycle pages and Apple's security-update history), downloaded at most once a day by the update
 watcher (routes/home.py) and cached in CACHE_PATH, so a new Windows release
 gets its date without a code change. If the API is unreachable the last
 cached copy keeps being used; with no cache at all, fleet.py falls back to
@@ -14,6 +15,11 @@ lookup(os_name, os_build) matches a device to a release record:
       LTSC/LTSB -> the LTSC record (IoT LTSC -> IoT), Enterprise/Education ->
       "(E)", everything else (Home, Pro, Pro Education, Pro for Workstations)
       -> "(W)"; older releases without the split have a single record
+  * macOS — by major version ("MacOS 26.6.2" -> 26, "10.15.7" -> 10.15).
+    Apple never announces end dates: endoflife.date marks the releases still
+    getting security updates (usually the newest three) as not ended, with no
+    date, and records the date each older one stopped. So a supported Mac has
+    no end date to count down to; it moves to "ended" once Apple drops it.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ SOURCE = "endoflife.date"
 _URLS = {
     "windows": "https://endoflife.date/api/windows.json",
     "windows-server": "https://endoflife.date/api/windows-server.json",
+    "macos": "https://endoflife.date/api/macos.json",
 }
 REFRESH_EVERY_S = 24 * 3600
 _TIMEOUT_S = 20
@@ -57,7 +64,8 @@ def refresh(force: bool = False) -> tuple[bool, str]:
     Returns (changed, message). Never raises."""
     current = load()
     age = time.time() - (current or {}).get("fetched_ts", 0)
-    if current and age < REFRESH_EVERY_S and not force:
+    complete = current and set(current.get("products", {})) >= set(_URLS)
+    if complete and age < REFRESH_EVERY_S and not force:
         return False, "cache is fresh"
     try:
         products = {name: _fetch(url) for name, url in _URLS.items()}
@@ -136,7 +144,11 @@ def lookup(os_name: str, os_build: str) -> tuple[str, bool | None] | None:
     """Match a device's OS. Returns (eol_date, eol_flag) — see _eol — or None
     when there's no data or no matching release."""
     c = load()
-    if not c or not os_name.startswith("Windows"):
+    if not c:
+        return None
+    if os_name.lower().startswith(("macos", "mac os")):
+        return _lookup_macos(c, os_name)
+    if not os_name.startswith("Windows"):
         return None
     build = str(os_build or "").strip()
 
@@ -163,3 +175,13 @@ def lookup(os_name: str, os_build: str) -> tuple[str, bool | None] | None:
             hits = [r for r in rows if r["cycle"] == cycle]
             return _eol(hits[0]) if hits else None
     return None
+
+
+def _lookup_macos(c: dict, os_name: str) -> tuple[str, bool | None] | None:
+    m = re.search(r"(\d+)(?:\.(\d+))?", os_name)
+    if not m:
+        return None
+    major = int(m.group(1))
+    cycle = f"10.{m.group(2)}" if major == 10 and m.group(2) else str(major)
+    hits = [r for r in c["products"].get("macos", []) if str(r["cycle"]) == cycle]
+    return _eol(hits[0]) if hits else None

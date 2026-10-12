@@ -66,7 +66,7 @@ PRESETS = [
      "description": "Haven't checked in for 365+ days — likely retired or reimaged.",
      "rules": [{"field": "last_seen", "op": "older_than", "value": "365"}]},
     {"name": "Unsupported operating system", "match": "any",
-     "description": "OS past Microsoft end of support, or ending within 6 months.",
+     "description": "OS past end of support (Windows or macOS), or ending within 6 months.",
      "rules": [{"field": "os_support", "op": "is", "value": "ended"},
                {"field": "os_support", "op": "is", "value": "ending_soon"}]},
     {"name": "Outdated RustDesk client", "match": "all",

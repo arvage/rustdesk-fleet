@@ -169,12 +169,17 @@ groups, whatever client group it belongs to.
 - Anyone signed in can view dynamic groups. Creating, editing and deleting
   them needs **Manage devices**.
 
-**OS support status** uses Microsoft's end-of-support dates: *End of support*
-(already past), *Ending within 6 months*, *Supported*, or *Unknown* (macOS,
-Linux, or no OS reported). Each device is judged by its exact Windows release
+**OS support status** uses Microsoft's and Apple's end-of-support dates: *End
+of support* (already past), *Ending within 6 months*, *Supported*, or *Unknown*
+(Linux, or no OS reported). Each Windows device is judged by its exact release
 (build number) and edition. Enterprise, Education and LTSC editions are
-supported longer than Home and Pro. The dates update automatically once a day
-from endoflife.date, which tracks Microsoft's lifecycle pages, so new Windows
+supported longer than Home and Pro. Macs are judged by their macOS version.
+Apple doesn't announce end dates in advance, so a supported Mac has no date
+and never shows *Ending within 6 months*. It moves to *End of support* once
+Apple stops releasing security updates for that version (typically around
+when a new macOS ships each autumn). The dates update
+automatically once a day from endoflife.date, which tracks Microsoft's
+lifecycle pages and Apple's security releases, so new Windows and macOS
 releases are covered without any action. The OS support report shows when
 they were last updated.
 

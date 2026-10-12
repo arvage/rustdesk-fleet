@@ -151,17 +151,22 @@ Public, no login:
   `row_colors` and `tone_cols`. Categorical colors are assigned by fleet-wide
   rank (stable under filtering; >7 fold into gray "Other"). Status values map
   to tones via `STATUS_TONES` and render as icon + label badges.
-- **OS support** (`app/os_lifecycle.py`, `app/fleet.py`): Windows and Windows
-  Server end-of-support dates are downloaded from
+- **OS support** (`app/os_lifecycle.py`, `app/fleet.py`): Windows, Windows
+  Server and macOS end-of-support dates are downloaded from
   [endoflife.date](https://endoflife.date) (`/api/windows.json`,
-  `/api/windows-server.json`) at most once a day by the update watcher and
+  `/api/windows-server.json`, `/api/macos.json`) at most once a day by the update watcher and
   cached in `/opt/rustdesk-fleet/os-lifecycle.json`, so **new releases get
   their dates automatically**. Devices are matched by build and edition:
   LTSC/IoT → LTSC record, Enterprise/Education → "(E)", Home/Pro/Pro
   Education → "(W)". Servers are matched by year, or by build for releases
-  without one. If a download fails, the last cached copy stays in use. With no
-  cache or no match, the built-in table in `fleet.py` is the fallback.
-  "Ending soon" = within 182 days. macOS/Linux are "unknown". The OS support
+  without one. Macs are matched by major version (`MacOS 26.6.2` → `26`,
+  `10.15.x` → `10.15`). Apple publishes no end dates, so releases still getting
+  security updates have `eol: false` (supported, no date) and older ones carry
+  the date they stopped. If a download fails, the last cached copy stays in
+  use. With no cache or no match, the built-in Windows table in `fleet.py` is
+  the fallback (no macOS fallback → "unknown"). If the cache is missing a
+  product (e.g. after one is added), it is re-downloaded on the next check.
+  "Ending soon" = within 182 days. Linux is "unknown". The OS support
   report shows the source and last update.
 - **Themes**: Light / Dark / Auto switch in the sidebar footer, stored in
   `localStorage['rdf-theme']`. An inline head script sets
