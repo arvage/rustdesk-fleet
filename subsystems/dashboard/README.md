@@ -9,7 +9,7 @@ Live at `https://rds.example.com`.
 - **Runtime**: Python 3.12 / FastAPI 0.138 / uvicorn
 - **Auth**: per-user bcrypt-hashed passwords stored in `users` table; session cookie (HTTPS-only, `SameSite=Lax`); session secret from env
 - **DB**: `/opt/rustdesk-fleet/fleet.sqlite3` — same SQLite file as `setup_server.py`
-- **Static assets**: `/app/static/style.css` — custom CSS, no framework (Inter font, indigo accent)
+- **Static assets**: `app/static/style.css` — custom CSS, no framework (Inter font, indigo accent). Colors are CSS variables with a light set on `:root` and a dark set on `:root[data-theme="dark"]` (see *Themes* below), plus the `--viz-*`/`--status-*` data-viz palette used by the reports
 - **Reverse proxy**: nginx (`/etc/nginx/sites-available/rds.example.com`) proxies `:443` → `127.0.0.1:8000`, plus a `:21114` block that exposes only the client-reporting endpoints (see `DEPLOYMENT.md`)
 
 ## Service file
@@ -34,24 +34,33 @@ Staff pages (all require login):
 | `POST /server/update` | Update hbbs/hbbr to the latest release (`update_server`) |
 | `POST /installers/update-version` | Move installers to the latest RustDesk client release, optionally rebuilding every group's installers in the background (`update_server`) |
 | `POST /server/backup`, `GET /server/backup/download/latest` | Run a backup now / download the newest archive (`manage_backups`) |
-| `GET /devices` | Device inventory: Computer / OS / client version (client-reported), live online · in session · offline status, group filter; **ⓘ details** modal per device (full reported details + recent sessions) |
-| `POST /devices/{id}/edit` · `/delete`, `POST /devices/sync` | Label/group a device (`manage_devices`); delete hides it and clears its details/sessions — a verified heartbeat later auto-un-hides it; import peers from hbbs |
+| `GET /devices` | Device inventory sorted by label (unlabeled last): Computer / OS / client version (client-reported), live online · in session · offline status, group filter; **Recently registered** panel (last 7 days, no client group yet); **ⓘ details** modal per device (full reported details + recent sessions) |
+| `POST /devices/{id}/edit` · `/delete`, `POST /devices/sync` | Label/group a device (`manage_devices`); delete hides it and clears its details/sessions — a verified heartbeat later auto-un-hides it; import peers from hbbs. Edit and delete accept a `next` local path to return to (the group page uses it) |
+| `POST /devices/{id}/assign-group` | Set a device's client group without touching its label (Recently registered panel; `manage_devices`) |
 | `GET /groups`, `POST /groups` | Group list (with live "X / Y online"), create group |
-| `GET /groups/{slug}` | Group detail: devices, Client Settings, installers, download links |
+| `GET /groups/{slug}` | Group detail: devices (sorted by label, with the same **Edit** modal as Devices), Client Settings, branding, installers, download links |
 | `POST /groups/{slug}/edit` | Rename / change slug / unattended password |
 | `POST /groups/{slug}/client-settings` | Per-group managed client settings (auto-update, remote settings changes) |
 | `POST /groups/{slug}/build`, `POST /groups/{slug}/installers/{id}/delete` | Build / delete installers |
+| `POST /groups/{slug}/installers/{id}/sign` | Sign / re-sign a Windows installer with Azure Trusted Signing (`manage_groups`) |
+| `POST /groups/{slug}/branding`, `GET /groups/{slug}/branding/icon.png` | Per-group installer app name + icon (`manage_groups`) |
 | `POST /groups/{slug}/links`, `/links/{id}/email`, `/links/{id}/revoke` | Create, email, revoke client download links |
 | `GET /download/{filename}` | Staff installer download (path-traversal safe, DB-gated) |
 | `GET /users` + `POST /users/...` | User management: assign roles, group access, password reset, passkeys, MFA reminders (`manage_users`) |
 | `GET /admin` | Admin landing: tool cards + fleet stats (any admin-area capability) |
+| `GET /admin/signing` + `POST /admin/signing/save` · `/test` | Installer signing config (Azure Trusted Signing) and connection test |
+| `GET /admin/reports`, `GET /admin/reports/{key}`, `GET /admin/reports/{key}/{section}.csv` | Reports catalogue, one report (`?group=<slug>\|__none__&days=7\|30\|90\|180\|365`), and any of its tables as CSV (any admin-area capability) |
+| `GET /admin/emails`, `GET/POST /admin/emails/{key}`, `GET/POST /admin/emails/design`, `GET /admin/emails/logo.png` | Email templates: list, per-email editor (save / reset), shared design + logo upload (`manage_notifications`) |
+| `POST /admin/emails/preview`, `POST /admin/emails/{key}/test` | Render an unsaved draft with sample data (JSON → HTML); send the saved version to the signed-in user |
+| `GET /dynamic-groups`, `GET /dynamic-groups/{id}`, `GET /dynamic-groups/{id}/export.csv` | Dynamic (rule-based) groups: list with live counts, members, CSV (any signed-in user) |
+| `GET /dynamic-groups/new`, `GET /dynamic-groups/{id}/edit`, `POST /dynamic-groups/save` · `/{id}/delete`, `POST /dynamic-groups/preview` | Rule builder, save/delete, live match preview (`manage_devices`) |
 | `GET /admin/backup` + `POST /admin/backup/save` · `/test` · `/run` · `/restore`, `GET /admin/backup/download` | Backup destination config (S3/Wasabi/B2/Spaces/MinIO), test, run, restore, per-archive download (`manage_backups`) |
 | `GET /admin/roles` + `POST /admin/roles...` | Roles & permissions: create/edit/delete permission levels via a capability matrix (`manage_roles`) |
 | `GET /admin/export/devices.csv` | Device inventory CSV (`manage_devices`) |
 | `POST /admin/restart-relay`, `POST /admin/logs/prune` | Restart hbbs/hbbr; prune old audit events (`manage_system`) |
 | `GET /account` + `POST /account/...` | Own profile, password, passkeys, sign-in method |
 | `GET /notifications` + `POST /notifications/...` | SMTP settings, per-event toggles, server-health alert thresholds, test email, send log (`manage_notifications`) |
-| `GET /audit` | **Logs** — categorized tabs (All / Clients / Remote sessions / Installers / Groups / Users & auth / Server), per-tab filter; the Remote sessions tab reads the session audit log |
+| `GET /audit` | **Logs** — categorized tabs (All / Clients / Remote sessions / Installers / Groups / Users & auth / Notifications / Server / Other), per-tab filter; the Remote sessions tab reads the session audit log |
 | `GET /sessions` | Redirects to `/audit?cat=sessions` (kept for old links) |
 | `GET /api/devices`, `GET /api/devices/status`, `GET /api/devices/{id}/sessions`, `GET /api/server/health` | JSON for the live tables, per-device session history, and server-health tiles |
 | `GET /setup`, `GET/POST /login`, `/login/webauthn/...`, `GET /logout` | First-run setup, password and passkey sign-in |
@@ -110,16 +119,100 @@ Public, no login:
   optional gpg encryption, restore, and off-site upload to S3-compatible
   storage (AWS S3 / Wasabi / Backblaze B2 / DigitalOcean Spaces / MinIO)
   configured entirely in the GUI via `backup_remote.py`.
-- **Notifications** (email): device registered / deleted / offline,
-  installer built / deleted / downloaded via link, user created / deleted,
-  new server version, new client version, and **server memory / disk above a
-  configurable threshold** (debounced, with hysteresis).
+- **Installer signing**: Windows installers are Authenticode-signed with Azure
+  Trusted Signing via `jsign` on this box — automatically after a build, or
+  per installer. See `subsystems/signing/README.md` and `DEPLOYMENT.md` §10.
+- **Notifications** (email): device registered / came online / went offline /
+  deleted, installer built / deleted / downloaded via link, user created /
+  deleted, new server version, new client version, and **server memory / disk
+  above a configurable threshold** (debounced, with hysteresis). Device
+  registration is detected by the background watcher (below), not by a
+  dashboard action, so it fires before the device has a group.
+- **Email templates** (`app/email_templates.py`): every email — the 13 alerts,
+  the new-user welcome, the passkey reminder and the client download-link
+  email — renders from one catalogue of defaults (subject, heading, intro,
+  closing, details table, button) overridden per email from the
+  `email_templates` table, inside a shared design from the `email_design`
+  singleton (brand names, colors, font, footers). Text fields are plain text
+  with `{placeholders}`, `**bold**`, auto-linked URLs. A paragraph whose
+  placeholders are all empty is dropped. The logo is stored as
+  `/opt/rustdesk-fleet/branding/email-logo.png` (uploads normalized to PNG,
+  ≤600 px wide) and attached inline (`multipart/related`, `cid:`), so it shows
+  without remote-image loading. The layout is table-based with inline styles.
+- **Dynamic groups** (`app/dynamic_groups.py`): saved rule sets (`dynamic_groups`
+  table: name, match all/any, JSON rules `[{field, op, value}]`) evaluated on
+  view against `fleet.fleet_snapshot()` — membership is never stored. The
+  `FIELDS`/`OPS` catalogue drives both validation (`normalize_rules`) and the
+  JS rule builder. `PRESETS` are the starting templates.
+- **Reports** (`app/reports.py`): 12 reports, each a function of a
+  `ReportContext` (group filter, period) returning stat tiles + table
+  sections. One template renders them all, and any section exports as CSV.
+  Sections can carry a `chart` (`share` stacked bar or `columns` time series),
+  `row_colors` and `tone_cols`. Categorical colors are assigned by fleet-wide
+  rank (stable under filtering; >7 fold into gray "Other"). Status values map
+  to tones via `STATUS_TONES` and render as icon + label badges.
+- **OS support** (`app/fleet.py`): Microsoft end-of-support dates by OS name
+  prefix, and by build for Windows 11 feature releases (Enterprise/Education
+  +1 year). "Ending soon" = within 182 days. Builds newer than the table count
+  as supported. **The table is static — add new Windows releases to
+  `_WIN11_EOS_BY_BUILD` / `_EOS_BY_PREFIX` as Microsoft publishes them.**
+- **Themes**: Light / Dark / Auto switch in the sidebar footer, stored in
+  `localStorage['rdf-theme']`. An inline head script sets
+  `<html data-theme>` before first paint (no white flash) and follows the OS
+  setting in Auto. Templates use CSS variables, not hex, for anything that
+  should change with the theme. Light values equal the original colors. The
+  always-dark sidebar and user modals and the public `/d/` page keep fixed
+  colors.
 - **Logs**: categorized audit log (clients, remote sessions, installers,
   groups, users & auth, server) of provisioning and admin actions.
 
 Heartbeat/sysinfo requests are excluded from the uvicorn access log
 (`app/main.py`) — devices post every few seconds.
 
-**Out of scope (by design):**
+## Code layout
+
+| Path | What |
+|---|---|
+| `app/main.py` | App, session middleware, router registration, migrations on startup |
+| `app/deps.py` | DB access, hbbs peer reader, `get_devices()` (fleet + peers + client-reported details, label order), `run_migrations()` (idempotent `ALTER`/`CREATE IF NOT EXISTS`) |
+| `app/fleet.py` | `fleet_snapshot()`: devices plus derived facts (RAM/cores as numbers, OS support, live status, days since seen/registered/last session) — shared by dynamic groups and reports |
+| `app/dynamic_groups.py`, `app/reports.py`, `app/email_templates.py` | Rule engine, report catalogue, email catalogue + renderer (see Features) |
+| `app/notifications.py` | SMTP send (with inline logo), event registry (`EVENT_LABELS`), per-event toggles, delivery log, `fire_notification()` (non-blocking) |
+| `app/permissions.py` | Capability catalogue, roles, `require_perm()` |
+| `app/routes/*.py` | One module per area. `api.py` also hosts the background watchers |
+| `app/templates/*.html`, `app/static/style.css` | Jinja templates (all extend `base.html` except login/setup/public pages) and the stylesheet |
+
+## Background jobs
+
+Daemon threads started at import (one uvicorn worker, so each runs once):
+
+| Thread | Interval | Does |
+|---|---|---|
+| `hbbs-ss-poll` (`routes/api.py`) | 1 s | Samples live TCP connections to hbbs ports (an online signal) |
+| `device-offline-watch` (`routes/api.py`) | 30 s | **New devices:** any hbbs peer without a `devices` row gets one (unassigned) and fires `device_registered` — the row marks it announced. **Status changes:** online→offline fires `device_offline`, offline→online fires `device_online`. The first pass after start only records a baseline. Also closes sessions for devices that vanished mid-session |
+| `health-alert-watch` (`routes/api.py`) | 60 s | Memory/disk thresholds → `memory_high` / `disk_high` (debounced, hysteresis) |
+| `server-update-watch` (`routes/home.py`) | 1 h (first 60 s after start) | New RustDesk server/client releases → `*_update_available`, once per version |
+
+## Database tables added by the dashboard
+
+Created by `run_migrations()` in `/opt/rustdesk-fleet/fleet.sqlite3`
+alongside the single-tenant schema: `notification_settings`,
+`notification_events`, `notification_log`, `device_sessions`, `device_info`,
+`download_links`, `backup_config`, `signing_config`, `roles`,
+`webauthn_credentials`, `dynamic_groups`, `email_templates`, `email_design`.
+
+## Deploying changes
+
+The service runs straight from the repo checkout. After pulling or editing:
+
+- **Templates and `static/`** are read live — changes show on the next page
+  load (bump the `style.css?v=N` query in `base.html`, `login.html`,
+  `login_webauthn.html` and `setup.html` so browsers refetch the CSS).
+- **Python changes** need `sudo systemctl restart rustdesk-dashboard`. New
+  tables/columns are created on startup by `run_migrations()`.
+- Check: `systemctl is-active rustdesk-dashboard` and
+  `journalctl -u rustdesk-dashboard -n 50`.
+
+## Out of scope (by design)
+
 - In-browser remote control — requires RustDesk Server Pro (paid); evaluated and ruled out
-- Installer code signing — see `subsystems/signing/` (not built yet)

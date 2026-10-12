@@ -220,6 +220,22 @@ sudo ln -s /etc/nginx/sites-available/rds.example.com /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+### Updating the dashboard
+
+The service runs straight from the repo checkout, so an update is a pull and
+a restart:
+
+```bash
+cd ~/rustdesk-fleet && git pull
+sudo systemctl restart rustdesk-dashboard
+systemctl is-active rustdesk-dashboard          # active
+journalctl -u rustdesk-dashboard -n 30          # "Application startup complete."
+```
+
+Database changes apply themselves on startup (`run_migrations()` only adds
+tables/columns), and nothing in `/opt/rustdesk-fleet` is touched. Template
+and CSS edits take effect without a restart, but Python changes need one.
+
 ## 5. First-run setup
 
 Visit `https://rds.example.com/` — with an empty `users` table every
@@ -591,6 +607,8 @@ sqlite3 /opt/rustdesk-fleet/fleet.sqlite3 \
 | `/opt/rustdesk-fleet/installer-assets` | Upstream RustDesk client binaries used as installer input |
 | `/opt/rustdesk-fleet/installers` | Generated per-group installer output |
 | `/opt/rustdesk-fleet/backups` | Backup archives + `last_backup.json` status (see Section 8) |
+| `/opt/rustdesk-fleet/branding` | Per-group installer icons (`<group_id>.png/.ico`) and the email logo (`email-logo.png`, set in Admin → Email templates → Design) |
+| `/opt/rustdesk-fleet/tools` | `jsign` jar for installer signing (see Section 10) |
 | `/etc/rustdesk-fleet/dashboard.env` | Dashboard secrets (`SESSION_SECRET`) — not in the repo |
 | `/etc/rustdesk-fleet/backup.env` | Backup config (retention, passphrase, offsite cmd) — not in the repo |
 | `/etc/systemd/system/rustdesk-dashboard.service` | Dashboard process supervisor |
@@ -600,5 +618,3 @@ sqlite3 /opt/rustdesk-fleet/fleet.sqlite3 \
 
 - `subsystems/provisioning/` — superseded per-tenant design, kept as
   reference only, not part of this deployment.
-- Installer code-signing (`subsystems/signing/`) — not built yet;
-  installers are currently distributed unsigned.

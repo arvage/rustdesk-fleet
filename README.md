@@ -59,8 +59,8 @@ isolation without buying one license per client. That ruled it out.)
 |---|---|---|
 | [`subsystems/single-tenant`](subsystems/single-tenant) | **Current, built & locally tested** | The one shared `hbbs`/`hbbr` server, plus `client_groups`/`devices`/`users` schema for app-layer separation |
 | [`subsystems/provisioning`](subsystems/provisioning) | Superseded, kept as reference | Original per-tenant isolated-stack allocator — real working code, was deployed and verified live on the Lightsail box before the architecture changed |
-| [`subsystems/signing`](subsystems/signing) | Not started | Sign installers via Azure Trusted Signing (needs a Windows agent — GitHub Actions `windows-latest` — since Authenticode has no Linux path) |
-| [`subsystems/dashboard`](subsystems/dashboard) | **Live** at `https://rds.example.com` | Management UI: device inventory with client-reported details and live status, client groups, installer builds and client version updates, client download links, per-group managed client settings, users with capability-based roles & permissions, email notifications, server-health monitoring + alerts, remote-session audit, categorized logs, an admin panel, and GUI-configured off-site backups (keypair + databases) with restore — see its README |
+| [`subsystems/signing`](subsystems/signing) | **Built** (2026-10-10) | Authenticode-signs Windows installers with Azure Trusted Signing using `jsign` on the Linux box (no Windows runner), automatically after each build or on demand |
+| [`subsystems/dashboard`](subsystems/dashboard) | **Live** at `https://rds.example.com` | Management UI: device inventory with client-reported details and live status, client groups with per-group branding and managed client settings, rule-based dynamic groups, installer builds (signed) and client version updates, client download links, users with capability-based roles & permissions, email notifications with editable templates and branding, server-health monitoring + alerts, remote-session audit, categorized logs, 12 admin reports with charts and CSV export, light/dark themes, and GUI-configured off-site backups (keypair + databases) with restore — see its README |
 | [`subsystems/viewer`](subsystems/viewer) | Ruled out | Browser session viewer — RustDesk's web client requires a paid Pro license per server; not pursuing |
 
 ## Shared
@@ -78,8 +78,8 @@ forward.
 `hbbs`/`hbbr` pair runs from `/opt/rustdesk-fleet/docker-compose.yml`
 (set up by `setup_server.py init`), currently on `rustdesk-server`
 1.1.16, with in-place updates done from the dashboard (1.1.14 → 1.1.15
-on 2026-07-09, → 1.1.16 on 2026-08-02). It serves the whole fleet — 43
-registered devices as of 2026-10-09 — alongside the dashboard at
+on 2026-07-09, → 1.1.16 on 2026-08-02). It serves the whole fleet — 51
+registered devices as of 2026-10-12 — alongside the dashboard at
 `https://rds.example.com`.
 
 **Per-tenant (superseded):** a real test tenant (`test-tenant`) was

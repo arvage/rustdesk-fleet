@@ -38,13 +38,16 @@
   <a href="#s3">Adding devices</a>
   <a href="#s4">Devices</a>
   <a href="#s5">Client Groups</a>
+  <a href="#dyn">Dynamic groups</a>
   <a href="#s6">Download links</a>
   <a href="#s7">Roles &amp; permissions</a>
   <a href="#s8">Admin tools</a>
+  <a href="#reports">Reports</a>
   <a href="#s9">Users</a>
   <a href="#s10">Logs</a>
   <a href="#s11">Backups</a>
   <a href="#s12">Notifications</a>
+  <a href="#emails">Email templates</a>
   <a href="#s13">My account</a>
   <a href="#tasks">Quick tasks</a>
 </div>
@@ -82,9 +85,10 @@
 <div class="help-sec" id="s4">
   <h2><span class="n">4</span> Devices</h2>
   <ul>
-    <li>Lists every machine with live <strong>online / in&nbsp;session / offline</strong> status, computer, OS, IP and group. A <strong>Recently registered</strong> panel at the top highlights machines added in the last 7 days.</li>
+    <li>Lists every machine with live <strong>online / in&nbsp;session / offline</strong> status, computer, OS, IP and group, sorted by <strong>label</strong> (unlabeled last).</li>
+    <li><strong>Recently registered</strong> — devices added in the last 7 days that still need a client group, newest first. <strong>Assign to Group</strong> sets the group without touching the label; the device then leaves the panel.</li>
     <li><strong>Filter</strong> with the search box; <strong>ⓘ Details</strong> shows full reported details and recent sessions.</li>
-    <li><strong>Connect</strong> (video icon) launches your local RustDesk app to that device.</li>
+    <li><strong>Connect</strong> (video icon) launches your local RustDesk app to that device; <strong>Terminal</strong> (<code>&gt;_</code>) opens a RustDesk terminal session.</li>
     <li><strong>Edit</strong> sets a label and moves the device between groups. <strong>Delete</strong> removes it from the dashboard (use for duplicates/decommissioned machines) — if that client ever communicates again, it reappears automatically.</li>
     <li><strong>Sort &amp; columns</strong> — click any column header to sort (numbers, sizes and durations sort by value); use the <strong>Columns</strong> button to show/hide columns, including the detail columns (User, OS Build, CPU, Cores, Memory, Client Version) that are hidden by default. Choices are remembered per browser.</li>
   </ul>
@@ -96,7 +100,19 @@
     <li>Groups organize devices (per customer, internal vs. external). A group is a label plus its own installers and settings — not separate infrastructure.</li>
     <li><strong>Create</strong> a group with a name and optional unattended password (baked into its installers). <strong>Open</strong> it to manage devices, installers, links and settings.</li>
     <li><strong>Managed client settings</strong> (each Not managed / On / Off): <strong>Automatic RustDesk updates</strong>, and <strong>Remote settings changes</strong> (whether a connected tech can change RustDesk's own settings on the device).</li>
-    <li>The groups list and the device list inside a group both support <strong>sorting</strong> (click a header) and <strong>column show/hide</strong> via the <strong>Columns</strong> button, remembered per browser.</li>
+    <li>The groups list and the device list inside a group both support <strong>sorting</strong> (click a header) and <strong>column show/hide</strong> via the <strong>Columns</strong> button, remembered per browser. A group's devices are sorted by label.</li>
+    <li><strong>Edit</strong> a device right from the group page (label, client group, delete) — you stay on the group page afterwards.</li>
+    <li><strong>Branding</strong> gives the group's installers their own app name and icon. Managers can click the unattended-password badge to copy it.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="dyn">
+  <h2><span class="n">5b</span> Dynamic groups</h2>
+  <ul>
+    <li>Saved filters such as “Windows 10 devices” or “not seen in over a year”. Their devices are worked out from the rules each time you open them, so they stay current, and a device can be in any number of them.</li>
+    <li><strong>New Dynamic Group</strong> — start from a template or build rules on OS, OS support status, last seen, registered, last remote session, status, client group, label, computer, user, RustDesk version, memory, CPU, cores or IP; match <strong>all</strong> or <strong>any</strong>. The preview shows how many devices match as you edit.</li>
+    <li>Open one to see its devices (Connect / Terminal) or <strong>Export CSV</strong>. Anyone can view; creating and editing needs <strong>Manage devices</strong>.</li>
+    <li><strong>OS support status</strong> follows Microsoft's end-of-support dates: <em>End of support</em>, <em>Ending within 6 months</em>, <em>Supported</em>, or <em>Unknown</em> (macOS/Linux/not reported). Windows 11 is judged by its feature release.</li>
   </ul>
 </div>
 
@@ -115,6 +131,7 @@
     <li>Access is controlled by <strong>roles</strong>. Viewing is always allowed; capabilities gate who can change things.</li>
     <li>Built-in: <strong>Administrator</strong> (everything, locked), <strong>Technician</strong> (devices + groups), <strong>Viewer</strong> (read-only).</li>
     <li>Admins can create <strong>custom roles</strong> with a capability checkbox matrix under <strong>Admin → Roles &amp; permissions</strong>, and assign them on the Users page. The UI hides actions a role can't use; the server enforces them regardless.</li>
+    <li>The <strong>Admin</strong> menu (including Reports) appears for any role with at least one admin capability, so a Technician doesn't see it.</li>
   </ul>
 </div>
 
@@ -122,7 +139,18 @@
   <h2><span class="n">8</span> Admin tools</h2>
   <ul>
     <li><strong>Backup &amp; Restore</strong> — off-site destination (S3 / Wasabi / Backblaze B2 / Spaces / MinIO), encryption, test, back up, download, restore.</li>
-    <li><strong>Roles &amp; permissions</strong>, <strong>Export device inventory (CSV)</strong>, <strong>Restart relay</strong> (brief session drop), <strong>Prune logs</strong>.</li>
+    <li><strong>Installer signing</strong> — Authenticode-sign Windows installers with Azure Trusted Signing (no SmartScreen “unknown publisher” warning); automatic after each build, or <strong>Sign / Re-sign</strong> per installer on the group page.</li>
+    <li><strong>Email templates</strong> (see below), <strong>Reports</strong> (see below), <strong>Roles &amp; permissions</strong>, <strong>Export device inventory (CSV)</strong>, <strong>Restart relay</strong> (brief session drop), <strong>Prune logs</strong>.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="reports">
+  <h2><span class="n">8b</span> Reports</h2>
+  <ul>
+    <li>Twelve reports under <strong>Admin → Reports</strong>: Fleet overview, Device inventory, OS support, Inactive devices, RustDesk versions, Hardware, Data quality, Client group health, Remote sessions, New devices, Installers &amp; download links, User activity.</li>
+    <li>Filter any report to one <strong>client group</strong> (or devices with none); activity reports also take a <strong>period</strong>. Every table has <strong>Download CSV</strong>; <strong>Print</strong> makes a clean printout or PDF.</li>
+    <li><strong>Colors mean something</strong>: breakdowns show a colored split bar (a category keeps its color when filtered; small ones fold into gray “Other”); sessions and new devices are column charts; status badges are green ✓ good, amber ! attention, red ✕ problem, gray – unknown; tiles get a red/amber stripe when the number is a problem. Hover a bar for its exact value.</li>
+    <li>Prepare client recommendations with <strong>Client group health</strong> and <strong>OS support</strong>, filtered to that client.</li>
   </ul>
 </div>
 
@@ -137,7 +165,7 @@
 <div class="help-sec" id="s10">
   <h2><span class="n">10</span> Logs</h2>
   <ul>
-    <li>Audit trail in category tabs: All, Clients, <strong>Remote sessions</strong>, Installers, Groups, Users &amp; auth, Server — each with a filter.</li>
+    <li>Audit trail in category tabs: All, Clients, <strong>Remote sessions</strong>, Installers, Groups, Users &amp; auth, Notifications, Server, Other — each with a filter.</li>
     <li><strong>Remote sessions</strong> shows each connection to a device: which device, when, and how long. (The client reports the device side, not which technician connected.)</li>
   </ul>
 </div>
@@ -156,9 +184,20 @@
 <div class="help-sec" id="s12">
   <h2><span class="n">12</span> Notifications &amp; alerts</h2>
   <ul>
-    <li><strong>SMTP</strong> for outbound mail (send a test). <strong>Event triggers</strong> choose which events email you.</li>
+    <li><strong>SMTP</strong> for outbound mail (send a test). <strong>Event triggers</strong> choose which events email you: device registered / came online / went offline / deleted, installer built / deleted / downloaded, user created / deleted, new server or client version, memory or disk high.</li>
+    <li>Device alerts are checked every 30 seconds. <strong>New device registered</strong> fires as soon as a device registers — it doesn't wait for a group. <strong>Came online</strong> / <strong>went offline</strong> fire on state changes of known devices. A dashboard restart never floods you.</li>
     <li><strong>Server health alerts</strong> — set memory and disk thresholds; you're emailed when usage crosses them (debounced). These are the markers on the Server Health tiles.</li>
     <li><strong>Delivery log</strong> shows recent sends and whether they succeeded.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="emails">
+  <h2><span class="n">12b</span> Email templates</h2>
+  <ul>
+    <li><strong>Admin → Email templates</strong> (Manage notifications) controls every email: alerts, the new-user welcome, the passkey reminder and the client download-link email.</li>
+    <li><strong>Design</strong> — logo (sent inside the email), brand names for team and client emails, header / button / page colors, font and footers.</li>
+    <li><strong>Each email</strong> — edit subject, heading, message, closing text and button text; click a <code>{placeholder}</code> to insert it. A blank line starts a paragraph, <code>**text**</code> is bold, and a paragraph whose placeholders are all empty is skipped. Hide the details table or <strong>Reset to default</strong>.</li>
+    <li>Live preview while you type; <strong>Send test to me</strong> emails the saved version with sample data.</li>
   </ul>
 </div>
 
@@ -166,6 +205,7 @@
   <h2><span class="n">13</span> My account</h2>
   <ul>
     <li>Update your name/email, change your password, and register or remove <strong>passkeys</strong> (Touch ID, Windows Hello, security key) — choosing whether password sign-in stays enabled.</li>
+    <li><strong>Theme</strong> — the switch at the bottom of the sidebar picks <strong>Light</strong>, <strong>Dark</strong> or <strong>Auto</strong> (follows your computer). Saved per browser.</li>
   </ul>
 </div>
 
@@ -184,6 +224,14 @@
     <tr><td>Get alerted on low disk/memory</td><td>Admin → Notifications → health thresholds</td></tr>
     <tr><td>See who connected to what</td><td>Logs → Remote sessions</td></tr>
     <tr><td>Export the device list</td><td>Admin → Export device inventory (CSV)</td></tr>
+    <tr><td>Find Windows 10 / stale / low-spec machines</td><td>Dynamic Groups → New (pick a template)</td></tr>
+    <tr><td>Prepare recommendations for a client</td><td>Admin → Reports → Client group health / OS support (filter to the client)</td></tr>
+    <tr><td>Give a newly registered device a group</td><td>Devices → Recently registered → Assign to Group</td></tr>
+    <tr><td>Edit a device without leaving its client</td><td>Client Groups → group → Edit</td></tr>
+    <tr><td>Brand a client's installer (name/icon)</td><td>Client Groups → group → Branding</td></tr>
+    <tr><td>Remove the SmartScreen warning</td><td>Admin → Installer signing</td></tr>
+    <tr><td>Change what alert emails say / add a logo</td><td>Admin → Email templates</td></tr>
+    <tr><td>Turn dark mode on/off</td><td>Sidebar footer → Light / Dark / Auto</td></tr>
   </table>
 </div>
 </div>

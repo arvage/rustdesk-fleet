@@ -15,7 +15,7 @@ Throughout, replace `rds.example.com` with your own server address.
   **setup** page — enter the email and password for the first administrator.
   This page locks permanently once that account exists.
 - **Normal sign-in:** enter your email and password. If you've registered a
-  passkey (see [My account](#9-my-account)), you'll be asked for it after the
+  passkey (see [My account](#13-my-account)), you'll be asked for it after the
   password, or it may replace the password entirely.
 
 The left sidebar is the main navigation. Which items you see depends on your
@@ -68,6 +68,13 @@ You don't configure anything on the client by hand — the installer does it.
 
 The **Devices** page lists every machine, with live status
 (**online** / **in session** / **offline**), computer name, OS, IP and group.
+It's sorted by **label** (A→Z, ignoring case), with unlabeled devices at the
+bottom. Click any column header to sort differently.
+
+**Recently registered**: devices registered in the last 7 days that don't
+have a client group yet appear in a highlighted panel at the top, newest
+first. **Assign to Group** (needs permission) sets the group without touching
+the label. Once a device has a group it leaves the panel.
 
 - **Filter** with the search box (by ID, label, group, hostname, user, OS).
 - **ⓘ Details** — opens a read-only panel with the full reported details
@@ -75,6 +82,8 @@ The **Devices** page lists every machine, with live status
   device's recent remote sessions.
 - **Connect** (the video icon) — launches your local RustDesk app to connect
   to that device.
+- **Terminal** (the `>_` icon) — opens a RustDesk terminal session to the
+  device.
 - **Edit** (needs permission) — set a friendly **label** and move the device
   to a different **client group**.
 - **Delete** (needs permission) — removes the device from the dashboard and
@@ -116,7 +125,15 @@ separate infrastructure.
 - **Create a group** from the Client Groups page: give it a name/slug and an
   optional **unattended password** that gets baked into its installers.
 - **Open a group** to see its devices, build installers, manage download
-  links, and set managed client settings.
+  links, and set managed client settings. Its device list is sorted by label.
+- **Edit a device from the group page** (needs *Manage devices*): each device
+  has the same **Edit** button as the Devices page (label, client group,
+  delete). Afterwards you stay on the group page. A device moved to another
+  group drops off this list.
+- **Branding** (needs *Manage groups*): give the group's installers their own
+  **app name** and **icon** (PNG or ICO, square, 256×256 is best). New
+  installers for that group use them.
+- **Unattended password**: managers can click the password badge to copy it.
 
 Both the groups list and the device list inside a group support sorting and
 column show/hide — see [Customizing tables](#customizing-tables-sorting--columns).
@@ -131,8 +148,6 @@ written into new installers:
   RustDesk release (when no session is active).
 - **Remote settings changes** — whether someone connected to a device can open
   and change RustDesk's own settings on it.
-
----
 
 ### Dynamic groups
 
@@ -158,6 +173,8 @@ groups, whatever client group it belongs to.
 (already past), *Ending within 6 months*, *Supported*, or *Unknown* (macOS,
 Linux, or no OS reported). Windows 11 is judged by its feature release (build
 number). Enterprise/Education editions get an extra year.
+
+---
 
 ## 6. Download links
 
@@ -189,6 +206,10 @@ under **Admin → Roles & permissions**, and assign a role to each user on the
 **Users** page. The interface hides actions a role can't perform, and the
 server enforces them regardless.
 
+The **Admin** menu, including **Reports**, appears for any role with at least
+one admin capability: update server, manage notifications, backups, system,
+users or roles. A Technician (devices + groups only) doesn't see it.
+
 ---
 
 ## 8. Admin tools
@@ -200,17 +221,59 @@ Under **Admin** (admins, or roles with the matching capability):
   encryption passphrase, **Test connection**, **Back up now**, and **download**
   or **restore** any archive. Backups also run nightly on their own. See
   [Backups](#11-backups).
+- **Installer signing** — Authenticode-sign Windows installers with Azure
+  Trusted Signing so clients don't get the SmartScreen "unknown publisher"
+  warning. Set the Azure details once, then signing runs automatically after
+  each build, or per installer with **Sign / Re-sign** on the group page.
+  Azure setup steps are in [`DEPLOYMENT.md`](DEPLOYMENT.md) §10.
 - **Roles & permissions** — see [above](#7-roles--permissions).
-- **Reports** (also in the sidebar under Admin): fleet overview, device
-  inventory, OS support, inactive devices, RustDesk versions, hardware, data
-  quality, client group health, remote sessions, new devices, installers &
-  download links, and user activity. Each one can be filtered to one client
-  group (and a time period where it applies). Every table downloads as CSV, and
-  **Print** gives a clean printout or PDF for a client meeting.
+- **Email templates** — the wording and design of every email; see
+  [Email templates](#email-templates).
+- **Reports** — see [Reports](#reports) below.
 - **Export device inventory (CSV)** — download the whole fleet as a spreadsheet.
 - **Restart relay** — restart the hbbs/hbbr containers (drops active sessions
   briefly).
 - **Prune logs** — delete audit entries older than a chosen age.
+
+### Reports
+
+**Admin → Reports** (also in the sidebar). Every report can be filtered to one
+client group, or to devices with no group. Reports about activity also take a
+time period (7 days to a year). Each table has **Download CSV**, and **Print**
+gives a clean printout or PDF for a client meeting.
+
+| Report | What it shows |
+|---|---|
+| **Fleet overview** | Totals (online, reporting, unsupported OS, outdated RustDesk, inactive) and breakdowns by client group, OS, OS support status, RustDesk version and status |
+| **Device inventory** | Every device, one row each, with hardware, OS, version and activity |
+| **Operating system support** | Devices past or within 6 months of Microsoft end of support, and every OS with its end date |
+| **Inactive devices** | Devices not seen for 30 days to a year (the period picks the threshold), plus "never seen" |
+| **RustDesk client versions** | Version spread, clients older than your installers, devices not reporting |
+| **Hardware** | Memory, cores and CPU models, with under-8 GB and under-4-core lists |
+| **Data quality** | Devices with no client group or no label, and duplicate computer names (usually a reinstall) |
+| **Client group health** | One row per client: devices, online, OS risk, outdated clients, inactivity, sessions, installers, links |
+| **Remote sessions** | Sessions and time by device, client group and day, and devices not accessed |
+| **New devices** | Devices registered in the period, and registrations by month |
+| **Installers & download links** | Latest installer per client and platform (and whether it's current), and link usage |
+| **User activity** | Actions per user and per event type, accounts, and the full event list |
+
+**Reading the colors.** Color always means something:
+
+- **Breakdowns** ("By operating system", etc.) show a colored bar of the split,
+  with a matching square and share bar on each table row. A category keeps its
+  color when you filter to one client. Beyond 7 categories the smallest are
+  grouped into a gray **Other**. *Not reported* and *Unassigned* are gray.
+- **Charts over time** (sessions by day, new devices by month) are column
+  charts with the peak labeled. Periods over a month use one column per week.
+- **Status badges**: green ✓ good, amber ! needs attention, red ✕ problem,
+  gray – neutral/unknown. The word is always shown too.
+- **Summary tiles** get a red or amber stripe and icon when the number is a
+  problem, green when it's good news.
+- In **Client group health**, any non-zero OS-ended, OS-ending, outdated or
+  inactive count is badged, so you can scan for clients that need attention.
+
+Hover over a bar or column to see its exact value. The table under each chart
+has the same data.
 
 ---
 
@@ -232,7 +295,10 @@ Under **Admin** (admins, or roles with the matching capability):
 **Logs** is the audit trail, split into category tabs:
 
 - **All activity**, **Clients**, **Remote sessions**, **Installers**,
-  **Groups**, **Users & auth**, **Server**.
+  **Groups**, **Users & auth**, **Notifications**, **Server**, **Other**.
+  Changes to dynamic groups are under Groups. Email template and design
+  changes are under Notifications. Devices registering, going offline and
+  coming back online are under Clients.
 - **Remote sessions** shows each remote connection to a device — which device
   was accessed, when, and for how long. (The RustDesk client reports the
   device side of the connection, not which technician connected.)
@@ -274,9 +340,20 @@ Backups protect the one thing that can't be regenerated — the server keypair
 
 - **SMTP** — the outbound mail server used for all alerts; send a **test
   email** to verify.
-- **Event triggers** — toggle which events send email (device registered /
-  deleted / offline, installer built, new server/client version, user
-  created, etc.).
+- **Event triggers** — toggle which events send email: device registered,
+  came online, went offline, deleted; installer built, deleted, downloaded via
+  link; user created or deleted; new server or client version; server memory or
+  disk high. New events start switched on.
+- **When device alerts fire**: the dashboard checks every 30 seconds.
+  - **New device registered** fires on the next check after a device
+    registers with the server, whether or not it has a client group yet.
+    Assigning it a group later doesn't send another.
+  - **Came online** and **went offline** fire when a known device changes
+    state. A brand-new device only gets the registration email.
+  - The first check after the dashboard restarts only records the current
+    state, so a restart never floods you with alerts.
+  - On a large fleet, "came online" can be frequent (every reboot or network
+    blip), so switch it off if it's noisy.
 - **Server health alerts** — set the **memory** and **disk** thresholds; you're
   emailed when usage crosses them (debounced, so you're not spammed). These
   thresholds are the markers shown on the Server Health tiles.
@@ -337,4 +414,10 @@ in this browser, so set it once on each browser or device you use.
 | See who connected to what | Logs → Remote sessions |
 | Export the device list | Admin → Export device inventory (CSV) |
 | Find Windows 10 / stale / low-spec machines | Dynamic Groups → New (pick a template) |
+| Give a newly registered device a group | Devices → Recently registered → Assign to Group |
+| Edit a device without leaving its client | Client Groups → group → Edit |
+| Brand a client's installer (name/icon) | Client Groups → group → Branding |
+| Remove the SmartScreen warning | Admin → Installer signing |
+| Change what alert emails say / add a logo | Admin → Email templates |
+| Turn dark mode on/off | Sidebar footer → Light / Dark / Auto |
 | Prepare recommendations for a client | Admin → Reports → Client group health / OS support (filter to the client) |
