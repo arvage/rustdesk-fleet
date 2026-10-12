@@ -50,6 +50,7 @@ _CATEGORY_EVENTS = {
     "notifications": [
         "notification_settings_updated", "notification_test_sent",
         "notification_triggers_updated", "health_alert_thresholds_updated",
+        "email_template_updated", "email_design_updated",
     ],
     "server": [
         "server_updated", "server_update_start", "server_update_available",

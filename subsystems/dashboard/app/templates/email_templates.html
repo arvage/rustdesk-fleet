@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Email templates — RustDesk Fleet{% endblock %}
+{% block page_title %}Email templates{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% block content %}
+<p class="text-muted text-sm" style="margin:0 0 18px;max-width:780px">
+  Change the wording of every email the dashboard sends, and the look they all share: logo, colors,
+  font and footer. Which alerts are sent, and to whom, is set on the
+  <a href="/notifications" style="color:var(--accent)">Notifications</a> page.
+</p>
+
+<div class="card" style="margin-bottom:22px"><div class="card-body" style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+  <div style="width:120px;height:56px;border-radius:8px;background:{{ design.header_bg }};display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden">
+    {% if has_logo %}<img src="/admin/emails/logo.png" alt="" style="max-height:36px;max-width:100px">
+    {% else %}<span style="color:{{ design.header_text }};font-size:12px;font-weight:600;padding:0 8px;text-align:center">{{ design.brand_name or 'No title' }}</span>{% endif %}
+  </div>
+  <div style="flex:1;min-width:220px">
+    <div style="font-size:14px;font-weight:600">Design</div>
+    <div class="text-muted text-sm">Logo, brand name, header and accent colors, font and footer, shared by every email.</div>
+  </div>
+  <a href="/admin/emails/design" class="btn btn-primary btn-sm">Edit design</a>
+</div></div>
+
+{% for cat, items in groups.items() %}
+<h2 style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px">{{ cat }}</h2>
+<div class="card" style="margin-bottom:22px">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Email</th><th>Subject</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+      {% for t in items %}
+        <tr style="cursor:pointer" onclick="location.href='/admin/emails/{{ t.key }}'">
+          <td style="font-weight:600;white-space:nowrap"><a href="/admin/emails/{{ t.key }}" style="color:var(--text-1);text-decoration:none">{{ t.name }}</a></td>
+          <td class="text-sm text-muted">{{ t.subject }}</td>
+          <td>{% if t.customized %}<span class="badge badge-signed">customized</span>{% else %}<span class="badge badge-unknown">default</span>{% endif %}</td>
+          <td style="text-align:right"><a href="/admin/emails/{{ t.key }}" class="btn btn-ghost btn-sm">Edit</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

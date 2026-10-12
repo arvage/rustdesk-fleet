@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Email design — RustDesk Fleet{% endblock %}
+{% block page_title %}Email design{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% block content %}
+<style>
+  .et-grid { display:grid; grid-template-columns:minmax(320px,1fr) minmax(360px,1fr); gap:18px; align-items:start }
+  @media (max-width:1000px){ .et-grid { grid-template-columns:1fr } }
+  .et-input { width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);color:var(--text-1);box-sizing:border-box;font-family:inherit }
+  .et-sec { font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 10px }
+  .et-sec:first-child { margin-top:0 }
+  .color-row { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 14px }
+  .color-field { display:flex;align-items:center;gap:8px }
+  .color-field input[type=color] { width:38px;height:32px;padding:2px;border:1px solid var(--border-md);border-radius:6px;background:var(--surface);cursor:pointer;flex-shrink:0 }
+  .color-field .et-input { font-family:monospace;text-transform:uppercase }
+</style>
+
+<p class="text-muted text-sm" style="margin-bottom:14px">
+  <a href="/admin/emails" style="color:inherit">Email templates</a> / Design
+</p>
+
+<div class="et-grid">
+  <form method="post" enctype="multipart/form-data" id="d-form" class="card" style="margin:0"><div class="card-body">
+
+    <div class="et-sec">Logo</div>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;flex-wrap:wrap">
+      <div style="min-width:120px;height:60px;padding:0 12px;border-radius:8px;background:{{ design.header_bg }};display:flex;align-items:center;justify-content:center">
+        {% if has_logo %}<img src="/admin/emails/logo.png?v={{ logo_v }}" alt="Current logo" style="max-height:44px;max-width:220px">
+        {% else %}<span style="color:{{ design.header_text }};opacity:.7;font-size:12px">No logo</span>{% endif %}
+      </div>
+      <div style="flex:1;min-width:200px">
+        <input type="file" name="logo" accept="image/png,image/jpeg,image/gif,image/webp" style="font-size:12px">
+        <div class="text-muted" style="font-size:12px;margin-top:4px">PNG, JPG or GIF, under 2 MB. A wide logo with a transparent background works best. Save to see it in the preview.</div>
+        {% if has_logo %}
+        <label style="display:inline-flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:var(--danger);cursor:pointer">
+          <input type="checkbox" name="remove_logo" value="1"> Remove logo
+        </label>
+        {% endif %}
+      </div>
+    </div>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-1)"><input type="checkbox" name="show_logo_team" value="1" {% if design.show_logo_team %}checked{% endif %}> On team emails</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-1)"><input type="checkbox" name="show_logo_client" value="1" {% if design.show_logo_client %}checked{% endif %}> On client emails</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-1)">Height
+        <input type="number" name="logo_height" min="20" max="120" value="{{ design.logo_height }}" class="et-input" style="width:72px"> px</label>
+    </div>
+
+    <div class="et-sec">Brand name</div>
+    <div class="field" style="margin-bottom:12px">
+      <label for="d-brand">Team emails (alerts, user emails)</label>
+      <input id="d-brand" name="brand_name" class="et-input" value="{{ design.brand_name }}" maxlength="80" placeholder="Leave empty for logo only">
+    </div>
+    <div class="field" style="margin-bottom:4px">
+      <label for="d-cbrand">Client emails (download links)</label>
+      <input id="d-cbrand" name="client_brand_name" class="et-input" value="{{ design.client_brand_name }}" maxlength="80" placeholder="e.g. your company name — empty means no header bar">
+    </div>
+
+    <div class="et-sec">Colors &amp; font</div>
+    <div class="color-row">
+      {% for k, label in [('header_bg','Header background'),('header_text','Header text'),('accent','Buttons & links'),('page_bg','Page background')] %}
+      <div class="field" style="margin:0">
+        <label>{{ label }}</label>
+        <div class="color-field">
+          <input type="color" value="{{ design[k] }}" data-for="d-{{ k }}">
+          <input id="d-{{ k }}" name="{{ k }}" class="et-input" value="{{ design[k] }}" maxlength="7" pattern="#[0-9A-Fa-f]{6}">
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="field" style="margin:12px 0 0">
+      <label for="d-font">Font</label>
+      <select id="d-font" name="font" class="et-input">
+        {% for k, f in fonts.items() %}<option value="{{ k }}" {% if design.font == k %}selected{% endif %}>{{ f[0] }}</option>{% endfor %}
+      </select>
+    </div>
+
+    <div class="et-sec">Footer</div>
+    <div class="field" style="margin-bottom:12px">
+      <label for="d-footer">Team emails</label>
+      <input id="d-footer" name="footer_text" class="et-input" value="{{ design.footer_text }}" maxlength="300">
+    </div>
+    <div class="field" style="margin-bottom:4px">
+      <label for="d-cfooter">Client emails</label>
+      <input id="d-cfooter" name="client_footer_text" class="et-input" value="{{ design.client_footer_text }}" maxlength="300" placeholder="e.g. Acme IT · (555) 010-0199 · support@acme.example">
+    </div>
+    <div class="text-muted" style="font-size:12px;margin-bottom:16px"><code>{timestamp}</code> inserts the send time. Leave a footer empty to hide it.</div>
+
+    <div style="display:flex;gap:8px;align-items:center">
+      <button type="submit" class="btn btn-primary">Save design</button>
+      <div style="flex:1"></div>
+      <button type="submit" name="action" value="reset" class="btn btn-ghost btn-sm" style="color:var(--danger)"
+              onclick="return confirm('Reset colors, brand names, font and footers to the defaults? The logo is kept.')">Reset to defaults</button>
+    </div>
+  </div></form>
+
+  <div class="card" style="margin:0;position:sticky;top:12px">
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <span style="font-size:13px;font-weight:600">Preview</span>
+      <select id="pv-key" class="et-input" style="width:auto;padding:5px 8px">
+        <option value="device_registered">Team alert — New device registered</option>
+        <option value="memory_high">Team alert — Server memory high</option>
+        <option value="user_credentials">User email — Welcome</option>
+        <option value="download_link">Client email — Installer download link</option>
+      </select>
+    </div>
+    <iframe id="pv-frame" sandbox="" title="Email preview" style="width:100%;height:640px;border:0;display:block;background:#fff;border-radius:0 0 var(--radius) var(--radius)"></iframe>
+  </div>
+</div>
+
+<script>
+const form = document.getElementById('d-form');
+// Keep each color picker and its hex box in sync.
+form.querySelectorAll('input[type=color]').forEach(picker => {
+  const box = document.getElementById(picker.dataset.for);
+  picker.addEventListener('input', () => { box.value = picker.value.toUpperCase(); schedule(); });
+  box.addEventListener('input', () => { if (/^#[0-9A-Fa-f]{6}$/.test(box.value)) picker.value = box.value; });
+});
+
+function draft() {
+  const fd = new FormData(form), d = {};
+  ['brand_name','client_brand_name','logo_height','header_bg','header_text','accent','page_bg','font','footer_text','client_footer_text']
+    .forEach(k => d[k] = fd.get(k) ?? '');
+  d.show_logo_team = fd.get('show_logo_team') ? '1' : '0';
+  d.show_logo_client = fd.get('show_logo_client') ? '1' : '0';
+  return d;
+}
+let timer = null;
+function schedule() { clearTimeout(timer); timer = setTimeout(refresh, 250); }
+async function refresh() {
+  try {
+    const res = await fetch('/admin/emails/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: document.getElementById('pv-key').value, design: draft() }),
+    });
+    document.getElementById('pv-frame').srcdoc = (await res.json()).html;
+  } catch (_) {}
+}
+form.addEventListener('input', schedule);
+form.addEventListener('change', schedule);
+document.getElementById('pv-key').addEventListener('change', refresh);
+refresh();
+</script>
+{% endblock %}

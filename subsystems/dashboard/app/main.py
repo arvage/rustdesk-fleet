@@ -22,6 +22,7 @@ from app.routes.links import router as links_router
 from app.routes.client_api import router as client_api_router
 from app.routes.dynamic_groups import router as dynamic_groups_router
 from app.routes.reports import router as reports_router
+from app.routes.email_templates import router as email_templates_router
 from app.deps import run_migrations
 
 app = FastAPI(docs_url=None, redoc_url=None)
@@ -92,3 +93,4 @@ app.include_router(links_router)
 app.include_router(client_api_router)
 app.include_router(dynamic_groups_router)
 app.include_router(reports_router)
+app.include_router(email_templates_router)

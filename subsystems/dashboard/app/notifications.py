@@ -23,9 +23,9 @@ import smtplib
 import sqlite3
 import threading
 from datetime import datetime, timezone
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from html import escape as html_escape
 from pathlib import Path
 
 DB_PATH = Path("/opt/rustdesk-fleet/fleet.sqlite3")
@@ -102,51 +102,9 @@ def get_log(limit: int = 50) -> list[dict]:
     conn.close()
     return [dict(r) for r in rows]
 
-# ── Email templates ───────────────────────────────────────────────────────────
-
-_BASE = """\
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-  body{{margin:0;padding:24px 0;background:#F1F5F9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}}
-  .wrap{{max-width:540px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.1)}}
-  .hdr{{background:#1E293B;padding:22px 28px}}
-  .hdr h1{{color:#fff;margin:0;font-size:16px;font-weight:600;letter-spacing:.01em}}
-  .hdr p{{color:#94A3B8;margin:4px 0 0;font-size:12px}}
-  .body{{padding:24px 28px}}
-  .body p{{color:#334155;font-size:14px;line-height:1.6;margin:0 0 16px}}
-  table.kv{{width:100%;border-collapse:collapse;font-size:13px;margin:16px 0}}
-  table.kv td{{padding:9px 0;border-bottom:1px solid #F1F5F9;vertical-align:top}}
-  table.kv td:first-child{{color:#64748B;width:150px;padding-right:12px;white-space:nowrap}}
-  table.kv td:last-child{{color:#0F172A;font-weight:500;word-break:break-all}}
-  .badge{{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}}
-  .badge-ok{{background:#D1FAE5;color:#065F46}}
-  .badge-warn{{background:#FEF3C7;color:#92400E}}
-  .badge-err{{background:#FEE2E2;color:#7F1D1D}}
-  .badge-info{{background:#DBEAFE;color:#1E3A8A}}
-  .ftr{{background:#F8FAFC;padding:14px 28px;border-top:1px solid #E2E8F0}}
-  .ftr p{{color:#94A3B8;font-size:11px;margin:0}}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="hdr">
-    <h1>RustDesk Fleet</h1>
-    <p>{subtitle}</p>
-  </div>
-  <div class="body">
-    {body}
-  </div>
-  <div class="ftr">
-    <p>RustDesk Fleet Management &nbsp;·&nbsp; {ts} (Los Angeles)</p>
-  </div>
-</div>
-</body>
-</html>"""
-
+# ── Email rendering ───────────────────────────────────────────────────────────
+# Wording and look are editable under Admin → Email templates; see
+# app/email_templates.py for the catalogue and defaults.
 
 def _now_la() -> str:
     from zoneinfo import ZoneInfo
@@ -155,195 +113,11 @@ def _now_la() -> str:
     )
 
 
-def _kv(*pairs: tuple[str, str]) -> str:
-    rows = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in pairs)
-    return f'<table class="kv">{rows}</table>'
-
-
 def _render(event_type: str, context: dict) -> tuple[str, str]:
     """Return (subject, html_body) for the given event and context."""
-    ts = _now_la()
-    subj = _SUBJECTS.get(event_type, event_type).format_map(context)
-
-    if event_type == "device_registered":
-        body = (
-            "<p>A new device has been registered with your RustDesk Fleet server.</p>"
-            + _kv(
-                ("RustDesk ID", context.get("rustdesk_id", "—")),
-                ("Computer", context.get("hostname") or "—"),
-                ("Label", context.get("label") or "—"),
-                ("Group", context.get("group_name") or "unassigned"),
-                ("IP address", context.get("ip") or "—"),
-                ("Registered at", context.get("registered_at") or ts),
-            )
-        )
-        subtitle = "New device registered"
-
-    elif event_type == "device_deleted":
-        body = (
-            "<p>A device has been removed from your RustDesk Fleet.</p>"
-            + _kv(
-                ("RustDesk ID", context.get("rustdesk_id", "—")),
-                ("Label", context.get("label") or "—"),
-                ("Group", context.get("group_name") or "—"),
-                ("Last seen", context.get("last_seen") or "—"),
-            )
-        )
-        subtitle = "Device removed from fleet"
-
-    elif event_type == "device_offline":
-        body = (
-            "<p>A device has gone offline.</p>"
-            + _kv(
-                ("RustDesk ID", context.get("rustdesk_id", "—")),
-                ("Label", context.get("label") or "—"),
-                ("Group", context.get("group_name") or "—"),
-                ("Last seen", context.get("last_seen") or ts),
-            )
-        )
-        subtitle = "Device offline"
-
-    elif event_type == "device_online":
-        body = (
-            "<p>A device that was offline is back online.</p>"
-            + _kv(
-                ("RustDesk ID", context.get("rustdesk_id", "—")),
-                ("Computer", context.get("hostname") or "—"),
-                ("Label", context.get("label") or "—"),
-                ("Group", context.get("group_name") or "unassigned"),
-                ("IP address", context.get("ip") or "—"),
-                ("Came online", context.get("online_at") or ts),
-            )
-        )
-        subtitle = "Device online"
-
-    elif event_type == "installer_built":
-        body = (
-            "<p>A new installer has been generated and is ready to deploy.</p>"
-            + _kv(
-                ("Group", context.get("group_name", "—")),
-                ("Platform", context.get("platform", "—")),
-                ("RustDesk version", context.get("version", "—")),
-                ("SHA-256 (first 16)", (context.get("sha256") or "")[:16] + "…"),
-            )
-        )
-        subtitle = "Installer ready"
-
-    elif event_type == "installer_deleted":
-        body = (
-            "<p>An installer build has been deleted.</p>"
-            + _kv(
-                ("Group", context.get("group_name", "—")),
-                ("Platform", context.get("platform", "—")),
-                ("RustDesk version", context.get("version", "—")),
-                ("Deleted by", context.get("deleted_by", "—")),
-            )
-        )
-        subtitle = "Installer deleted"
-
-    elif event_type == "user_created":
-        body = (
-            "<p>A new user account has been created in RustDesk Fleet.</p>"
-            + _kv(
-                ("Name", context.get("display_name", "—")),
-                ("Email", context.get("email", "—")),
-                ("Role", context.get("role", "—")),
-                ("Group access", context.get("groups") or "None"),
-                ("Created by", context.get("created_by", "—")),
-            )
-        )
-        subtitle = "New user created"
-
-    elif event_type == "user_deleted":
-        body = (
-            "<p>A user account has been removed from RustDesk Fleet.</p>"
-            + _kv(
-                ("Name", context.get("display_name", "—")),
-                ("Email", context.get("email", "—")),
-                ("Role", context.get("role", "—")),
-                ("Deleted by", context.get("deleted_by", "—")),
-            )
-        )
-        subtitle = "User deleted"
-
-    elif event_type == "installer_downloaded":
-        body = (
-            "<p>A client downloaded an installer using a shared download link."
-            " The device should appear in the dashboard shortly after it's installed.</p>"
-            + _kv(
-                ("Group", context.get("group_name", "—")),
-                ("Platform", context.get("platform", "—")),
-                ("RustDesk version", context.get("version", "—")),
-                ("Client IP", context.get("ip") or "—"),
-                ("Link note", context.get("note") or "—"),
-                ("Downloads on link", context.get("downloads") or "—"),
-            )
-        )
-        subtitle = "Installer downloaded"
-
-    elif event_type == "client_update_available":
-        body = (
-            "<p>A newer RustDesk client release is available. An admin can switch the"
-            " installers to it from the dashboard Home page, and rebuild every group's"
-            " installers in one step.</p>"
-            + _kv(
-                ("Installers use", context.get("current_version") or "—"),
-                ("Latest client", context.get("latest_version") or "—"),
-            )
-            + "<p>Devices that are already installed keep their current version until"
-            " they're reinstalled with a new installer.</p>"
-        )
-        subtitle = "Client update available"
-
-    elif event_type == "server_update_available":
-        body = (
-            "<p>A newer RustDesk server release is available. An admin can apply it"
-            " from the dashboard Home page.</p>"
-            + _kv(
-                ("Current version", context.get("current_version") or "—"),
-                ("Latest version", context.get("latest_version") or "—"),
-            )
-            + '<p><span class="badge badge-warn">Note</span>&nbsp; Updating restarts'
-            " hbbs/hbbr and drops any active remote sessions.</p>"
-        )
-        subtitle = "Server update available"
-
-    elif event_type == "memory_high":
-        body = (
-            '<p><span class="badge badge-warn">Alert</span>&nbsp; Server memory usage has'
-            " crossed the configured threshold.</p>"
-            + _kv(
-                ("Memory used", context.get("pct_str") or (str(context.get("pct", "—")) + "%")),
-                ("Threshold", str(context.get("threshold", "—")) + "%"),
-                ("Used / total", context.get("usage") or "—"),
-                ("Host", context.get("host") or "—"),
-            )
-            + "<p>Sustained high memory can cause the hbbs/hbbr containers or the dashboard"
-            " to be killed by the OOM killer. Consider adding swap or a larger instance.</p>"
-        )
-        subtitle = "Server memory high"
-
-    elif event_type == "disk_high":
-        body = (
-            '<p><span class="badge badge-warn">Alert</span>&nbsp; Server disk usage has'
-            " crossed the configured threshold.</p>"
-            + _kv(
-                ("Disk used", context.get("pct_str") or (str(context.get("pct", "—")) + "%")),
-                ("Threshold", str(context.get("threshold", "—")) + "%"),
-                ("Used / total", context.get("usage") or "—"),
-                ("Host", context.get("host") or "—"),
-            )
-            + "<p>When the disk fills, installer builds, the fleet database and new client"
-            " registrations can fail. Free space or grow the volume.</p>"
-        )
-        subtitle = "Server disk high"
-
-    else:
-        body = f"<p>Event: <strong>{event_type}</strong></p>"
-        subtitle = event_type
-
-    html = _BASE.format(subtitle=subtitle, body=body, ts=ts)
-    return subj, html
+    from app.email_templates import render
+    subject, html, _ = render(event_type, context)
+    return subject, html
 
 
 # ── SMTP send ─────────────────────────────────────────────────────────────────
@@ -352,13 +126,27 @@ def _send_sync(
     settings: dict, to_list: list[str], subject: str, html: str, reply_to: str = ""
 ) -> None:
     """Blocking send — must be called from a thread, not the async event loop."""
-    msg = MIMEMultipart("alternative")
+    from app.email_templates import LOGO_CID, logo_bytes
+    logo = logo_bytes() if f"cid:{LOGO_CID}" in html else None
+    if logo:
+        # multipart/related so the logo travels inline with the message
+        # (shows without the recipient having to allow remote images).
+        msg = MIMEMultipart("related")
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(html, "html", "utf-8"))
+        msg.attach(alt)
+        img = MIMEImage(logo, "png")
+        img.add_header("Content-ID", f"<{LOGO_CID}>")
+        img.add_header("Content-Disposition", "inline", filename="logo.png")
+        msg.attach(img)
+    else:
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(html, "html", "utf-8"))
     msg["Subject"] = subject
     msg["From"] = settings["from_addr"]
     msg["To"] = ", ".join(to_list)
     if reply_to:
         msg["Reply-To"] = reply_to
-    msg.attach(MIMEText(html, "html", "utf-8"))
 
     host = settings["smtp_host"]
     port = int(settings["smtp_port"])
@@ -441,27 +229,9 @@ def send_credentials_email(to_email: str, display_name: str, password: str) -> t
     if not settings.get("from_addr"):
         return False, "No from address configured."
     try:
-        subject = "Your RustDesk Fleet account credentials"
-        html = f"""
-        <div style="font-family:Inter,system-ui,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1E293B">
-          <h2 style="font-size:20px;font-weight:700;margin-bottom:8px">Welcome to RustDesk Fleet</h2>
-          <p style="color:#64748B;font-size:14px;margin-bottom:24px">
-            Hi {display_name or to_email}, an account has been created for you.
-          </p>
-          <div style="background:#F1F5F9;border-radius:10px;padding:20px 24px;margin-bottom:24px">
-            <p style="margin:0 0 6px;font-size:13px;color:#64748B;font-weight:500">LOGIN EMAIL</p>
-            <p style="margin:0 0 16px;font-size:15px;font-weight:600;color:#0F172A">{to_email}</p>
-            <p style="margin:0 0 6px;font-size:13px;color:#64748B;font-weight:500">TEMPORARY PASSWORD</p>
-            <p style="margin:0;font-size:15px;font-weight:600;color:#0F172A;letter-spacing:.05em;font-family:monospace">{password}</p>
-          </div>
-          <p style="font-size:13px;color:#94A3B8">
-            Please change your password after your first login. This email was sent once and will not be resent.
-          </p>
-          <p style="font-size:13px;color:#94A3B8">
-            For faster, more secure sign-in, consider registering a passkey (Touch ID, Windows Hello, or a security key) from <strong>My Account &rarr; Passkeys</strong> once you're logged in.
-          </p>
-        </div>
-        """
+        subject, html = _render("user_credentials", {
+            "name": display_name or to_email, "email": to_email, "password": password,
+        })
         _send_sync(settings, [to_email], subject, html)
         return True, ""
     except Exception as exc:
@@ -476,21 +246,7 @@ def send_mfa_reminder_email(to_email: str, display_name: str) -> tuple[bool, str
     if not settings.get("from_addr"):
         return False, "No from address configured."
     try:
-        subject = "Set up a passkey for your RustDesk Fleet account"
-        html = f"""
-        <div style="font-family:Inter,system-ui,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1E293B">
-          <h2 style="font-size:20px;font-weight:700;margin-bottom:8px">Add a passkey to your account</h2>
-          <p style="color:#64748B;font-size:14px;margin-bottom:16px">
-            Hi {display_name or to_email}, you don't have multi-factor sign-in set up yet on your
-            RustDesk Fleet account.
-          </p>
-          <p style="color:#64748B;font-size:14px;margin-bottom:24px">
-            Registering a passkey (Touch ID, Windows Hello, or a security key) makes signing in
-            faster and more secure. You can add one from <strong>My Account &rarr; Passkeys</strong>
-            after logging in.
-          </p>
-        </div>
-        """
+        subject, html = _render("mfa_reminder", {"name": display_name or to_email, "email": to_email})
         _send_sync(settings, [to_email], subject, html)
         return True, ""
     except Exception as exc:
@@ -509,7 +265,8 @@ def send_download_link_email(
 ) -> tuple[bool, str]:
     """Email a client their installer download link. Returns (ok, error_msg).
 
-    Client-facing, so it's deliberately free of internal fleet branding.
+    Client-facing: uses the client email design (Admin → Email templates),
+    which has no internal fleet branding unless one is set there.
     Replies go to the staff member who sent it.
     """
     settings = get_settings()
@@ -518,43 +275,10 @@ def send_download_link_email(
     if not settings.get("from_addr"):
         return False, "No from address configured on the Notifications page."
 
-    esc = html_escape
-    greeting = f"Hi {esc(recipient_name)}," if recipient_name else "Hello,"
-    note_html = (
-        f'<p style="margin:0 0 20px;font-size:14px;color:#334155;line-height:1.6;white-space:pre-line">{esc(message)}</p>'
-        if message else ""
-    )
-    expiry_html = (
-        f'<p style="margin:16px 0 0;font-size:12px;color:#94A3B8">This link expires {esc(expires_at_local)} (Pacific time).</p>'
-        if expires_at_local else ""
-    )
-    sign_off = esc(sender_name) if sender_name else "Your IT support team"
-    subject = "Remote support installer" + (f" for {group_name}" if group_name else "")
-    html = f"""
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1E293B">
-      <h2 style="font-size:19px;font-weight:700;margin:0 0 16px">Install remote support</h2>
-      <p style="margin:0 0 16px;font-size:14px;color:#334155;line-height:1.6">{greeting}</p>
-      {note_html}
-      <p style="margin:0 0 20px;font-size:14px;color:#334155;line-height:1.6">
-        To let us help you remotely, please download and install our remote support program
-        using the button below. The page will pick the right version for your computer and
-        show you the steps.
-      </p>
-      <p style="margin:0 0 20px">
-        <a href="{esc(url)}" style="display:inline-block;background:#6366F1;color:#fff;text-decoration:none;
-           font-weight:600;font-size:14px;padding:11px 22px;border-radius:8px">Download installer</a>
-      </p>
-      <p style="margin:0;font-size:12px;color:#64748B;line-height:1.6">
-        Or copy this link into your browser:<br>
-        <a href="{esc(url)}" style="color:#6366F1;word-break:break-all">{esc(url)}</a>
-      </p>
-      {expiry_html}
-      <p style="margin:24px 0 0;font-size:14px;color:#334155">Thanks,<br>{sign_off}</p>
-      <p style="margin:24px 0 0;font-size:11px;color:#94A3B8;line-height:1.5">
-        If you weren't expecting this email, please don't install anything — just reply to let us know.
-      </p>
-    </div>
-    """
+    subject, html = _render("download_link", {
+        "recipient_name": recipient_name, "group_name": group_name, "url": url,
+        "expires_at": expires_at_local, "message": message, "sender_name": sender_name,
+    })
     try:
         _send_sync(settings, [to_email], subject, html, reply_to=reply_to)
         _log("download_link_email", subject, to_email, "sent")
@@ -574,13 +298,8 @@ def send_test_email(settings: dict) -> tuple[bool, str]:
     if not settings.get("from_addr"):
         return False, "From address is required."
 
-    _, html = _render("device_registered", {
-        "rustdesk_id": "123 456 789",
-        "label": "Test Device",
-        "group_name": "Example Group",
-        "ip": "203.0.113.42",
-        "registered_at": _now_la(),
-    })
+    from app.email_templates import TEMPLATES
+    _, html = _render("device_registered", TEMPLATES["device_registered"]["sample"])
     subject = "RustDesk Fleet — test notification"
 
     try:

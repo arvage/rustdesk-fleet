@@ -65,6 +65,15 @@
     <a href="/notifications" class="btn btn-ghost btn-sm">Notification settings</a>
   </div></div>
 
+  <!-- Email templates -->
+  {% if 'manage_notifications' in (current_user.permissions or []) %}
+  <div class="card"><div class="card-body">
+    <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Email templates</h2>
+    <p class="text-muted text-sm" style="margin:0 0 14px">Edit the wording of every email, and add your logo, colors, font and footer.</p>
+    <a href="/admin/emails" class="btn btn-ghost btn-sm">Edit emails</a>
+  </div></div>
+  {% endif %}
+
   <!-- Reports -->
   <div class="card"><div class="card-body">
     <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Reports</h2>

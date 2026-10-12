@@ -488,6 +488,10 @@ def run_migrations() -> None:
         conn.execute("ALTER TABLE download_links ADD COLUMN emailed_at TEXT")
         conn.commit()
 
+    # Editable email wording and design (app/email_templates.py).
+    from app.email_templates import ensure_tables as _ensure_email_tables
+    _ensure_email_tables(conn)
+
     # Dynamic groups: saved device filters, evaluated on view (app/dynamic_groups.py).
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS dynamic_groups (

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}{{ spec.name }} — Email templates — RustDesk Fleet{% endblock %}
+{% block page_title %}{{ spec.name }}{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% block content %}
+<style>
+  .et-grid { display:grid; grid-template-columns:minmax(320px,1fr) minmax(360px,1fr); gap:18px; align-items:start }
+  @media (max-width:1000px){ .et-grid { grid-template-columns:1fr } }
+  .et-input { width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);color:var(--text-1);box-sizing:border-box;font-family:inherit }
+  textarea.et-input { min-height:110px;resize:vertical;line-height:1.5 }
+  .ph-chip { display:inline-block;margin:0 4px 4px 0;padding:2px 7px;border-radius:5px;background:var(--code-bg);color:var(--code-text);font-family:monospace;font-size:12px;cursor:pointer;border:0 }
+  .ph-chip:hover { background:var(--accent-soft) }
+</style>
+
+<p class="text-muted text-sm" style="margin-bottom:14px">
+  <a href="/admin/emails" style="color:inherit">Email templates</a> / {{ spec.name }}
+  · <span>{{ 'sent to clients' if spec.audience == 'client' else ('sent to the user' if spec.category == 'Emails to users' else 'sent to your notification recipients') }}</span>
+  {% if t.customized %}· <span class="badge badge-signed">customized</span>{% endif %}
+</p>
+
+<div class="et-grid">
+  <form method="post" id="et-form" class="card" style="margin:0"><div class="card-body">
+    <div class="field" style="margin-bottom:14px">
+      <label for="f-subject">Subject</label>
+      <input id="f-subject" name="subject" class="et-input" value="{{ t.subject }}" maxlength="200">
+    </div>
+    <div class="field" style="margin-bottom:14px">
+      <label for="f-heading">Heading</label>
+      <input id="f-heading" name="heading" class="et-input" value="{{ t.heading }}" maxlength="200">
+    </div>
+    <div class="field" style="margin-bottom:14px">
+      <label for="f-intro">Message</label>
+      <textarea id="f-intro" name="intro" class="et-input">{{ t.intro }}</textarea>
+    </div>
+    {% if spec.details %}
+    <label style="display:flex;align-items:center;gap:8px;margin:0 0 14px;font-size:13px;color:var(--text-1);{{ 'opacity:.6' if spec.details_required }}">
+      <input type="checkbox" name="show_details" value="1" id="f-details" {% if t.show_details %}checked{% endif %} {% if spec.details_required %}disabled{% endif %}>
+      Include the details table ({{ spec.details | map(attribute=0) | join(', ') }})
+      {% if spec.details_required %}<span class="text-muted text-sm">— always included</span>{% endif %}
+    </label>
+    {% endif %}
+    {% if spec.button_url %}
+    <div class="field" style="margin-bottom:14px">
+      <label for="f-button">Button text</label>
+      <input id="f-button" name="button_text" class="et-input" value="{{ t.button_text }}" maxlength="80">
+    </div>
+    {% endif %}
+    <div class="field" style="margin-bottom:14px">
+      <label for="f-outro">Closing text <span class="text-muted" style="font-weight:400">— after the {{ 'button' if spec.button_url else 'details' }}</span></label>
+      <textarea id="f-outro" name="outro" class="et-input">{{ t.outro }}</textarea>
+    </div>
+
+    <div style="margin:4px 0 16px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px">
+      <div class="text-sm" style="font-weight:600;margin-bottom:6px">Placeholders <span class="text-muted" style="font-weight:400">— click to insert</span></div>
+      {% for p in placeholders %}<button type="button" class="ph-chip" data-ph="{{ p }}">{{ '{' ~ p ~ '}' }}</button>{% endfor %}
+      <div class="text-muted" style="font-size:12px;margin-top:6px;line-height:1.5">
+        A blank line starts a new paragraph. <code>**text**</code> is bold. Links are clickable automatically.
+        A paragraph whose placeholders are all empty is left out.
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button type="submit" class="btn btn-primary">Save</button>
+      <button type="button" class="btn btn-ghost" onclick="sendTest()" id="test-btn">Send test to me</button>
+      <span id="test-result" class="text-sm"></span>
+      <div style="flex:1"></div>
+      {% if t.customized %}
+      <button type="submit" name="action" value="reset" class="btn btn-ghost btn-sm" style="color:var(--danger)"
+              onclick="return confirm('Reset this email to the default wording?')">Reset to default</button>
+      {% endif %}
+    </div>
+    <p class="text-muted" style="font-size:12px;margin:10px 0 0">The test sends the <strong>saved</strong> version, with sample data, to {{ current_user.email }}.</p>
+  </div></form>
+
+  <div class="card" style="margin:0;position:sticky;top:12px">
+    <div class="card-header" style="font-size:13px">
+      <span class="text-muted">Subject:</span> <strong id="pv-subject"></strong>
+      <div class="text-muted" style="font-size:12px;margin-top:2px">Preview with sample data · <a href="/admin/emails/design" style="color:var(--accent)">change design</a></div>
+    </div>
+    <iframe id="pv-frame" sandbox="" title="Email preview" style="width:100%;height:640px;border:0;display:block;background:#fff;border-radius:0 0 var(--radius) var(--radius)"></iframe>
+  </div>
+</div>
+
+<script>
+const KEY = {{ key | tojson }};
+const form = document.getElementById('et-form');
+let lastField = document.getElementById('f-intro');
+form.querySelectorAll('input.et-input, textarea').forEach(el => el.addEventListener('focus', () => { lastField = el; }));
+
+document.querySelectorAll('.ph-chip').forEach(b => b.addEventListener('click', () => {
+  const el = lastField, ins = '{' + b.dataset.ph + '}';
+  const s = el.selectionStart ?? el.value.length, e = el.selectionEnd ?? el.value.length;
+  el.value = el.value.slice(0, s) + ins + el.value.slice(e);
+  el.focus(); el.selectionStart = el.selectionEnd = s + ins.length;
+  schedule();
+}));
+
+function draft() {
+  const v = id => document.getElementById(id)?.value;
+  const t = { subject: v('f-subject'), heading: v('f-heading'), intro: v('f-intro'), outro: v('f-outro') };
+  if (document.getElementById('f-button')) t.button_text = v('f-button');
+  const cb = document.getElementById('f-details');
+  if (cb) t.show_details = cb.checked;
+  return t;
+}
+
+let timer = null;
+function schedule() { clearTimeout(timer); timer = setTimeout(refresh, 300); }
+async function refresh() {
+  try {
+    const res = await fetch('/admin/emails/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: KEY, template: draft() }),
+    });
+    const data = await res.json();
+    document.getElementById('pv-subject').textContent = data.subject;
+    document.getElementById('pv-frame').srcdoc = data.html;
+  } catch (_) {}
+}
+form.addEventListener('input', schedule);
+form.addEventListener('change', schedule);
+refresh();
+
+async function sendTest() {
+  const out = document.getElementById('test-result'), btn = document.getElementById('test-btn');
+  btn.disabled = true; out.textContent = 'Sending…'; out.style.color = '';
+  try {
+    const data = await (await fetch(`/admin/emails/${KEY}/test`, { method: 'POST' })).json();
+    out.textContent = data.ok ? `Sent to ${data.to}` : data.error;
+    out.style.color = data.ok ? 'var(--success)' : 'var(--danger)';
+  } catch (_) { out.textContent = 'Send failed.'; out.style.color = 'var(--danger)'; }
+  btn.disabled = false;
+}
+</script>
+{% endblock %}
