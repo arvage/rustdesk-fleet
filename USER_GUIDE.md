@@ -282,6 +282,26 @@ Backups protect the one thing that can't be regenerated — the server keypair
   thresholds are the markers shown on the Server Health tiles.
 - **Delivery log** — the last notifications sent and whether they succeeded.
 
+### Email templates
+
+**Admin → Email templates** (needs *Manage notifications & alerts*) controls
+what every email says and how it looks. That covers the alerts above, the
+new-user welcome, the passkey reminder, and the download-link email sent to
+clients.
+
+- **Design**: upload a logo (PNG/JPG/GIF; it's sent inside the email, so it
+  shows without the recipient allowing images), and set the brand name, header,
+  button and page colors, font and footer. Team and client emails have separate
+  brand names and footers. Client emails have no header bar unless you give
+  them a brand name or logo.
+- **Each email**: edit the subject, heading, message, closing text and button
+  text. Click a placeholder such as `{label}` or `{group_name}` to insert it.
+  A blank line starts a new paragraph, `**text**` is bold, and a paragraph
+  whose placeholders are all empty is skipped. You can also hide the details
+  table, or **Reset to default**.
+- The preview updates as you type. **Send test to me** emails the saved
+  version, with sample data, to your own address.
+
 ---
 
 ## 13. My account
