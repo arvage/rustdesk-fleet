@@ -47,7 +47,7 @@
           <td class="text-sm">{{ d.os_name or '—' }}{% if d.os_build %}<div class="text-muted" style="font-size:11px">build {{ d.os_build }}</div>{% endif %}</td>
           <td class="text-sm" data-val="{{ d.os_support }}">
             {% if d.os_support == 'ended' %}<span style="color:var(--danger);font-weight:500">Ended {{ d.os_eos }}</span>
-            {% elif d.os_support == 'ending_soon' %}<span style="color:#B45309;font-weight:500">Ends {{ d.os_eos }}</span>
+            {% elif d.os_support == 'ending_soon' %}<span style="color:var(--warn-strong);font-weight:500">Ends {{ d.os_eos }}</span>
             {% elif d.os_support == 'supported' %}<span class="text-muted">Until {{ d.os_eos }}</span>
             {% else %}<span class="text-muted">—</span>{% endif %}
           </td>
@@ -60,11 +60,11 @@
             {% if d.last_seen and d.last_seen != '—' %}{{ d.last_seen | localtime }}<div style="font-size:11px">{{ d.last_seen_days }} day{{ '' if d.last_seen_days == 1 else 's' }} ago</div>{% else %}never{% endif %}
           </td>
           <td class="text-muted text-sm" style="white-space:nowrap" data-val="{{ d.last_session }}">{{ d.last_session | localtime if d.last_session else '—' }}</td>
-          <td class="text-sm">{% if d.client_version %}{{ d.client_version }}{% if d.client_outdated %} <span style="color:#B45309" title="Older than your installers">⚠</span>{% endif %}{% else %}—{% endif %}</td>
+          <td class="text-sm">{% if d.client_version %}{{ d.client_version }}{% if d.client_outdated %} <span style="color:var(--warn-strong)" title="Older than your installers">⚠</span>{% endif %}{% else %}—{% endif %}</td>
           <td class="text-muted text-sm" data-val="{{ d.ram_gb or 0 }}">{{ d.ram or '—' }}</td>
           <td style="white-space:nowrap;text-align:right">
-            <a href="rustdesk://{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm" title="Connect via RustDesk" aria-label="Connect" style="color:#2563EB"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.82v6.36a1 1 0 0 1-1.447.894L15 14"/><rect x="1" y="6" width="15" height="12" rx="2"/></svg></a>
-            <a href="rustdesk://terminal/{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm" title="Open terminal (RustDesk)" aria-label="Terminal" style="color:#475569"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></a>
+            <a href="rustdesk://{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm" title="Connect via RustDesk" aria-label="Connect" style="color:var(--link)"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.82v6.36a1 1 0 0 1-1.447.894L15 14"/><rect x="1" y="6" width="15" height="12" rx="2"/></svg></a>
+            <a href="rustdesk://terminal/{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm" title="Open terminal (RustDesk)" aria-label="Terminal" style="color:var(--text-2)"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></a>
           </td>
         </tr>
       {% endfor %}

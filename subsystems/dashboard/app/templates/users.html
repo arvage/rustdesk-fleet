@@ -97,10 +97,10 @@
   <strong>Account ready{% if new_pw.email_sent %} — credentials emailed to {{ new_pw.email }}{% else %} — share these credentials once, they won't be shown again{% endif %}:</strong>
   <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:2px">
     <span>Email: <code>{{ new_pw.email }}</code></span>
-    <span>Password: <code style="background:#D1FAE5;padding:3px 8px;border-radius:4px">{{ new_pw.password }}</code></span>
+    <span>Password: <code style="background:var(--ok-bg);padding:3px 8px;border-radius:4px">{{ new_pw.password }}</code></span>
   </div>
   {% if new_pw.email_sent %}<div style="font-size:12px;color:#10B981">✓ Email delivered</div>{% endif %}
-  <div style="font-size:12px;color:#065F46">Suggest they set up a passkey from My Account → Passkeys after their first login.</div>
+  <div style="font-size:12px;color:var(--ok-text)">Suggest they set up a passkey from My Account → Passkeys after their first login.</div>
 </div>
 {% endif %}
 
@@ -181,7 +181,7 @@
             </div>
           </td>
         </tr>
-        <tr id="edit-{{ u.id }}" style="display:none;background:#F8FAFC">
+        <tr id="edit-{{ u.id }}" style="display:none;background:var(--surface-2)">
           <td colspan="7" style="padding:12px 16px">
             <form method="post" action="/users/{{ u.id }}/edit"
                   style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">

@@ -72,7 +72,7 @@
         <td>{% if s.group_name %}<a href="/groups/{{ s.group_slug }}" style="color:var(--accent);text-decoration:none;font-size:13px">{{ s.group_name }}</a>{% else %}<span class="text-muted text-sm">—</span>{% endif %}</td>
         <td class="text-muted text-sm mono" style="white-space:nowrap">{{ s.started_at | localtime }}</td>
         <td class="text-muted text-sm mono" style="white-space:nowrap">{{ s.ended_at | localtime if s.ended_at else '—' }}</td>
-        <td class="text-sm" style="white-space:nowrap;color:#475569">{{ s.duration_str }}</td>
+        <td class="text-sm" style="white-space:nowrap;color:var(--text-2)">{{ s.duration_str }}</td>
         <td>{% if s.active %}<span class="badge badge-active">active</span>{% else %}<span class="badge badge-offline">ended</span>{% endif %}</td>
       </tr>
     {% endfor %}
@@ -112,10 +112,10 @@
     {% for e in events %}
       <tr data-search="{{ e.user_email or '' }} {{ e.event }} {{ e.detail or '' }} {{ tab_labels.get(e.category, '') }}">
         <td class="text-muted text-sm mono" style="white-space:nowrap">{{ e.created_at | localtime }}</td>
-        <td class="text-sm" style="white-space:nowrap;color:#475569">{{ e.user_email or '—' }}</td>
+        <td class="text-sm" style="white-space:nowrap;color:var(--text-2)">{{ e.user_email or '—' }}</td>
         {% if cat == 'all' %}<td style="white-space:nowrap">{{ cat_pill(e.category) }}</td>{% endif %}
         <td><code>{{ e.event }}</code></td>
-        <td class="text-sm" style="color:#475569;max-width:400px;word-break:break-all">{{ e.detail or '' }}</td>
+        <td class="text-sm" style="color:var(--text-2);max-width:400px;word-break:break-all">{{ e.detail or '' }}</td>
       </tr>
     {% endfor %}
     </tbody>

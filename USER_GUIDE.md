@@ -294,6 +294,10 @@ Backups protect the one thing that can't be regenerated — the server keypair
   for faster, stronger sign-in, and choose whether password sign-in stays
   enabled.
 
+**Theme**: the switch at the bottom of the sidebar picks **Light**, **Dark**,
+or **Auto** (follows your computer's light/dark setting). The choice is saved
+in this browser, so set it once on each browser or device you use.
+
 ---
 
 ## Quick task index

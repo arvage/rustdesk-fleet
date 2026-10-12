@@ -44,7 +44,7 @@
 .toggle-slider::before {
   content: ''; position: absolute;
   height: 14px; width: 14px; left: 3px; bottom: 3px;
-  background: #fff; border-radius: 50%; transition: .2s;
+  background:#fff; border-radius: 50%; transition: .2s;
 }
 .toggle input:checked + .toggle-slider { background: #3B82F6; }
 .toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
@@ -86,7 +86,7 @@
             <div style="font-weight:600;font-size:13px;color:#F1F5F9">
               Notifications {{ 'enabled' if settings.enabled else 'disabled' }}
             </div>
-            <div style="font-size:11px;color:#64748B;margin-top:2px">
+            <div style="font-size:11px;color:var(--text-2);margin-top:2px">
               Toggle to enable or disable all email alerts globally
             </div>
           </div>

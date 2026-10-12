@@ -6,7 +6,21 @@
   <title>Sign in — RustDesk Fleet</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-  <link rel="stylesheet" href="/static/style.css">
+  <script>
+  // Theme: 'light' | 'dark' | 'system' (follows the OS), saved per browser.
+  // Runs before the page paints so dark mode doesn't flash white.
+  (function () {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    function apply() {
+      var t = localStorage.getItem('rdf-theme') || 'system';
+      document.documentElement.dataset.theme = (t === 'dark' || (t === 'system' && mq.matches)) ? 'dark' : 'light';
+    }
+    apply();
+    mq.addEventListener('change', apply);
+    window.rdfApplyTheme = apply;
+  })();
+  </script>
+  <link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
 <div class="login-shell">

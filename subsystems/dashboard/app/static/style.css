@@ -8,6 +8,7 @@
   --surface:   #FFFFFF;
   --border:    #E2E8F0;
   --border-md: #CBD5E1;
+  --border-lt: var(--border);
 
   --text-1:    #0F172A;
   --text-2:    #475569;
@@ -33,11 +34,67 @@
   --shadow:    0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
   --shadow-md: 0 4px 6px -1px rgba(0,0,0,.07), 0 2px 4px -1px rgba(0,0,0,.05);
 
+  /* Secondary surfaces & status tints (themed — see [data-theme="dark"]) */
+  --surface-2:   #F8FAFC;
+  --code-bg:     #F1F5F9;
+  --code-text:   #334155;
+  --neutral-bg:  #F1F5F9;
+  --neutral-text:#64748B;
+  --link:        #2563EB;
+  --accent-soft: #EEF2FF;
+  --ok-bg:   #ECFDF5; --ok-text:   #065F46; --ok-border:   #A7F3D0;
+  --err-bg:  #FEF2F2; --err-text:  #991B1B; --err-border:  #FECACA;
+  --warn-bg: #FFFBEB; --warn-text: #92400E; --warn-border: #FDE68A; --warn-strong: #B45309;
+  --info-bg: #EFF6FF; --info-text: #1D4ED8; --info-border: #BFDBFE;
+  color-scheme: light;
+
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   font-size: 14px;
   color: var(--text-1);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+}
+
+/* ── Dark theme ───────────────────────────────────────────────────
+   Set on <html data-theme="dark"> by the theme switcher (base.html). */
+:root[data-theme="dark"] {
+  --bg:        #0B1120;
+  --surface:   #131B2C;
+  --surface-2: #1A2336;
+  --border:    #243049;
+  --border-md: #334155;
+
+  --text-1:    #E2E8F0;
+  --text-2:    #A3B1C6;
+  --text-3:    #718096;
+
+  --sidebar-bg:     #070C17;
+  --sidebar-hover:  #1A2336;
+
+  --accent:    #818CF8;
+  --accent-dk: #6366F1;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+  --shadow:    0 1px 3px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.3);
+  --shadow-md: 0 4px 10px -1px rgba(0,0,0,.55), 0 2px 4px -1px rgba(0,0,0,.35);
+
+  --code-bg:     #1E293B;
+  --code-text:   #CBD5E1;
+  --neutral-bg:  #1E293B;
+  --neutral-text:#94A3B8;
+  --link:        #60A5FA;
+  --accent-soft: rgba(129,140,248,.16);
+  --ok-bg:   rgba(16,185,129,.14);  --ok-text:   #6EE7B7; --ok-border:   rgba(16,185,129,.35);
+  --err-bg:  rgba(239,68,68,.14);   --err-text:  #FCA5A5; --err-border:  rgba(239,68,68,.35);
+  --warn-bg: rgba(245,158,11,.13);  --warn-text: #FCD34D; --warn-border: rgba(245,158,11,.35); --warn-strong: #FBBF24;
+  --info-bg: rgba(59,130,246,.15);  --info-text: #93C5FD; --info-border: rgba(59,130,246,.35);
+  color-scheme: dark;
+}
+/* Form controls without their own colors (browser defaults are light). */
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea,
+:root[data-theme="dark"] input:not([type=checkbox]):not([type=radio]):not([type=range]) {
+  background-color: var(--surface); color: var(--text-1); border-color: var(--border-md);
 }
 
 /* ── Shell layout ─────────────────────────────────────────────── */
@@ -184,9 +241,9 @@
   margin-bottom: 20px; font-size: 13px; font-weight: 500;
 }
 .flash::before { font-size: 15px; }
-.flash.success { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
+.flash.success { background: var(--ok-bg); color: var(--ok-text); border: 1px solid var(--ok-border); }
 .flash.success::before { content: "✓"; }
-.flash.error   { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; }
+.flash.error   { background: var(--err-bg); color: var(--err-text); border: 1px solid var(--err-border); }
 .flash.error::before { content: "✕"; }
 
 /* ── Cards ────────────────────────────────────────────────────── */
@@ -243,7 +300,7 @@ th {
 }
 td { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 tbody tr:last-child td { border-bottom: none; }
-tbody tr:hover td { background: #F8FAFC; }
+tbody tr:hover td { background: var(--surface-2); }
 
 /* ── Badges ───────────────────────────────────────────────────── */
 .badge {
@@ -253,13 +310,13 @@ tbody tr:hover td { background: #F8FAFC; }
   white-space: nowrap;
 }
 .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-.badge-active  { background: #ECFDF5; color: #065F46; } .badge-active::before  { background: #10B981; }
-.badge-built   { background: #ECFDF5; color: #065F46; } .badge-built::before   { background: #10B981; }
-.badge-signed  { background: #EFF6FF; color: #1D4ED8; } .badge-signed::before  { background: #3B82F6; }
-.badge-pending { background: #FFFBEB; color: #92400E; } .badge-pending::before { background: #F59E0B; animation: pulse 1.5s infinite; }
-.badge-failed  { background: #FEF2F2; color: #991B1B; } .badge-failed::before  { background: #EF4444; }
-.badge-offline { background: #F1F5F9; color: #64748B; } .badge-offline::before { background: #94A3B8; }
-.badge-unknown { background: #F1F5F9; color: #475569; } .badge-unknown::before { background: #94A3B8; }
+.badge-active  { background: var(--ok-bg); color: var(--ok-text); } .badge-active::before  { background: #10B981; }
+.badge-built   { background: var(--ok-bg); color: var(--ok-text); } .badge-built::before   { background: #10B981; }
+.badge-signed  { background: var(--info-bg); color: var(--info-text); } .badge-signed::before  { background: #3B82F6; }
+.badge-pending { background: var(--warn-bg); color: var(--warn-text); } .badge-pending::before { background: #F59E0B; animation: pulse 1.5s infinite; }
+.badge-failed  { background: var(--err-bg); color: var(--err-text); } .badge-failed::before  { background: #EF4444; }
+.badge-offline { background: var(--neutral-bg); color: var(--neutral-text); } .badge-offline::before { background: #94A3B8; }
+.badge-unknown { background: var(--neutral-bg); color: var(--text-2); } .badge-unknown::before { background: #94A3B8; }
 
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
 
@@ -310,8 +367,8 @@ input[type=text]:focus, input[type=password]:focus {
 /* ── Misc helpers ─────────────────────────────────────────────── */
 code {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: .85em; background: #F1F5F9;
-  padding: 2px 6px; border-radius: 4px; color: #334155;
+  font-size: .85em; background: var(--code-bg);
+  padding: 2px 6px; border-radius: 4px; color: var(--code-text);
 }
 .text-muted { color: var(--text-3); }
 .text-sm    { font-size: 12px; }
@@ -395,7 +452,7 @@ th.sortable:hover { color: var(--text-1); }
 }
 .kv-row:last-child .kv-key,
 .kv-row:last-child .kv-val { border-bottom: none; }
-.kv-key { font-weight: 500; color: var(--text-2); white-space: nowrap; background: #F8FAFC; min-width: 140px; }
+.kv-key { font-weight: 500; color: var(--text-2); white-space: nowrap; background: var(--surface-2); min-width: 140px; }
 .kv-val { color: var(--text-1); word-break: break-all; }
 
 /* ── Modal backdrops (shared by users.html's .modal-backdrop and the
@@ -405,7 +462,7 @@ th.sortable:hover { color: var(--text-1); }
 .filter-input {
   padding: 7px 11px; border: 1px solid var(--border-md);
   border-radius: var(--radius-sm); font-size: 13px;
-  outline: none; background: var(--surface);
+  outline: none; background: var(--surface); color: var(--text-1);
 }
 
 /* ── Pubkey highlight ─────────────────────────────────────────── */
@@ -416,3 +473,18 @@ th.sortable:hover { color: var(--text-1); }
   word-break: break-all; line-height: 1.6;
   border: 1px solid #1E293B;
 }
+
+/* Dark theme: keep primary buttons at the deeper indigo so white text stays readable. */
+:root[data-theme="dark"] .btn-primary { background: var(--accent-dk); }
+
+/* ── Theme switcher (sidebar footer) ─────────────────────────────── */
+.theme-switch { display: flex; gap: 2px; margin: 4px 12px 8px; padding: 3px; background: #0B1222; border: 1px solid #1E293B; border-radius: 8px; }
+.theme-switch button {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 5px 0; border: 0; border-radius: 6px; background: transparent;
+  color: var(--sidebar-text); font: inherit; font-size: 11px; font-weight: 500; cursor: pointer;
+}
+.theme-switch button:hover { color: #E2E8F0; }
+.theme-switch button[aria-pressed="true"] { background: #1E293B; color: #fff; }
+.theme-switch svg { width: 13px; height: 13px; }
+:root[data-theme="dark"] .btn-primary:hover { background: #4F46E5; }

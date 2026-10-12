@@ -5,7 +5,7 @@
   <span class="badge badge-{{ group.status }}">{{ group.status }}</span>
   {% if has_password %}
   {% set pw_copyable = 'manage_groups' in (current_user.permissions or []) %}
-  {% set pw_style = "background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE" %}
+  {% set pw_style = "background:var(--info-bg);color:var(--link);border:1px solid var(--info-border)" %}
   {% if pw_copyable %}
   <button type="button" class="badge" style="{{ pw_style }};font-family:inherit;cursor:pointer"
           data-pw="{{ unattended_password }}" onclick="copyText(this.dataset.pw, this)"
@@ -102,7 +102,7 @@
               <div class="text-sm">{{ d.os_name }}</div>
               <div class="text-muted" style="font-size:11px">
                 {% if d.os_build %}build {{ d.os_build }}{% endif %}
-                {% if d.client_version %} · {% if d.client_outdated %}<span style="color:#B45309" title="Older than the version your installers use — rebuild and reinstall to update">RustDesk {{ d.client_version }} ⚠</span>{% else %}RustDesk {{ d.client_version }}{% endif %}{% endif %}
+                {% if d.client_version %} · {% if d.client_outdated %}<span style="color:var(--warn-strong)" title="Older than the version your installers use — rebuild and reinstall to update">RustDesk {{ d.client_version }} ⚠</span>{% else %}RustDesk {{ d.client_version }}{% endif %}{% endif %}
               </div>
               {% else %}<span class="text-muted text-sm">—</span>{% endif %}
             </td>
@@ -121,7 +121,7 @@
             <td class="text-sm">{{ d.cpu_name or '—' }}</td>
             <td class="text-muted text-sm">{{ d.cores or '—' }}</td>
             <td class="text-muted text-sm">{{ d.ram or '—' }}</td>
-            <td class="text-sm">{% if d.client_version %}{{ d.client_version }}{% if d.client_outdated %} <span style="color:#B45309" title="Older than your installers">⚠</span>{% endif %}{% else %}—{% endif %}</td>
+            <td class="text-sm">{% if d.client_version %}{{ d.client_version }}{% if d.client_outdated %} <span style="color:var(--warn-strong)" title="Older than your installers">⚠</span>{% endif %}{% else %}—{% endif %}</td>
             <td style="white-space:nowrap">
               {% if d.rustdesk_id %}
               <button onclick="openDetailModal('{{ d.rustdesk_id }}')" class="btn btn-ghost btn-sm"
@@ -131,7 +131,7 @@
                 </svg>
               </button>
               <a href="rustdesk://{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm"
-                 title="Launch RustDesk and connect" aria-label="Connect" style="color:#2563EB">
+                 title="Launch RustDesk and connect" aria-label="Connect" style="color:var(--link)">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
                      style="width:14px;height:14px">
                   <path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.82v6.36a1 1 0 0 1-1.447.894L15 14"/>
@@ -139,7 +139,7 @@
                 </svg>
               </a>
               <a href="rustdesk://terminal/{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm"
-                 title="Open terminal (RustDesk)" aria-label="Terminal" style="color:#475569">
+                 title="Open terminal (RustDesk)" aria-label="Terminal" style="color:var(--text-2)">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
                      style="width:14px;height:14px">
                   <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
@@ -260,13 +260,13 @@
   <!-- Device detail (read-only) modal -->
   <div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px"
        onclick="if(event.target===this)closeDetailModal()">
-    <div style="background:#fff;border-radius:14px;padding:28px 28px 22px;width:100%;max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,.22);max-height:90vh;overflow:auto">
+    <div style="background:var(--surface);border-radius:14px;padding:28px 28px 22px;width:100%;max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,.22);max-height:90vh;overflow:auto">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
         <h2 style="font-size:16px;font-weight:700;margin:0">Device Details</h2>
         <button onclick="closeDetailModal()"
                 style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1;padding:0">✕</button>
       </div>
-      <div style="margin-bottom:16px;padding:9px 12px;background:#F8FAFC;border:1px solid var(--border-lt);border-radius:8px">
+      <div style="margin-bottom:16px;padding:9px 12px;background:var(--surface-2);border:1px solid var(--border-lt);border-radius:8px">
         <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Device ID</span>
         <div style="display:flex;align-items:center;gap:6px">
           <code id="detail-rid" style="font-size:13px;color:var(--text-1);letter-spacing:.04em"></code>
@@ -276,7 +276,7 @@
         </div>
       </div>
       <div id="detail-notreporting" hidden
-           style="margin-bottom:16px;padding:9px 12px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;font-size:12px;color:#92400E">
+           style="margin-bottom:16px;padding:9px 12px;background:var(--warn-bg);border:1px solid var(--warn-border);border-radius:8px;font-size:12px;color:var(--warn-text)">
         This device hasn't reported its details yet — it may be offline, or running an older client that doesn't report over the current channel.
       </div>
       <table id="detail-table" style="width:100%;font-size:13px;border-collapse:collapse"></table>
@@ -288,18 +288,18 @@
   <!-- Device edit modal (same form as the Devices page; returns here) -->
   <div id="device-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px"
        onclick="if(event.target===this)closeDeviceModal()">
-    <div style="background:#fff;border-radius:14px;padding:28px 28px 22px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.22)">
+    <div style="background:var(--surface);border-radius:14px;padding:28px 28px 22px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.22)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
         <h2 style="font-size:16px;font-weight:700;margin:0">Edit Device</h2>
         <button onclick="closeDeviceModal()"
                 style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1;padding:0">✕</button>
       </div>
-      <div style="margin-bottom:18px;padding:9px 12px;background:#F8FAFC;border:1px solid var(--border-lt);border-radius:8px">
+      <div style="margin-bottom:18px;padding:9px 12px;background:var(--surface-2);border:1px solid var(--border-lt);border-radius:8px">
         <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Device ID</span>
         <div><code id="modal-rid" style="font-size:13px;color:var(--text-1);letter-spacing:.04em"></code></div>
       </div>
       <div id="modal-info" hidden
-           style="margin:-8px 0 18px;padding:9px 12px;background:#F8FAFC;border:1px solid var(--border-lt);border-radius:8px;font-size:12px">
+           style="margin:-8px 0 18px;padding:9px 12px;background:var(--surface-2);border:1px solid var(--border-lt);border-radius:8px;font-size:12px">
         <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Reported by device</span>
         <table id="modal-info-table" style="width:100%;margin-top:4px;font-size:12px"></table>
       </div>
@@ -540,7 +540,7 @@
           <p class="text-sm text-muted" style="margin:4px 0 0">
             Lets whoever is remotely controlling a device use RustDesk's own window and settings on it. When off, RustDesk
             grays out and blocks its window as soon as the remote mouse is over it.
-            <span style="color:#B45309">With it on, anyone who connects can change the device's RustDesk password and server settings.</span>
+            <span style="color:var(--warn-strong)">With it on, anyone who connects can change the device's RustDesk password and server settings.</span>
           </p>
         </div>
         {{ policy_select('remote_config', remote_config) }}
@@ -561,7 +561,7 @@
   <div class="card"><div class="card-body">
     <form method="post" action="/groups/{{ group.slug }}/branding" enctype="multipart/form-data">
       <div style="display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid var(--border)">
-        <div style="width:64px;height:64px;flex-shrink:0;border:1px solid var(--border-md);border-radius:8px;display:flex;align-items:center;justify-content:center;background:#F8FAFC">
+        <div style="width:64px;height:64px;flex-shrink:0;border:1px solid var(--border-md);border-radius:8px;display:flex;align-items:center;justify-content:center;background:var(--surface-2)">
           {% if brand_icon_v %}
           <img src="/groups/{{ group.slug }}/branding/icon.png?v={{ brand_icon_v }}" alt="Client icon" style="width:48px;height:48px">
           {% else %}
@@ -644,7 +644,7 @@
               </a>
               {% endif %}
               {% if i.error_message %}
-              <span class="text-muted text-sm" title="{{ i.error_message }}" style="color:#B45309">⚠</span>
+              <span class="text-muted text-sm" title="{{ i.error_message }}" style="color:var(--warn-strong)">⚠</span>
               {% endif %}
               {% if can_groups and signing_enabled and i.status in ('built','signed') %}
               <form method="post" action="/groups/{{ group.slug }}/installers/{{ i.id }}/sign" style="margin:0"
@@ -696,7 +696,7 @@
       {% if shareable %}
       <div class="text-muted text-sm" style="font-weight:400;margin-top:4px">
         Links currently serve:
-        {% for i in shareable %}{{ i.label }} · RustDesk <strong style="color:var(--text-1)">{{ i.rustdesk_version }}</strong>{% if pinned_version and i.rustdesk_version != pinned_version %} <span style="color:#B45309" title="Installers now use {{ pinned_version }} — rebuild this platform above to update the link">⚠ rebuild for {{ pinned_version }}</span>{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+        {% for i in shareable %}{{ i.label }} · RustDesk <strong style="color:var(--text-1)">{{ i.rustdesk_version }}</strong>{% if pinned_version and i.rustdesk_version != pinned_version %} <span style="color:var(--warn-strong)" title="Installers now use {{ pinned_version }} — rebuild this platform above to update the link">⚠ rebuild for {{ pinned_version }}</span>{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
       </div>
       {% endif %}
     </h2>
@@ -716,7 +716,7 @@
         </thead>
         <tbody>
         {% for l in links %}
-          <tr {% if l.is_new %}style="background:#EEF2FF"{% endif %}>
+          <tr {% if l.is_new %}style="background:var(--accent-soft)"{% endif %}>
             <td style="white-space:nowrap">
               {% if l.state == 'active' %}
               <code class="text-sm" title="{{ l.url }}">…/d/{{ l.token[:8] }}…</code>
@@ -781,7 +781,7 @@
 
 <!-- Create link modal -->
 <div id="create-link-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px">
-  <div style="background:#fff;border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+  <div style="background:var(--surface);border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <h2 style="font-size:16px;font-weight:700">New Download Link</h2>
       <button onclick="document.getElementById('create-link-modal').style.display='none'"
@@ -795,7 +795,7 @@
       <li><strong>{{ i.label }}</strong> — RustDesk {{ i.rustdesk_version }}
         <span class="text-muted">(built {{ i.created_at | localtime("%Y-%m-%d") }})</span>
         {% if pinned_version and i.rustdesk_version != pinned_version %}
-        <span style="color:#B45309">— older than {{ pinned_version }}, rebuild to update</span>
+        <span style="color:var(--warn-strong)">— older than {{ pinned_version }}, rebuild to update</span>
         {% endif %}
       </li>
       {% endfor %}
@@ -851,7 +851,7 @@
 
 <!-- Email link modal -->
 <div id="email-link-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px">
-  <div style="background:#fff;border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+  <div style="background:var(--surface);border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <h2 style="font-size:16px;font-weight:700">Email Download Link</h2>
       <button onclick="document.getElementById('email-link-modal').style.display='none'"
@@ -900,7 +900,7 @@ document.querySelectorAll('#email-link-form, #create-link-modal form').forEach(f
 <!-- Edit group modal (managers only: it carries the group password) -->
 {% if can_groups %}
 <div id="edit-group-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px">
-  <div style="background:#fff;border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+  <div style="background:var(--surface);border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <h2 style="font-size:16px;font-weight:700">Edit Group</h2>
       <button onclick="document.getElementById('edit-group-modal').style.display='none'"

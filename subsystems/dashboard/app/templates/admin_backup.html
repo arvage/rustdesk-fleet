@@ -47,7 +47,7 @@
           </label>
           <div>
             <div id="offsite-label" style="font-weight:600;font-size:13px;color:#F1F5F9">Off-site copy {{ 'ON' if cfg.enabled else 'OFF' }}</div>
-            <div style="font-size:11px;color:#64748B;margin-top:2px">When on, each backup is uploaded to the destination below. Saves immediately.</div>
+            <div style="font-size:11px;color:var(--text-2);margin-top:2px">When on, each backup is uploaded to the destination below. Saves immediately.</div>
           </div>
         </div>
 
@@ -55,7 +55,7 @@
 
         <!-- S3-compatible object storage — configured entirely here, no server access needed -->
         <div style="display:flex;flex-direction:column;gap:14px">
-          <div id="provider-help" style="font-size:12px;color:var(--text-2);line-height:1.6;background:#F8FAFC;border:1px solid var(--border-md);border-radius:8px;padding:10px 12px"></div>
+          <div id="provider-help" style="font-size:12px;color:var(--text-2);line-height:1.6;background:var(--surface-2);border:1px solid var(--border-md);border-radius:8px;padding:10px 12px"></div>
           <div class="bk-grid">
             <div class="field">
               <label>S3 provider</label>
