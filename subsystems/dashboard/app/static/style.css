@@ -206,6 +206,9 @@
 .card-header h2 { font-size: 13px; font-weight: 600; color: var(--text-1); }
 .card-body { padding: 18px; }
 .card + .card { margin-top: 16px; }
+/* In a grid the gap does the spacing — a top margin would push every tile
+   but the first out of line. */
+.card-grid > .card + .card { margin-top: 0; }
 
 /* ── Stat cards ───────────────────────────────────────────────── */
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px; }

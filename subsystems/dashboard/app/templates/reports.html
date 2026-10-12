@@ -12,7 +12,7 @@
 
 {% for cat, items in categories.items() %}
 <h2 style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px">{{ cat }}</h2>
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-bottom:24px">
+<div class="card-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-bottom:24px">
   {% for r in items %}
   <a href="/admin/reports/{{ r.key }}" class="card" style="text-decoration:none;color:inherit;display:block">
     <div class="card-body">
