@@ -488,4 +488,19 @@ def run_migrations() -> None:
         conn.execute("ALTER TABLE download_links ADD COLUMN emailed_at TEXT")
         conn.commit()
 
+    # Dynamic groups: saved device filters, evaluated on view (app/dynamic_groups.py).
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS dynamic_groups (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT NOT NULL,
+            description  TEXT NOT NULL DEFAULT '',
+            match        TEXT NOT NULL DEFAULT 'all' CHECK (match IN ('all','any')),
+            rules        TEXT NOT NULL DEFAULT '[]',
+            created_by   TEXT,
+            created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+    """)
+    conn.commit()
+
     conn.close()

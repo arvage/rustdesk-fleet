@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — Reports — RustDesk Fleet{% endblock %}
+{% block page_title %}{{ title }}{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+{% block topbar_actions %}
+  <button type="button" class="btn btn-ghost btn-sm" onclick="window.print()">Print</button>
+{% endblock %}
+
+{% block content %}
+{% set qs = ('?group=' ~ (ctx.group | urlencode) if ctx.group else '?') ~ ('&days=' ~ ctx.days if uses_period else '') %}
+<style>
+  @media print {
+    .sidebar, .topbar, .report-filters, .csv-link { display:none !important }
+    .main { margin:0 !important }
+    .table-wrap { overflow:visible !important; max-height:none !important }
+  }
+</style>
+
+<p class="text-muted text-sm" style="margin-bottom:14px">
+  <a href="/admin/reports" style="color:inherit">Reports</a> / {{ title }}
+</p>
+<p class="text-sm" style="margin:0 0 16px;max-width:760px">{{ description }}</p>
+
+{% if uses_group or uses_period %}
+<form method="get" class="report-filters" style="display:flex;gap:8px;align-items:center;margin-bottom:18px;flex-wrap:wrap">
+  {% if uses_group %}
+  <select name="group" onchange="this.form.submit()" class="filter-input" style="width:auto">
+    <option value="">All client groups</option>
+    {% for g in groups %}<option value="{{ g.slug }}" {% if ctx.group == g.slug %}selected{% endif %}>{{ g.display_name }}</option>{% endfor %}
+    <option value="__none__" {% if ctx.group == '__none__' %}selected{% endif %}>No client group</option>
+  </select>
+  {% endif %}
+  {% if uses_period %}
+  <select name="days" onchange="this.form.submit()" class="filter-input" style="width:auto">
+    {% for d, label in periods %}<option value="{{ d }}" {% if ctx.days == d %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  <noscript><button type="submit" class="btn btn-ghost btn-sm">Apply</button></noscript>
+</form>
+{% endif %}
+
+{% if data.stats %}
+<div class="stats" style="margin-bottom:20px">
+  {% for label, value, sub in data.stats %}
+  <div class="stat-card">
+    <div class="stat-label">{{ label }}</div>
+    <div class="stat-value">{{ value }}</div>
+    {% if sub %}<div class="stat-sub">{{ sub }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if data.notice %}<p class="text-muted text-sm" style="margin:-6px 0 16px">{{ data.notice }}</p>{% endif %}
+
+{% for sec in data.sections %}
+<div class="card" style="margin-bottom:18px">
+  <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+    <div>
+      <h2 style="font-size:13px;font-weight:600;color:var(--text-1);margin:0">{{ sec.title }}
+        <span class="badge badge-unknown" style="margin-left:6px">{{ sec.rows | length }}</span></h2>
+      {% if sec.note %}<div class="text-muted" style="font-size:12px;margin-top:3px">{{ sec.note }}</div>{% endif %}
+    </div>
+    {% if sec.rows %}
+    <a href="/admin/reports/{{ key }}/{{ loop.index0 }}.csv{{ qs }}" class="btn btn-ghost btn-sm csv-link" style="white-space:nowrap">Download CSV</a>
+    {% endif %}
+  </div>
+  {% if sec.rows %}
+  <div class="table-wrap" style="max-height:560px;overflow:auto">
+    <table class="js-sort">
+      <thead><tr>{% for c in sec.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for row in sec.rows %}
+        <tr>{% for cell in row %}<td class="text-sm">{{ cell if cell is not none and cell != '' else '—' }}</td>{% endfor %}</tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="padding:22px;text-align:center;color:var(--text-3);font-size:13px">Nothing to show.</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Reports — RustDesk Fleet{% endblock %}
+{% block page_title %}Reports{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% block content %}
+<p class="text-muted text-sm" style="margin:0 0 18px;max-width:760px">
+  Every report can be filtered to one client group, and each table downloads as CSV.
+  For a device list you'll check again later, save it as a
+  <a href="/dynamic-groups" style="color:var(--accent)">dynamic group</a>.
+</p>
+
+{% for cat, items in categories.items() %}
+<h2 style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px">{{ cat }}</h2>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-bottom:24px">
+  {% for r in items %}
+  <a href="/admin/reports/{{ r.key }}" class="card" style="text-decoration:none;color:inherit;display:block">
+    <div class="card-body">
+      <div style="font-size:14px;font-weight:600;margin-bottom:4px;color:var(--text-1)">{{ r.title }}</div>
+      <div class="text-muted text-sm">{{ r.description }}</div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% endfor %}
+{% endblock %}

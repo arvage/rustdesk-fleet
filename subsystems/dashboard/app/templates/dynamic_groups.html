@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Dynamic Groups — RustDesk Fleet{% endblock %}
+{% block page_title %}Dynamic Groups{% endblock %}
+{% block topbar_actions %}
+  {% if 'manage_devices' in (current_user.permissions or []) %}
+  <a href="/dynamic-groups/new" class="btn btn-primary btn-sm">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    New Dynamic Group
+  </a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<p class="text-muted text-sm" style="margin:0 0 16px;max-width:760px">
+  A dynamic group is a saved filter — e.g. “Windows 10 devices” or “not seen in over a year”.
+  Its devices are worked out from the rules every time you open it, so it stays current on its own.
+  A device can be in any number of dynamic groups, whatever client group it belongs to.
+</p>
+
+{% if items %}
+<div class="card">
+  <div class="table-wrap">
+    <table class="js-sort">
+      <thead>
+        <tr><th>Name</th><th>Rules</th><th>Devices</th><th>Created by</th><th>Updated</th></tr>
+      </thead>
+      <tbody>
+      {% for g in items %}
+        <tr style="cursor:pointer" onclick="location.href='/dynamic-groups/{{ g.id }}'">
+          <td>
+            <a href="/dynamic-groups/{{ g.id }}" style="font-weight:600;color:var(--accent);text-decoration:none">{{ g.name }}</a>
+            {% if g.description %}<div class="text-muted" style="font-size:12px;margin-top:2px">{{ g.description }}</div>{% endif %}
+          </td>
+          <td class="text-sm" style="max-width:420px">{{ g.summary }}</td>
+          <td data-val="{{ g.count }}"><span class="badge {{ 'badge-active' if g.count else 'badge-unknown' }}">{{ g.count }}</span>
+            <span class="text-muted text-sm">of {{ total_devices }}</span></td>
+          <td class="text-muted text-sm">{{ g.created_by or '—' }}</td>
+          <td class="text-muted text-sm" style="white-space:nowrap">{{ g.updated_at | localtime }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card"><div class="card-body" style="text-align:center;padding:48px 24px">
+  <div style="font-size:15px;font-weight:600;margin-bottom:6px">No dynamic groups yet</div>
+  <p class="text-muted text-sm" style="margin:0 0 16px">Create one from a ready-made starting point like “Windows 10 devices”, or build your own rules.</p>
+  {% if 'manage_devices' in (current_user.permissions or []) %}
+  <a href="/dynamic-groups/new" class="btn btn-primary btn-sm">New Dynamic Group</a>
+  {% endif %}
+</div></div>
+{% endif %}
+{% endblock %}

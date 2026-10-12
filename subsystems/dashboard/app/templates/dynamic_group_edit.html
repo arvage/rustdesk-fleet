@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% set editing = group and group.id %}
+{% block title %}{{ 'Edit' if editing else 'New' }} Dynamic Group — RustDesk Fleet{% endblock %}
+{% block page_title %}{{ 'Edit Dynamic Group' if editing else 'New Dynamic Group' }}{% endblock %}
+
+{% block content %}
+<style>
+  .dg-input { padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);box-sizing:border-box;color:var(--text-1) }
+  .dg-rule { display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap }
+  .dg-rule select, .dg-rule input { min-width:0 }
+  .dg-preset { text-align:left;border:1px solid var(--border-md);background:var(--surface);border-radius:10px;padding:10px 12px;cursor:pointer;font:inherit;color:inherit }
+  .dg-preset:hover { border-color:var(--accent) }
+</style>
+
+<p class="text-muted text-sm" style="margin-bottom:16px">
+  <a href="/dynamic-groups" style="color:inherit">Dynamic Groups</a> /
+  {% if editing %}<a href="/dynamic-groups/{{ group.id }}" style="color:inherit">{{ group.name }}</a> / Edit{% else %}New{% endif %}
+</p>
+
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+{% if presets %}
+<div class="card" style="margin-bottom:16px"><div class="card-body">
+  <h2 style="font-size:13px;font-weight:600;margin:0 0 4px">Start from a template</h2>
+  <p class="text-muted text-sm" style="margin:0 0 12px">Fills in the form below — you can change anything before saving.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">
+    {% for p in presets %}
+    <button type="button" class="dg-preset" onclick="applyPreset({{ loop.index0 }})">
+      <div style="font-size:13px;font-weight:600">{{ p.name }}</div>
+      <div class="text-muted" style="font-size:12px;margin-top:2px">{{ p.description }}</div>
+    </button>
+    {% endfor %}
+  </div>
+</div></div>
+{% endif %}
+
+<form method="post" action="/dynamic-groups/save" id="dg-form" onsubmit="return beforeSubmit()">
+  <input type="hidden" name="group_id" value="{{ group.id if editing else '' }}">
+  <input type="hidden" name="rules" id="dg-rules-json">
+
+  <div class="card" style="margin-bottom:16px"><div class="card-body">
+    <div class="field" style="margin-bottom:14px">
+      <label for="dg-name">Name</label>
+      <input id="dg-name" name="name" class="dg-input" style="width:100%" maxlength="100" required
+             value="{{ group.name if group else '' }}" placeholder="e.g. Windows 10 devices">
+    </div>
+    <div class="field" style="margin-bottom:0">
+      <label for="dg-desc">Description <span class="text-muted" style="font-weight:400">— optional</span></label>
+      <input id="dg-desc" name="description" class="dg-input" style="width:100%" maxlength="300"
+             value="{{ group.description if group else '' }}" placeholder="What this group is for">
+    </div>
+  </div></div>
+
+  <div class="card" style="margin-bottom:16px"><div class="card-body">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:13px;flex-wrap:wrap">
+      Include devices that match
+      <select name="match" id="dg-match" class="dg-input" style="width:auto" onchange="schedulePreview()">
+        <option value="all" {% if not group or group.match != 'any' %}selected{% endif %}>all of these rules</option>
+        <option value="any" {% if group and group.match == 'any' %}selected{% endif %}>any of these rules</option>
+      </select>
+    </div>
+    <div id="dg-rules"></div>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="addRule()" style="margin-top:4px">+ Add rule</button>
+  </div></div>
+
+  <div class="card" style="margin-bottom:16px"><div class="card-body">
+    <div style="display:flex;align-items:baseline;gap:8px">
+      <span style="font-size:13px;font-weight:600">Preview</span>
+      <span id="dg-preview-count" class="text-sm text-muted">—</span>
+    </div>
+    <div id="dg-preview-sample" class="text-muted" style="font-size:12px;margin-top:6px"></div>
+  </div></div>
+
+  <div style="display:flex;gap:8px;justify-content:flex-end">
+    <a href="{{ '/dynamic-groups/' ~ group.id if editing else '/dynamic-groups' }}" class="btn btn-ghost">Cancel</a>
+    <button type="submit" class="btn btn-primary">Save dynamic group</button>
+  </div>
+</form>
+
+<script>
+const CAT = {{ catalogue | tojson }};
+const PRESETS = {{ presets | tojson }};
+const INITIAL = {{ (group.rules if group and group.rules else []) | tojson }};
+const NO_VALUE = new Set(CAT.no_value_ops);
+
+const escH = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const opts = (list, sel) => list.map(([v, l]) => `<option value="${escH(v)}"${String(v) === String(sel) ? ' selected' : ''}>${escH(l)}</option>`).join('');
+
+function ruleRow(rule) {
+  rule = rule || { field: 'os_name', op: 'contains', value: '' };
+  const div = document.createElement('div');
+  div.className = 'dg-rule';
+  div.innerHTML = `
+    <select class="dg-input dg-field" style="width:220px">${opts(Object.entries(CAT.fields).map(([k, f]) => [k, f.label]), rule.field)}</select>
+    <select class="dg-input dg-op" style="width:210px"></select>
+    <span class="dg-value-wrap" style="flex:1;min-width:160px;display:flex;align-items:center;gap:6px"></span>
+    <button type="button" class="btn btn-ghost btn-sm" title="Remove rule" style="color:var(--danger)">✕</button>`;
+  const fieldSel = div.querySelector('.dg-field'), opSel = div.querySelector('.dg-op');
+  const renderOps = (op) => {
+    const f = CAT.fields[fieldSel.value];
+    opSel.innerHTML = opts(CAT.ops[f.type], op);
+    renderValue(rule.value);
+  };
+  const renderValue = (value) => {
+    const f = CAT.fields[fieldSel.value], wrap = div.querySelector('.dg-value-wrap');
+    if (NO_VALUE.has(opSel.value)) { wrap.innerHTML = ''; return; }
+    if (f.type === 'choice') {
+      wrap.innerHTML = `<select class="dg-input dg-value" style="width:100%">${opts(f.options, value)}</select>`;
+    } else if (f.type === 'number' || f.type === 'age') {
+      wrap.innerHTML = `<input type="number" step="any" min="0" class="dg-input dg-value" style="width:120px" value="${escH(value)}">`
+        + (f.type === 'age' ? '<span class="text-muted text-sm">days</span>' : '');
+    } else {
+      wrap.innerHTML = `<input type="text" class="dg-input dg-value" style="width:100%" value="${escH(value)}" placeholder="${escH(f.hint || '')}">`;
+    }
+    wrap.querySelector('.dg-value').addEventListener('input', schedulePreview);
+    wrap.querySelector('.dg-value').addEventListener('change', schedulePreview);
+  };
+  fieldSel.addEventListener('change', () => { rule.value = ''; renderOps(); schedulePreview(); });
+  opSel.addEventListener('change', () => { renderValue(div.querySelector('.dg-value')?.value ?? ''); schedulePreview(); });
+  div.querySelector('button').addEventListener('click', () => { div.remove(); schedulePreview(); });
+  renderOps(rule.op);
+  return div;
+}
+
+function addRule(rule) {
+  document.getElementById('dg-rules').appendChild(ruleRow(rule));
+  schedulePreview();
+}
+
+function collectRules() {
+  return Array.from(document.querySelectorAll('#dg-rules .dg-rule')).map(r => ({
+    field: r.querySelector('.dg-field').value,
+    op: r.querySelector('.dg-op').value,
+    value: r.querySelector('.dg-value')?.value ?? '',
+  }));
+}
+
+function applyPreset(i) {
+  const p = PRESETS[i];
+  document.getElementById('dg-name').value = p.name;
+  document.getElementById('dg-desc').value = p.description;
+  document.getElementById('dg-match').value = p.match;
+  document.getElementById('dg-rules').innerHTML = '';
+  p.rules.forEach(r => addRule({ ...r }));
+}
+
+let _previewTimer = null;
+function schedulePreview() {
+  clearTimeout(_previewTimer);
+  _previewTimer = setTimeout(runPreview, 350);
+}
+
+async function runPreview() {
+  const count = document.getElementById('dg-preview-count');
+  const sample = document.getElementById('dg-preview-sample');
+  const rules = collectRules();
+  if (!rules.length) { count.textContent = 'Add a rule to see which devices match.'; sample.textContent = ''; return; }
+  try {
+    const res = await fetch('/dynamic-groups/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ match: document.getElementById('dg-match').value, rules }),
+    });
+    const data = await res.json();
+    if (data.error) { count.textContent = data.error; sample.textContent = ''; return; }
+    count.textContent = `${data.count} device${data.count === 1 ? '' : 's'} match right now`;
+    sample.textContent = data.sample.join(', ') + (data.count > data.sample.length ? `, and ${data.count - data.sample.length} more` : '');
+  } catch (_) {
+    count.textContent = 'Preview unavailable.';
+  }
+}
+
+function beforeSubmit() {
+  const rules = collectRules();
+  if (!rules.length) { alert('Add at least one rule.'); return false; }
+  document.getElementById('dg-rules-json').value = JSON.stringify(rules);
+  return true;
+}
+
+if (INITIAL.length) INITIAL.forEach(r => addRule({ ...r }));
+else addRule();
+</script>
+{% endblock %}

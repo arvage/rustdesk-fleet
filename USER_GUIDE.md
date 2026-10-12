@@ -134,6 +134,31 @@ written into new installers:
 
 ---
 
+### Dynamic groups
+
+**Dynamic Groups** (sidebar) are saved filters, e.g. "Windows 10 devices" or
+"not seen in over a year". Unlike a client group, you never add devices to
+one by hand. Its devices are worked out from its rules each time you open it,
+so the list keeps itself current. A device can be in any number of dynamic
+groups, whatever client group it belongs to.
+
+- **New Dynamic Group**: start from a template (Windows 10, not seen in a year,
+  unsupported OS, outdated RustDesk, low memory, not reporting, no client
+  group) or build rules yourself. Rules can test the OS, OS support status, last
+  seen, registration date, last remote session, current status, client group,
+  label, computer name, user, RustDesk version, memory, CPU, cores and IP.
+  Choose whether a device must match **all** rules or **any** of them. The
+  preview shows how many devices match while you edit.
+- **Open a group** to see its devices with Connect/Terminal buttons, or
+  **Export CSV** to share with a client.
+- Anyone signed in can view dynamic groups. Creating, editing and deleting
+  them needs **Manage devices**.
+
+**OS support status** uses Microsoft's end-of-support dates: *End of support*
+(already past), *Ending within 6 months*, *Supported*, or *Unknown* (macOS,
+Linux, or no OS reported). Windows 11 is judged by its feature release (build
+number). Enterprise/Education editions get an extra year.
+
 ## 6. Download links
 
 Instead of emailing a binary, share a **download link** from a group page:
@@ -176,6 +201,12 @@ Under **Admin** (admins, or roles with the matching capability):
   or **restore** any archive. Backups also run nightly on their own. See
   [Backups](#11-backups).
 - **Roles & permissions** — see [above](#7-roles--permissions).
+- **Reports** (also in the sidebar under Admin): fleet overview, device
+  inventory, OS support, inactive devices, RustDesk versions, hardware, data
+  quality, client group health, remote sessions, new devices, installers &
+  download links, and user activity. Each one can be filtered to one client
+  group (and a time period where it applies). Every table downloads as CSV, and
+  **Print** gives a clean printout or PDF for a client meeting.
 - **Export device inventory (CSV)** — download the whole fleet as a spreadsheet.
 - **Restart relay** — restart the hbbs/hbbr containers (drops active sessions
   briefly).
@@ -281,3 +312,5 @@ Backups protect the one thing that can't be regenerated — the server keypair
 | Get alerted on low disk/memory | Admin → Notifications → health thresholds |
 | See who connected to what | Logs → Remote sessions |
 | Export the device list | Admin → Export device inventory (CSV) |
+| Find Windows 10 / stale / low-spec machines | Dynamic Groups → New (pick a template) |
+| Prepare recommendations for a client | Admin → Reports → Client group health / OS support (filter to the client) |

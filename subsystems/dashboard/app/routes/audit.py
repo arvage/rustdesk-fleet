@@ -37,7 +37,8 @@ _CATEGORY_EVENTS = {
         "client_update_available", "installer_downloaded",
         "download_link_created", "download_link_emailed", "download_link_revoked",
     ],
-    "groups": ["group_created", "group_updated", "group_client_settings_changed"],
+    "groups": ["group_created", "group_updated", "group_client_settings_changed",
+               "dynamic_group_created", "dynamic_group_updated", "dynamic_group_deleted"],
     "users": [
         "user_created", "user_deleted", "user_updated", "user_role_changed",
         "user_access_updated", "user_password_reset", "password_changed", "profile_updated",
