@@ -8,11 +8,53 @@
 
 {% block content %}
 {% set qs = ('?group=' ~ (ctx.group | urlencode) if ctx.group else '?') ~ ('&days=' ~ ctx.days if uses_period else '') %}
+{% set tone_icon = {'good': '✓', 'warning': '!', 'serious': '!', 'critical': '✕', 'info': '●', 'neutral': '–'} %}
 <style>
+  /* Stat tiles: a 3px top stripe — status tone when the number is a state, accent otherwise */
+  .rp-tile { position:relative; overflow:hidden }
+  .rp-tile::before { content:""; position:absolute; inset:0 0 auto 0; height:3px; background:var(--accent); opacity:.55 }
+  .rp-tile[data-tone]::before { opacity:1 }
+  .rp-tile[data-tone="good"]::before { background:var(--status-good) }
+  .rp-tile[data-tone="warning"]::before { background:var(--status-warning) }
+  .rp-tile[data-tone="critical"]::before { background:var(--status-critical) }
+  .rp-tone { display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;
+             font-size:11px;font-weight:700;color:#fff;margin-left:6px;vertical-align:3px }
+
+  /* Status badges in tables: tint + icon + label (never color alone) */
+  .rp-badge { display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;white-space:nowrap }
+  .rp-badge i { font-style:normal;font-size:10px }
+  .rp-good     { background:var(--ok-bg);   color:var(--ok-text) }
+  .rp-warning, .rp-serious { background:var(--warn-bg); color:var(--warn-text) }
+  .rp-critical { background:var(--err-bg);  color:var(--err-text) }
+  .rp-info     { background:var(--info-bg); color:var(--info-text) }
+  .rp-neutral  { background:var(--neutral-bg); color:var(--text-2) }
+
+  /* Share bar: 20px, 2px surface gaps between segments, 4px rounded outer ends */
+  .rp-share { display:flex;gap:2px;height:20px;margin:14px 16px 4px;border-radius:4px;overflow:hidden;background:var(--surface) }
+  .rp-share > span { display:block;height:100%;min-width:3px;cursor:default }
+  .rp-legend { display:flex;flex-wrap:wrap;gap:4px 14px;margin:8px 16px 12px;font-size:12px;color:var(--text-2) }
+  .rp-legend span { display:inline-flex;align-items:center;gap:6px }
+  .rp-sw { display:inline-block;width:10px;height:10px;border-radius:3px;flex-shrink:0 }
+  .rp-minibar { display:flex;align-items:center;gap:8px;min-width:140px }
+  .rp-minibar > b { display:block;height:8px;border-radius:0 4px 4px 0;min-width:2px }
+
+  /* Column chart: <=24px columns from one baseline, 4px rounded tops */
+  .rp-cols { display:flex;align-items:flex-end;gap:2px;height:150px;padding:22px 16px 0;position:relative }
+  .rp-cols .rp-col { position:relative;flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;min-width:3px;cursor:default }
+  .rp-cols .rp-col > b { display:block;width:100%;max-width:24px;background:var(--viz-1);border-radius:4px 4px 0 0;min-height:0 }
+  .rp-cols .rp-col:hover > b { filter:brightness(1.12) }
+  .rp-cols .rp-max { position:absolute;left:50%;transform:translateX(-50%);font-size:11px;font-weight:600;color:var(--text-1);white-space:nowrap }
+  .rp-axis { display:flex;justify-content:space-between;margin:0 16px 12px;padding-top:5px;border-top:1px solid var(--border);font-size:11px;color:var(--text-3) }
+
+  #rp-tip { position:fixed;z-index:60;pointer-events:none;display:none;background:var(--text-1);color:var(--surface);
+            font-size:12px;padding:6px 9px;border-radius:6px;box-shadow:var(--shadow-md);white-space:nowrap }
+  #rp-tip .rp-sw { margin-right:6px;vertical-align:-1px }
+
   @media print {
     .sidebar, .topbar, .report-filters, .csv-link { display:none !important }
     .main { margin:0 !important }
     .table-wrap { overflow:visible !important; max-height:none !important }
+    .rp-share > span, .rp-sw, .rp-minibar > b, .rp-cols .rp-col > b, .rp-tile::before { -webkit-print-color-adjust:exact; print-color-adjust:exact }
   }
 </style>
 
@@ -42,9 +84,10 @@
 {% if data.stats %}
 <div class="stats" style="margin-bottom:20px">
   {% for label, value, sub in data.stats %}
-  <div class="stat-card">
+  {% set tone = stat_tone(label, value) %}
+  <div class="stat-card rp-tile"{% if tone %} data-tone="{{ tone }}"{% endif %}>
     <div class="stat-label">{{ label }}</div>
-    <div class="stat-value">{{ value }}</div>
+    <div class="stat-value">{{ value }}{% if tone %}<span class="rp-tone" style="background:var(--status-{{ tone }})" aria-label="{{ tone }}">{{ tone_icon[tone] }}</span>{% endif %}</div>
     {% if sub %}<div class="stat-sub">{{ sub }}</div>{% endif %}
   </div>
   {% endfor %}
@@ -54,6 +97,7 @@
 {% if data.notice %}<p class="text-muted text-sm" style="margin:-6px 0 16px">{{ data.notice }}</p>{% endif %}
 
 {% for sec in data.sections %}
+{% set chart = sec.chart %}
 <div class="card" style="margin-bottom:18px">
   <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
     <div>
@@ -65,13 +109,58 @@
     <a href="/admin/reports/{{ key }}/{{ loop.index0 }}.csv{{ qs }}" class="btn btn-ghost btn-sm csv-link" style="white-space:nowrap">Download CSV</a>
     {% endif %}
   </div>
+
+  {% if chart and chart.type == 'share' and chart.total %}
+  <div class="rp-share" role="img" aria-label="{{ sec.title }}: {% for it in chart['items'] %}{{ it.label }} {{ it.value }}{{ ', ' if not loop.last }}{% endfor %}">
+    {% for it in chart['items'] %}
+    <span style="flex:{{ it.value }} 1 0;background:{{ it.color }}" data-tip="{{ it.label }} — {{ it.value }} ({{ '%.0f' % it.pct }}%)" data-color="{{ it.color }}"></span>
+    {% endfor %}
+  </div>
+  <div class="rp-legend">
+    {% for it in chart['items'] %}<span><i class="rp-sw" style="background:{{ it.color }}"></i>{{ it.label }}</span>{% endfor %}
+  </div>
+  {% elif chart and chart.type == 'columns' and chart.max %}
+  {% set n = chart.points | length %}
+  <div class="rp-cols" role="img" aria-label="{{ sec.title }} — peak {{ chart.max }}">
+    {% set peak = namespace(done=false) %}
+    {% for p in chart.points %}
+    <div class="rp-col" data-tip="{{ p.label }} — {{ p.value }} {{ chart.unit }}{{ '' if p.value == 1 else 's' }}" data-color="var(--viz-1)">
+      {% if p.value == chart.max and not peak.done %}{% set peak.done = true %}
+      <span class="rp-max" style="bottom:calc({{ (100 * p.value / chart.max) | round(1) }}% + 3px)">{{ p.value }}</span>{% endif %}
+      <b style="height:{{ (100 * p.value / chart.max) | round(1) }}%"></b>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="rp-axis"><span>{{ chart.points[0].label }}</span>{% if n > 2 %}<span>{{ chart.points[n // 2].label }}</span>{% endif %}<span>{{ chart.points[-1].label }}</span></div>
+  {% endif %}
+
   {% if sec.rows %}
   <div class="table-wrap" style="max-height:560px;overflow:auto">
     <table class="js-sort">
       <thead><tr>{% for c in sec.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
       <tbody>
       {% for row in sec.rows %}
-        <tr>{% for cell in row %}<td class="text-sm">{{ cell if cell is not none and cell != '' else '—' }}</td>{% endfor %}</tr>
+        {% set rcolor = sec.row_colors[loop.index0] if sec.row_colors else '' %}
+        {% set row_status = chart and chart.status %}
+        <tr>
+        {% for cell in row %}
+          {% set col = sec.columns[loop.index0] %}
+          {% set text = cell if cell is not none and cell != '' else '—' %}
+          {% if loop.first and rcolor and not row_status %}
+            <td class="text-sm"><span style="display:inline-flex;align-items:center;gap:8px"><i class="rp-sw" style="background:{{ rcolor }}"></i>{{ text }}</span></td>
+          {% elif (col in status_columns or (loop.first and row_status)) and text in status_tones %}
+            {% set t = status_tones[text] %}
+            <td class="text-sm" data-val="{{ text }}"><span class="rp-badge rp-{{ t }}"><i>{{ tone_icon[t] }}</i>{{ text }}</span></td>
+          {% elif sec.tone_cols and col in sec.tone_cols and cell %}
+            {% set t = sec.tone_cols[col] %}
+            <td class="text-sm" data-val="{{ cell }}"><span class="rp-badge rp-{{ t }}"><i>{{ tone_icon[t] }}</i>{{ cell }}</span></td>
+          {% elif col == 'Share' and rcolor %}
+            <td class="text-sm" data-val="{{ row[1] }}"><span class="rp-minibar"><b style="width:{{ ((text[:-1] | float) * 1.1) | round(1) if text.endswith('%') else 0 }}px;background:{{ rcolor }}"></b>{{ text }}</span></td>
+          {% else %}
+            <td class="text-sm">{{ text }}</td>
+          {% endif %}
+        {% endfor %}
+        </tr>
       {% endfor %}
       </tbody>
     </table>
@@ -81,4 +170,24 @@
   {% endif %}
 </div>
 {% endfor %}
+
+<div id="rp-tip" role="tooltip"></div>
+<script>
+// One shared tooltip for every chart mark (data-tip); hit area = the whole mark/column slot.
+(function () {
+  const tip = document.getElementById('rp-tip');
+  const show = (el, x, y) => {
+    tip.innerHTML = `<i class="rp-sw" style="background:${el.dataset.color}"></i>`;
+    tip.appendChild(document.createTextNode(el.dataset.tip));
+    tip.style.display = 'block';
+    const w = tip.offsetWidth;
+    tip.style.left = Math.min(x + 12, window.innerWidth - w - 8) + 'px';
+    tip.style.top = (y - 34) + 'px';
+  };
+  document.querySelectorAll('[data-tip]').forEach(el => {
+    el.addEventListener('mousemove', e => show(el, e.clientX, e.clientY));
+    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  });
+})();
+</script>
 {% endblock %}

@@ -30,6 +30,7 @@ class ReportContext:
     group: str = ""     # client group slug, "__none__" = unassigned, "" = all
     days: int = 30
     _devices: list | None = field(default=None, repr=False)
+    _all: list | None = field(default=None, repr=False)
 
     @property
     def devices(self) -> list[dict]:
@@ -41,6 +42,15 @@ class ReportContext:
                 devs = [d for d in devs if d.get("group_slug") == self.group]
             self._devices = devs
         return self._devices
+
+    @property
+    def all_devices(self) -> list[dict]:
+        """The whole fleet, ignoring the group filter (for stable colors)."""
+        if self.group == "":
+            return self.devices
+        if self._all is None:
+            self._all = fleet_snapshot()
+        return self._all
 
     @property
     def device_ids(self) -> set[str]:
@@ -70,12 +80,82 @@ def _dev_cells(d: dict) -> list:
 _DEV_COLS = ["Device", "RustDesk ID", "Client group"]
 
 
-def _breakdown(counter: Counter, total: int, label: str, blank: str = "Not reported") -> dict:
+# ── Color ────────────────────────────────────────────────────────────────────
+# Categorical slots (--viz-1..8, defined in report.html for light and dark) are
+# assigned in fixed order by each category's rank across the WHOLE fleet, so a
+# category keeps its color when the report is filtered to one client group.
+# Past 7 categories the rest fold into a gray "Other"; blank/unknown is gray.
+# Status values use status tones (with an icon), never a categorical slot.
+_MAX_SLOTS = 8
+STATUS_TONES = {
+    "End of support": "critical", "Ending within 6 months": "warning", "Supported": "good", "Unknown": "neutral",
+    "online": "good", "in session": "info", "offline": "neutral",
+    "yes": "good", "no": "warning",
+    "active": "good", "expired": "neutral", "used up": "neutral", "revoked": "critical",
+    "built": "good", "signed": "good", "signing": "info", "pending": "warning", "failed": "critical",
+}
+STATUS_COLUMNS = {"Status", "State", "Up to date", "Current status", "OS support status"}
+
+
+def _breakdown(ctx: ReportContext, devs: list[dict], key, label: str, blank: str = "Not reported",
+               status: bool = False) -> dict:
+    """'By <label>' section: share-of-devices table plus a stacked share bar."""
+    counter = Counter(key(d) or "" for d in devs)
+    total = len(devs)
+    rows = [[k or blank, n, _pct(n, total)] for k, n in counter.most_common()]
+    if status:
+        colors = [f"var(--status-{STATUS_TONES.get(k or blank, 'neutral')})" for k, _ in counter.most_common()]
+    else:
+        fleet_rank = [k for k, _ in Counter(key(d) or "" for d in ctx.all_devices).most_common() if k]
+        many = len([k for k in counter if k]) > _MAX_SLOTS
+        slot = {k: i + 1 for i, k in enumerate(fleet_rank[:_MAX_SLOTS - 1 if many else _MAX_SLOTS])}
+        colors = [f"var(--viz-{slot[k]})" if k in slot else "var(--viz-neutral)" for k, _ in counter.most_common()]
+    # Chart: colored categories individually, folded ones merged into "Other".
+    items, other = [], 0
+    for (name, n, _), color in zip(rows, colors):
+        if color == "var(--viz-neutral)" and name != blank and not status:
+            other += n
+        else:
+            items.append({"label": name, "value": n, "pct": 100 * n / total if total else 0, "color": color})
+    if other:
+        items.append({"label": "Other", "value": other, "pct": 100 * other / total, "color": "var(--viz-neutral)"})
     return {
         "title": f"By {label.lower()}", "note": "",
         "columns": [label, "Devices", "Share"],
-        "rows": [[k or blank, n, _pct(n, total)] for k, n in counter.most_common()],
+        "rows": rows,
+        "row_colors": colors,
+        "chart": {"type": "share", "items": items, "total": total, "status": status},
     }
+
+
+# Stat tiles whose number is a state get a status tone when it's non-zero.
+_STAT_TONES = [
+    ("Unsupported OS", "critical"), ("End of support", "critical"),
+    ("Ending within", "warning"), ("Outdated", "warning"), ("Inactive", "warning"),
+    ("Not seen in", "warning"), ("Need rebuilding", "warning"), ("Under 8 GB", "warning"),
+    ("Fewer than 4", "warning"), ("Not reporting", "warning"), ("No client group", "warning"),
+    ("No label", "warning"), ("Duplicate", "warning"),
+    ("Online now", "good"), ("Supported", "good"), ("Reporting details", "good"),
+]
+
+
+def stat_tone(label: str, value) -> str:
+    """'critical' | 'warning' | 'good' | '' (plain) for a stat tile."""
+    try:
+        nonzero = float(str(value).split()[0]) > 0
+    except (ValueError, IndexError):
+        nonzero = False
+    for prefix, tone in _STAT_TONES:
+        if label.startswith(prefix):
+            return tone if nonzero else ""
+    return ""
+
+
+def _columns_chart(points: list[tuple[str, int]], unit: str) -> dict:
+    """Single-series column chart over time (chronological, oldest first)."""
+    return {"type": "columns", "unit": unit,
+            "points": [{"label": k, "value": v} for k, v in points],
+            "max": max((v for _, v in points), default=0)}
 
 
 # ── Fleet & devices ──────────────────────────────────────────────────────────
@@ -98,11 +178,11 @@ def r_fleet_overview(ctx: ReportContext) -> dict:
             ("Inactive 90+ days", stale, "or never seen"),
         ],
         "sections": [
-            _breakdown(Counter(d.get("group_name") or "" for d in devs), total, "Client group", "Unassigned"),
-            _breakdown(Counter(d.get("os_name") for d in devs), total, "Operating system"),
-            _breakdown(Counter(OS_SUPPORT_LABELS[d["os_support"]] for d in devs), total, "OS support status"),
-            _breakdown(Counter(d.get("client_version") for d in devs), total, "RustDesk version"),
-            _breakdown(Counter(d["live_status"] for d in devs), total, "Current status"),
+            _breakdown(ctx, devs, lambda d: d.get("group_name"), "Client group", "Unassigned"),
+            _breakdown(ctx, devs, lambda d: d.get("os_name"), "Operating system"),
+            _breakdown(ctx, devs, lambda d: OS_SUPPORT_LABELS[d["os_support"]], "OS support status", status=True),
+            _breakdown(ctx, devs, lambda d: d.get("client_version"), "RustDesk version"),
+            _breakdown(ctx, devs, lambda d: d["live_status"], "Current status", status=True),
         ],
     }
 
@@ -200,7 +280,7 @@ def r_client_versions(ctx: ReportContext) -> dict:
             ("Not reporting", len(not_reporting), "version unknown"),
         ],
         "sections": [
-            _breakdown(Counter(d.get("client_version") for d in devs), len(devs), "RustDesk version"),
+            _breakdown(ctx, devs, lambda d: d.get("client_version"), "RustDesk version"),
             {"title": "Outdated clients", "note": "Older than the version your installers use — turn on auto-update for the "
                                                    "client group, or reinstall with a fresh installer.",
              "columns": _DEV_COLS + ["RustDesk", "Status", "Last seen"],
@@ -236,9 +316,9 @@ def r_hardware(ctx: ReportContext) -> dict:
             ("Fewer than 4 cores", len(low_cores), ""),
         ],
         "sections": [
-            _breakdown(Counter(ram_bucket(d["ram_gb"]) for d in devs), len(devs), "Memory"),
-            _breakdown(Counter(d.get("cores") for d in devs), len(devs), "CPU cores"),
-            _breakdown(Counter(d.get("cpu_name") for d in devs), len(devs), "CPU model"),
+            _breakdown(ctx, devs, lambda d: ram_bucket(d["ram_gb"]), "Memory"),
+            _breakdown(ctx, devs, lambda d: d.get("cores"), "CPU cores"),
+            _breakdown(ctx, devs, lambda d: d.get("cpu_name"), "CPU model"),
             {"title": "Low memory (under 8 GB)", "note": "Windows 11 runs poorly below 8 GB — upgrade or replace.",
              "columns": _DEV_COLS + ["Computer", "OS", "Memory", "CPU"],
              "rows": [_dev_cells(d) + [d.get("hostname", ""), d.get("os_name", ""), d.get("ram", ""),
@@ -296,7 +376,8 @@ def r_registrations(ctx: ReportContext) -> dict:
                       for d in recent]},
             {"title": "Registrations by month", "note": "",
              "columns": ["Month", "New devices"],
-             "rows": [[m, n] for m, n in sorted(by_month.items(), reverse=True)]},
+             "rows": [[m, n] for m, n in sorted(by_month.items(), reverse=True)],
+             "chart": _columns_chart(sorted(by_month.items()), "new device")},
         ],
     }
 
@@ -362,8 +443,26 @@ def r_client_groups(ctx: ReportContext) -> dict:
             "columns": ["Client group", "Devices", "Online", "OS ended", "OS ending <6mo", "Outdated RustDesk",
                         "Inactive 90d+", "Sessions", "Session time", "Installers", "Active links", "Downloads"],
             "rows": rows,
+            # Non-zero counts in these columns are flagged with a status badge.
+            "tone_cols": {"OS ended": "critical", "OS ending <6mo": "warning",
+                          "Outdated RustDesk": "warning", "Inactive 90d+": "warning"},
         }],
     }
+
+
+def _every_day(per_day: Counter, days: int) -> list[tuple[str, int]]:
+    """Continuous time axis, oldest first, zero-filled. Daily up to a month;
+    weekly buckets (labelled by their first day) beyond, to keep columns readable."""
+    from datetime import date, timedelta
+    start = date.today() - timedelta(days=days - 1)
+    step = 1 if days <= 31 else 7
+    out = []
+    for b in range(0, days, step):
+        first = start + timedelta(days=b)
+        n = sum(per_day.get((first + timedelta(days=i)).isoformat(), 0)
+                for i in range(min(step, days - b)))
+        out.append(((("Week of " if step > 1 else "") + first.isoformat()), n))
+    return out
 
 
 def r_sessions(ctx: ReportContext) -> dict:
@@ -404,7 +503,8 @@ def r_sessions(ctx: ReportContext) -> dict:
                       for g, e in sorted(per_group.items(), key=lambda kv: -kv[1]["secs"])]},
             {"title": "By day", "note": "",
              "columns": ["Date (UTC)", "Sessions"],
-             "rows": [[day, n] for day, n in sorted(per_day.items(), reverse=True)]},
+             "rows": [[day, n] for day, n in sorted(per_day.items(), reverse=True)],
+             "chart": _columns_chart(_every_day(per_day, ctx.days), "session")},
             {"title": f"Devices with no remote session in the last {ctx.days} days", "note": "",
              "columns": _DEV_COLS + ["Last remote session", "Last seen"],
              "rows": [_dev_cells(d) + [d["last_session"] or "never", _ago(d["last_seen_days"])] for d in untouched]},

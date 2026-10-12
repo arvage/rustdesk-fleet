@@ -7,7 +7,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from app.auth import require_auth
 from app.deps import get_db
 from app.reports import (
-    CATEGORIES, DEFAULT_DAYS, NO_GROUP_FILTER, PERIODS, REPORTS, ReportContext,
+    CATEGORIES, DEFAULT_DAYS, NO_GROUP_FILTER, PERIODS, REPORTS, STATUS_COLUMNS, STATUS_TONES,
+    ReportContext, stat_tone,
 )
 from app.routes.admin import _require_admin
 from app.templates_config import templates
@@ -32,8 +33,10 @@ async def reports_index(request: Request, current_user: dict = Depends(require_a
     by_cat = {c: [] for c in CATEGORIES}
     for key, (title, desc, cat, _uses_period, _fn) in REPORTS.items():
         by_cat[cat].append({"key": key, "title": title, "description": desc})
+    # Each category keeps one categorical slot (identity color for its cards).
+    cat_slots = {"Fleet": 1, "Maintenance": 2, "Clients": 3, "Administration": 7}
     return templates.TemplateResponse(request, "reports.html", {
-        "categories": by_cat, "current_user": current_user,
+        "categories": by_cat, "cat_slots": cat_slots, "current_user": current_user,
     })
 
 
@@ -57,6 +60,7 @@ async def report_view(
         "uses_period": uses_period, "uses_group": key not in NO_GROUP_FILTER,
         "periods": PERIODS, "groups": groups, "ctx": ctx,
         "data": data, "current_user": current_user,
+        "stat_tone": stat_tone, "status_tones": STATUS_TONES, "status_columns": STATUS_COLUMNS,
     })
 
 
