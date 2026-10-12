@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from app.auth import require_auth
-from app.deps import get_db, get_devices, log_event
+from app.deps import get_db, get_devices, get_hbbs_peers, log_event
 from app.notifications import fire_notification
 
 HBBS_DB_PATH = Path("/opt/rustdesk-fleet/data/db_v2.sqlite3")
@@ -213,9 +213,56 @@ def _check_offline_transitions() -> None:
     conn.close()
 
 
+# ── New-device watcher ──────────────────────────────────────────────────────
+# Devices register with the relay (hbbs), not the dashboard, so nothing else
+# notices a new one until someone edits it. Each pass, any hbbs peer without a
+# fleet row gets one (unassigned, unlabeled) and fires "device_registered".
+# The fleet row is the "already announced" marker: later edits/assignments
+# update it rather than re-notifying, and deleted (hidden) devices keep their
+# row so they don't re-announce either.
+
+def _check_new_devices() -> None:
+    peers = get_hbbs_peers()
+    if not peers:
+        return
+    conn = get_db()
+    known = {r[0] for r in conn.execute("SELECT rustdesk_id FROM devices WHERE rustdesk_id IS NOT NULL")}
+    new = [rid for rid in peers if rid not in known]
+    announced = []
+    for rid in new:
+        # OR IGNORE: a tech may have just created the row from the UI.
+        if conn.execute(
+            "INSERT OR IGNORE INTO devices (rustdesk_id, status, last_seen) VALUES (?, 'registered', datetime('now'))",
+            (rid,),
+        ).rowcount:
+            log_event(conn, "device_registered", rid, "")
+            announced.append(rid)
+    conn.commit()
+    info = {}
+    if announced:
+        marks = ",".join("?" * len(announced))
+        info = {r["rustdesk_id"]: r for r in conn.execute(
+            f"SELECT rustdesk_id, hostname FROM device_info WHERE rustdesk_id IN ({marks})", announced)}
+    conn.close()
+    for rid in announced:
+        peer = peers[rid]
+        fire_notification("device_registered", {
+            "rustdesk_id": rid,
+            "label": "",
+            "group_name": "",
+            "hostname": (info[rid]["hostname"] if rid in info else "") or "",
+            "ip": peer.get("ip") or "—",
+            "registered_at": peer.get("registered_at") or "",
+        })
+
+
 def _bg_offline_watch_loop() -> None:
     from app.routes.client_api import sweep_stale_sessions
     while True:
+        try:
+            _check_new_devices()
+        except Exception:
+            pass
         try:
             _check_offline_transitions()
         except Exception:

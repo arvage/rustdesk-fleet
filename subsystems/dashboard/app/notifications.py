@@ -167,8 +167,9 @@ def _render(event_type: str, context: dict) -> tuple[str, str]:
             "<p>A new device has been registered with your RustDesk Fleet server.</p>"
             + _kv(
                 ("RustDesk ID", context.get("rustdesk_id", "—")),
+                ("Computer", context.get("hostname") or "—"),
                 ("Label", context.get("label") or "—"),
-                ("Group", context.get("group_name") or "—"),
+                ("Group", context.get("group_name") or "unassigned"),
                 ("IP address", context.get("ip") or "—"),
                 ("Registered at", context.get("registered_at") or ts),
             )
