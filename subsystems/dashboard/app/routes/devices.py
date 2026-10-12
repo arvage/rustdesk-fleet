@@ -72,6 +72,7 @@ async def device_edit(
     rustdesk_id: str,
     label: str = Form(""),
     group_id: str = Form(""),
+    next: str = Form(""),
     current_user: dict = Depends(require_auth),
 ):
     require_perm(current_user, "manage_devices")
@@ -112,7 +113,15 @@ async def device_edit(
             "registered_at": peer.get("registered_at") or _now_utc(),
         })
     _set_flash(request, "success", "Device updated.")
-    return RedirectResponse("/devices", status_code=303)
+    return RedirectResponse(_back_to(next), status_code=303)
+
+
+def _back_to(next_url: str) -> str:
+    """Where to return after an edit/delete — a local path the form passed in
+    (e.g. the client group page), else the Devices page."""
+    if next_url.startswith("/") and not next_url.startswith("//"):
+        return next_url
+    return "/devices"
 
 
 @router.post("/devices/{rustdesk_id}/assign-group")
@@ -170,6 +179,7 @@ async def device_assign_group(
 async def device_delete(
     request: Request,
     rustdesk_id: str,
+    next: str = Form(""),
     current_user: dict = Depends(require_auth),
 ):
     require_perm(current_user, "manage_devices")
@@ -208,7 +218,7 @@ async def device_delete(
     fire_notification("device_deleted", notif_ctx)
 
     _set_flash(request, "success", f"Device {rustdesk_id} deleted.")
-    return RedirectResponse("/devices", status_code=303)
+    return RedirectResponse(_back_to(next), status_code=303)
 
 
 @router.post("/devices/sync")

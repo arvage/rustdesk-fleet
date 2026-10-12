@@ -33,6 +33,7 @@
 
 {% block content %}
 {% set can_groups = 'manage_groups' in (current_user.permissions or []) %}
+{% set can_devices = 'manage_devices' in (current_user.permissions or []) %}
 <p class="text-muted text-sm" style="margin-bottom:20px">
   <a href="/groups" style="color:inherit">Client Groups</a> / <code>{{ group.slug }}</code>
 </p>
@@ -144,6 +145,10 @@
                   <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
                 </svg>
               </a>
+              {% if can_devices %}
+              <button onclick="openDeviceModal('{{ d.rustdesk_id }}', '{{ d.label | e }}', '{{ d.group_id or '' }}')"
+                      class="btn btn-ghost btn-sm">Edit</button>
+              {% endif %}
               {% endif %}
             </td>
           </tr>
@@ -279,6 +284,67 @@
     </div>
   </div>
 
+  {% if can_devices %}
+  <!-- Device edit modal (same form as the Devices page; returns here) -->
+  <div id="device-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px"
+       onclick="if(event.target===this)closeDeviceModal()">
+    <div style="background:#fff;border-radius:14px;padding:28px 28px 22px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.22)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+        <h2 style="font-size:16px;font-weight:700;margin:0">Edit Device</h2>
+        <button onclick="closeDeviceModal()"
+                style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1;padding:0">✕</button>
+      </div>
+      <div style="margin-bottom:18px;padding:9px 12px;background:#F8FAFC;border:1px solid var(--border-lt);border-radius:8px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Device ID</span>
+        <div><code id="modal-rid" style="font-size:13px;color:var(--text-1);letter-spacing:.04em"></code></div>
+      </div>
+      <div id="modal-info" hidden
+           style="margin:-8px 0 18px;padding:9px 12px;background:#F8FAFC;border:1px solid var(--border-lt);border-radius:8px;font-size:12px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Reported by device</span>
+        <table id="modal-info-table" style="width:100%;margin-top:4px;font-size:12px"></table>
+      </div>
+      <form id="device-edit-form" method="post">
+        <input type="hidden" name="next" value="/groups/{{ group.slug }}">
+        <div class="field" style="margin-bottom:14px">
+          <label for="modal-label">Label</label>
+          <input type="text" id="modal-label" name="label"
+                 placeholder="e.g. Reception, HR, Server Room…"
+                 style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);box-sizing:border-box">
+        </div>
+        <div class="field" style="margin-bottom:22px">
+          <label for="modal-group">Client Group</label>
+          <select id="modal-group" name="group_id"
+                  style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);box-sizing:border-box">
+            <option value="">— Unassigned —</option>
+            {% for g in all_groups %}
+            <option value="{{ g.id }}">{{ g.display_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button type="button" onclick="confirmDelete()"
+                  class="btn btn-ghost btn-sm" style="color:#EF4444;padding:7px 12px">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                 style="width:13px;height:13px;display:inline;vertical-align:-2px;margin-right:3px">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6m4-6v6"/>
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+            </svg>
+            Delete
+          </button>
+          <div style="flex:1"></div>
+          <button type="button" onclick="closeDeviceModal()" class="btn btn-ghost">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <form id="device-delete-form" method="post" style="display:none">
+    <input type="hidden" name="next" value="/groups/{{ group.slug }}">
+  </form>
+  {% endif %}
+
   <script>
   (function () {
     const GROUP_NAME = {{ group.display_name | tojson }};
@@ -377,7 +443,49 @@
       document.getElementById('detail-modal').style.display = 'none';
     };
 
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetailModal(); });
+    // ── Device edit modal (mirrors the Devices page) ──────────────────────
+    let _modalRid = '';
+    window.openDeviceModal = function (rid, label, groupId) {
+      _modalRid = rid;
+      document.getElementById('modal-rid').textContent = formatRid(rid);
+      let info = {};
+      try { info = JSON.parse(document.querySelector(`tr[data-rid="${rid}"]`)?.dataset.info || '{}'); } catch (_) {}
+      const rows = [
+        ['Computer', info.hostname],
+        ['User', info.username || (info.hostname ? 'nobody logged in' : '')],
+        ['OS', [info.os_name, info.os_build && `(build ${info.os_build})`].filter(Boolean).join(' ')],
+        ['CPU', [info.cpu_name, info.cores].filter(Boolean).join(' · ')],
+        ['RAM', info.ram],
+        ['RustDesk', info.client_version && (info.client_version + (info.client_outdated ? ' — older than your installers' : ''))],
+        ['Registered', info.registered_at && info.registered_at !== '—' && toLA(info.registered_at)],
+        ['Last check-in', info.heartbeat_at && toLA(info.heartbeat_at)],
+      ].filter(([, v]) => v);
+      document.getElementById('modal-info-table').innerHTML = rows.map(([k, v]) =>
+        `<tr><td style="color:var(--text-3);padding:2px 10px 2px 0;white-space:nowrap;border:none;vertical-align:top">${k}</td>`
+        + `<td style="color:var(--text-1);padding:2px 0;border:none">${esc(v)}</td></tr>`).join('');
+      document.getElementById('modal-info').hidden = rows.length === 0;
+      document.getElementById('modal-label').value = label;
+      document.getElementById('modal-group').value = groupId || '';
+      document.getElementById('device-edit-form').action = '/devices/' + rid + '/edit';
+      document.getElementById('device-delete-form').action = '/devices/' + rid + '/delete';
+      document.getElementById('device-modal').style.display = 'flex';
+      setTimeout(() => document.getElementById('modal-label').focus(), 50);
+    };
+
+    window.closeDeviceModal = function () {
+      const m = document.getElementById('device-modal');
+      if (m) m.style.display = 'none';
+    };
+
+    window.confirmDelete = function () {
+      const label = document.getElementById('modal-label').value.trim();
+      const name = label ? `"${label}" (${_modalRid})` : _modalRid;
+      if (confirm(`Delete ${name}?\n\nIt will be removed from the dashboard. If the device ever communicates with the server again, it will reappear automatically.`)) {
+        document.getElementById('device-delete-form').submit();
+      }
+    };
+
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDetailModal(); closeDeviceModal(); } });
   })();
   </script>
   {% else %}

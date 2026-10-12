@@ -90,6 +90,10 @@ async def group_detail(
         (group["id"],),
     ).fetchall()
 
+    all_groups = conn.execute(
+        "SELECT id, display_name FROM client_groups ORDER BY display_name"
+    ).fetchall()
+
     installers = conn.execute(
         "SELECT * FROM installers WHERE group_id = ? ORDER BY created_at DESC",
         (group["id"],),
@@ -154,6 +158,7 @@ async def group_detail(
         {
             "group": group,
             "devices": devices,
+            "all_groups": all_groups,
             "installers": installer_rows,
             "links": links,
             "auto_update": group["auto_update"] or "",
