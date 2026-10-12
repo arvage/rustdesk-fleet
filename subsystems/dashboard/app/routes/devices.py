@@ -32,13 +32,15 @@ async def devices_list(
 ):
     devices, peer_count = get_devices(group)
 
-    # Newly-registered devices (last 7 days), newest first — shown as a
-    # highlighted group at the top of the page for an at-a-glance view.
+    # Newly-registered devices (last 7 days) that still need a client group,
+    # newest first — shown as a highlighted group at the top of the page.
+    # Once a device is assigned to a group it drops out of this panel.
     recent_days = 7
     cutoff = (date.today() - timedelta(days=recent_days)).isoformat()
     recent = sorted(
         [d for d in devices
-         if d.get("registered_at") and d["registered_at"] != "—" and d["registered_at"][:10] >= cutoff],
+         if not d.get("group_id")
+         and d.get("registered_at") and d["registered_at"] != "—" and d["registered_at"][:10] >= cutoff],
         key=lambda d: (d["registered_at"], d.get("last_seen") or ""),
         reverse=True,
     )
@@ -110,6 +112,57 @@ async def device_edit(
             "registered_at": peer.get("registered_at") or _now_utc(),
         })
     _set_flash(request, "success", "Device updated.")
+    return RedirectResponse("/devices", status_code=303)
+
+
+@router.post("/devices/{rustdesk_id}/assign-group")
+async def device_assign_group(
+    request: Request,
+    rustdesk_id: str,
+    group_id: str = Form(""),
+    current_user: dict = Depends(require_auth),
+):
+    """Assign a device to a client group without touching its label
+    (used by the Recently registered panel)."""
+    require_perm(current_user, "manage_devices")
+    conn = get_db()
+    group = conn.execute(
+        "SELECT id, display_name FROM client_groups WHERE id = ?",
+        (int(group_id) if group_id.isdigit() else -1,),
+    ).fetchone()
+    if not group:
+        conn.close()
+        _set_flash(request, "error", "Please choose a client group.")
+        return RedirectResponse("/devices", status_code=303)
+
+    existing = conn.execute(
+        "SELECT id FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE devices SET group_id = ? WHERE rustdesk_id = ?",
+            (group["id"], rustdesk_id),
+        )
+        log_event(conn, "device_updated", rustdesk_id, current_user["email"])
+        conn.commit()
+        conn.close()
+    else:
+        conn.execute(
+            "INSERT INTO devices (rustdesk_id, group_id, status, last_seen) VALUES (?, ?, 'registered', ?)",
+            (rustdesk_id, group["id"], _now_utc()),
+        )
+        log_event(conn, "device_registered", rustdesk_id, current_user["email"])
+        conn.commit()
+        conn.close()
+        peer = get_hbbs_peers().get(rustdesk_id, {})
+        fire_notification("device_registered", {
+            "rustdesk_id": rustdesk_id,
+            "label": "",
+            "group_name": group["display_name"],
+            "ip": peer.get("ip") or "—",
+            "registered_at": peer.get("registered_at") or _now_utc(),
+        })
+    _set_flash(request, "success", f"Device {rustdesk_id} assigned to {group['display_name']}.")
     return RedirectResponse("/devices", status_code=303)
 
 
