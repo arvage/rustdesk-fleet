@@ -129,6 +129,12 @@ def merge_device_info(device: dict, info: dict[str, dict]) -> dict:
     return device
 
 
+def label_sort_key(device: dict) -> tuple:
+    """Default device-list order: by label (case-insensitive), unlabeled last."""
+    label = (device.get("label") or "").strip().lower()
+    return (not label, label, device.get("rustdesk_id") or "")
+
+
 def get_devices(group: str = "") -> tuple[list[dict], int]:
     """Return (devices_list, peer_count), optionally filtered by group slug.
 
@@ -176,7 +182,7 @@ def get_devices(group: str = "") -> tuple[list[dict], int]:
     for d in devices:
         merge_device_info(d, info)
 
-    devices.sort(key=lambda d: d["last_seen"] or "", reverse=True)
+    devices.sort(key=label_sort_key)
     return devices, len(peers)
 
 

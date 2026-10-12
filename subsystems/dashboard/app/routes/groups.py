@@ -8,7 +8,9 @@ SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]$')
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
-from app.deps import get_db, get_device_info, get_hbbs_peers, log_event, merge_device_info
+from app.deps import (
+    get_db, get_device_info, get_hbbs_peers, label_sort_key, log_event, merge_device_info,
+)
 from app.notifications import fire_notification
 from app.permissions import require_perm, user_can
 from app.routes.links import DEFAULT_EXPIRY, EXPIRY_OPTIONS, latest_installers, link_state
@@ -84,7 +86,7 @@ async def group_detail(
         return RedirectResponse("/groups", status_code=303)
 
     fleet_devices = conn.execute(
-        "SELECT * FROM devices WHERE group_id = ? AND hidden = 0 ORDER BY last_seen DESC",
+        "SELECT * FROM devices WHERE group_id = ? AND hidden = 0",
         (group["id"],),
     ).fetchall()
 
@@ -127,6 +129,7 @@ async def group_detail(
             "ip": peer.get("ip") or "—",
             "registered_at": (peer.get("registered_at") or "")[:10] or "—",
         }, info))
+    devices.sort(key=label_sort_key)
 
     installer_rows = [
         {**dict(r), "filename": Path(r["signed_path"] or r["unsigned_path"]).name
