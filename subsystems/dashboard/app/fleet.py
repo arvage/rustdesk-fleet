@@ -14,10 +14,13 @@ from datetime import date, datetime, timezone
 
 from app.deps import get_db, get_devices
 
-# ── OS end-of-support dates (Microsoft lifecycle, extended/final support) ────
+# ── OS end-of-support dates ─────────────────────────────────────────────────
+# The live source is app/os_lifecycle.py (endoflife.date, refreshed daily), so
+# new Windows releases get their dates automatically. The table below is only
+# the FALLBACK for when that data has never been downloaded or has no match.
 # Matched by name prefix, first hit wins, so the more specific names come
-# first. Windows 11 is per feature release (by build) since each one has its
-# own end date; Enterprise/Education editions get an extra year.
+# first. Windows 11 is per feature release (by build); Enterprise/Education
+# editions get an extra year.
 _EOS_BY_PREFIX = [
     ("Windows Server 2025", "2034-10-10"),
     ("Windows Server 2022", "2031-10-14"),
@@ -48,9 +51,8 @@ OS_SUPPORT_LABELS = {
 }
 
 
-def os_end_of_support(os_name: str, os_build: str) -> str:
-    """Microsoft end-of-support date (YYYY-MM-DD) for an OS, or '' if unknown
-    (macOS/Linux, LTSC editions, unrecognised builds, no report)."""
+def _fallback_end_of_support(os_name: str, os_build: str) -> str:
+    """Built-in end-of-support date (YYYY-MM-DD), or '' if unknown."""
     if not os_name or "LTSC" in os_name or "LTSB" in os_name:
         return ""
     if os_name.startswith("Windows 11"):
@@ -73,6 +75,22 @@ def _newer_than_known_win11(os_name: str, os_build: str) -> bool:
         return os_name.startswith("Windows 11") and int(os_build) > max(_WIN11_EOS_BY_BUILD)
     except (TypeError, ValueError):
         return False
+
+
+def os_support(os_name: str, os_build: str, today: date | None = None) -> tuple[str, str]:
+    """(end-of-support date or '', status) for a device's OS. Uses the live
+    lifecycle data first, then the built-in table."""
+    from app import os_lifecycle
+    hit = os_lifecycle.lookup(os_name or "", os_build or "")
+    if hit is not None:
+        eos, flag = hit
+        if eos:
+            return eos, os_support_status(eos, today)
+        return "", ("ended" if flag else "supported")
+    eos = _fallback_end_of_support(os_name or "", os_build or "")
+    if not eos and _newer_than_known_win11(os_name or "", os_build or ""):
+        return "", "supported"
+    return eos, os_support_status(eos, today)
 
 
 def os_support_status(eos: str, today: date | None = None) -> str:
@@ -145,9 +163,7 @@ def fleet_snapshot() -> list[dict]:
         rid = d["rustdesk_id"]
         d["ram_gb"] = _first_number(d.get("ram", ""))
         d["cores_n"] = _first_number(d.get("cores", ""))
-        d["os_eos"] = os_end_of_support(d.get("os_name", ""), d.get("os_build", ""))
-        d["os_support"] = ("supported" if _newer_than_known_win11(d.get("os_name", ""), d.get("os_build", ""))
-                           else os_support_status(d["os_eos"], today))
+        d["os_eos"], d["os_support"] = os_support(d.get("os_name", ""), d.get("os_build", ""), today)
         d["live_status"] = status.get(rid, "offline")
         # Fleet last_seen is bumped on every heartbeat; fall back to the raw
         # heartbeat for devices that never got a fleet row.

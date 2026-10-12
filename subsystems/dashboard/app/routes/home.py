@@ -57,10 +57,17 @@ def _check_client_update() -> None:
         _notify_once("client_update_available", current, latest)
 
 
+def _refresh_os_lifecycle() -> None:
+    """Windows end-of-support dates (app/os_lifecycle.py); downloads at most
+    once a day, so calling it every pass is cheap."""
+    from app import os_lifecycle
+    os_lifecycle.refresh()
+
+
 def _bg_update_watch_loop() -> None:
     time.sleep(_UPDATE_CHECK_STARTUP_DELAY_S)
     while True:
-        for check in (_check_server_update, _check_client_update):
+        for check in (_check_server_update, _check_client_update, _refresh_os_lifecycle):
             try:
                 check()
             except Exception:

@@ -151,11 +151,18 @@ Public, no login:
   `row_colors` and `tone_cols`. Categorical colors are assigned by fleet-wide
   rank (stable under filtering; >7 fold into gray "Other"). Status values map
   to tones via `STATUS_TONES` and render as icon + label badges.
-- **OS support** (`app/fleet.py`): Microsoft end-of-support dates by OS name
-  prefix, and by build for Windows 11 feature releases (Enterprise/Education
-  +1 year). "Ending soon" = within 182 days. Builds newer than the table count
-  as supported. **The table is static — add new Windows releases to
-  `_WIN11_EOS_BY_BUILD` / `_EOS_BY_PREFIX` as Microsoft publishes them.**
+- **OS support** (`app/os_lifecycle.py`, `app/fleet.py`): Windows and Windows
+  Server end-of-support dates are downloaded from
+  [endoflife.date](https://endoflife.date) (`/api/windows.json`,
+  `/api/windows-server.json`) at most once a day by the update watcher and
+  cached in `/opt/rustdesk-fleet/os-lifecycle.json`, so **new releases get
+  their dates automatically**. Devices are matched by build and edition:
+  LTSC/IoT → LTSC record, Enterprise/Education → "(E)", Home/Pro/Pro
+  Education → "(W)". Servers are matched by year, or by build for releases
+  without one. If a download fails, the last cached copy stays in use. With no
+  cache or no match, the built-in table in `fleet.py` is the fallback.
+  "Ending soon" = within 182 days. macOS/Linux are "unknown". The OS support
+  report shows the source and last update.
 - **Themes**: Light / Dark / Auto switch in the sidebar footer, stored in
   `localStorage['rdf-theme']`. An inline head script sets
   `<html data-theme>` before first paint (no white flash) and follows the OS
@@ -191,7 +198,7 @@ Daemon threads started at import (one uvicorn worker, so each runs once):
 | `hbbs-ss-poll` (`routes/api.py`) | 1 s | Samples live TCP connections to hbbs ports (an online signal) |
 | `device-offline-watch` (`routes/api.py`) | 30 s | **New devices:** any hbbs peer without a `devices` row gets one (unassigned) and fires `device_registered` — the row marks it announced. **Status changes:** online→offline fires `device_offline`, offline→online fires `device_online`. The first pass after start only records a baseline. Also closes sessions for devices that vanished mid-session |
 | `health-alert-watch` (`routes/api.py`) | 60 s | Memory/disk thresholds → `memory_high` / `disk_high` (debounced, hysteresis) |
-| `server-update-watch` (`routes/home.py`) | 1 h (first 60 s after start) | New RustDesk server/client releases → `*_update_available`, once per version |
+| `server-update-watch` (`routes/home.py`) | 1 h (first 60 s after start) | New RustDesk server/client releases → `*_update_available`, once per version. Also refreshes the Windows end-of-support data (downloads at most daily) |
 
 ## Database tables added by the dashboard
 

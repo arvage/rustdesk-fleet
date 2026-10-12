@@ -609,6 +609,7 @@ sqlite3 /opt/rustdesk-fleet/fleet.sqlite3 \
 | `/opt/rustdesk-fleet/backups` | Backup archives + `last_backup.json` status (see Section 8) |
 | `/opt/rustdesk-fleet/branding` | Per-group installer icons (`<group_id>.png/.ico`) and the email logo (`email-logo.png`, set in Admin → Email templates → Design) |
 | `/opt/rustdesk-fleet/tools` | `jsign` jar for installer signing (see Section 10) |
+| `/opt/rustdesk-fleet/os-lifecycle.json` | Cached Windows end-of-support dates (from endoflife.date, refreshed daily by the dashboard; safe to delete — it's re-downloaded) |
 | `/etc/rustdesk-fleet/dashboard.env` | Dashboard secrets (`SESSION_SECRET`) — not in the repo |
 | `/etc/rustdesk-fleet/backup.env` | Backup config (retention, passphrase, offsite cmd) — not in the repo |
 | `/etc/systemd/system/rustdesk-dashboard.service` | Dashboard process supervisor |

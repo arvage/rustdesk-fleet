@@ -171,8 +171,12 @@ groups, whatever client group it belongs to.
 
 **OS support status** uses Microsoft's end-of-support dates: *End of support*
 (already past), *Ending within 6 months*, *Supported*, or *Unknown* (macOS,
-Linux, or no OS reported). Windows 11 is judged by its feature release (build
-number). Enterprise/Education editions get an extra year.
+Linux, or no OS reported). Each device is judged by its exact Windows release
+(build number) and edition. Enterprise, Education and LTSC editions are
+supported longer than Home and Pro. The dates update automatically once a day
+from endoflife.date, which tracks Microsoft's lifecycle pages, so new Windows
+releases are covered without any action. The OS support report shows when
+they were last updated.
 
 ---
 

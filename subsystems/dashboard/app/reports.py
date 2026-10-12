@@ -218,7 +218,13 @@ def r_os_support(ctx: ReportContext) -> dict:
     at_risk = sorted((d for d in devs if d["os_support"] in ("ended", "ending_soon")),
                      key=lambda d: (d["os_eos"], device_name(d).lower()))
     c = Counter(d["os_support"] for d in devs)
+    from app import os_lifecycle
+    src = os_lifecycle.info()
+    notice = (f"End-of-support dates from {src['source']} (Microsoft lifecycle), checked daily — "
+              f"last updated {src['fetched_at']} UTC." if src else
+              "End-of-support dates from the dashboard's built-in table (live lifecycle data not downloaded yet).")
     return {
+        "notice": notice,
         "stats": [
             ("End of support", c["ended"], "no security updates"),
             ("Ending within 6 months", c["ending_soon"], "plan upgrades"),
@@ -228,7 +234,8 @@ def r_os_support(ctx: ReportContext) -> dict:
         "sections": [
             {"title": "Devices needing an OS upgrade",
              "note": "Past Microsoft's end-of-support date, or reaching it within 6 months. "
-                     "Windows 11 dates depend on the feature release (build); Enterprise/Education get an extra year.",
+                     "Windows dates depend on the release (build) and edition — Enterprise/Education and LTSC "
+                     "editions are supported longer.",
              "columns": _DEV_COLS + ["OS", "Build", "End of support", "Status", "Last seen"],
              "rows": [_dev_cells(d) + [d.get("os_name", ""), d.get("os_build", ""), d["os_eos"],
                                        OS_SUPPORT_LABELS[d["os_support"]], _ago(d["last_seen_days"])]
