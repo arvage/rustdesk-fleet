@@ -9,6 +9,7 @@ Supported event types (EVENT_LABELS keys):
   device_registered  — a new device appeared in the fleet
   device_deleted     — a device was removed
   device_offline     — a previously-online device stopped responding
+  device_online      — a previously-offline device came back online
   installer_built    — an installer was compiled for a group
   installer_deleted  — an installer build was deleted
   server_update_available — a newer rustdesk-server release is on GitHub
@@ -35,6 +36,7 @@ EVENT_LABELS: dict[str, str] = {
     "device_registered": "New device registered",
     "device_deleted":    "Device deleted",
     "device_offline":    "Device went offline",
+    "device_online":     "Device came online",
     "installer_built":   "Installer built",
     "installer_deleted": "Installer deleted",
     "user_created":      "User account created",
@@ -50,6 +52,7 @@ _SUBJECTS: dict[str, str] = {
     "device_registered": "New device registered — {rustdesk_id}",
     "device_deleted":    "Device removed — {rustdesk_id}",
     "device_offline":    "Device went offline — {rustdesk_id}",
+    "device_online":     "Device came online — {name}",
     "installer_built":   "Installer built — {group_name} ({platform})",
     "installer_deleted": "Installer deleted — {group_name} ({platform})",
     "user_created":      "New user created — {email}",
@@ -199,6 +202,20 @@ def _render(event_type: str, context: dict) -> tuple[str, str]:
             )
         )
         subtitle = "Device offline"
+
+    elif event_type == "device_online":
+        body = (
+            "<p>A device that was offline is back online.</p>"
+            + _kv(
+                ("RustDesk ID", context.get("rustdesk_id", "—")),
+                ("Computer", context.get("hostname") or "—"),
+                ("Label", context.get("label") or "—"),
+                ("Group", context.get("group_name") or "unassigned"),
+                ("IP address", context.get("ip") or "—"),
+                ("Came online", context.get("online_at") or ts),
+            )
+        )
+        subtitle = "Device online"
 
     elif event_type == "installer_built":
         body = (

@@ -191,7 +191,13 @@ def _check_offline_transitions() -> None:
         rid for rid, state in current.items()
         if state == "offline" and previous.get(rid) in ("online", "in session")
     ]
-    if not newly_offline:
+    # Only offline -> online counts. A device missing from the previous pass is
+    # new, and the device_registered notification covers it.
+    newly_online = [
+        rid for rid, state in current.items()
+        if state in ("online", "in session") and previous.get(rid) == "offline"
+    ]
+    if not newly_offline and not newly_online:
         return
 
     devices, _ = get_devices()
@@ -208,6 +214,20 @@ def _check_offline_transitions() -> None:
             "label": info.get("label") or "",
             "group_name": info.get("group_name") or "",
             "last_seen": info.get("last_seen") or "",
+        })
+    for rid in newly_online:
+        info = by_id.get(rid)
+        if info is None:
+            continue
+        log_event(conn, "device_online", rid, "")
+        fire_notification("device_online", {
+            "rustdesk_id": rid,
+            "name": info.get("label") or info.get("hostname") or rid,
+            "label": info.get("label") or "",
+            "hostname": info.get("hostname") or "",
+            "group_name": info.get("group_name") or "",
+            "ip": info.get("ip") or "",
+            "online_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         })
     conn.commit()
     conn.close()

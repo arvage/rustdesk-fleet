@@ -28,7 +28,7 @@ TAB_LABELS = dict(TABS)
 _CATEGORY_EVENTS = {
     "clients": [
         "device_registered", "device_deleted", "device_updated",
-        "device_offline", "device_restored",
+        "device_offline", "device_online", "device_restored",
     ],
     "installers": [
         "installer_built", "installer_build_start", "installer_build_failed",
