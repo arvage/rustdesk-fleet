@@ -17,6 +17,16 @@
 {%- endmacro %}
 
 {% block content %}
+<style>
+.log-toggle { position: relative; display: inline-block; width: 32px; height: 18px; flex-shrink: 0; }
+.log-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.log-toggle span { position: absolute; inset: 0; background: var(--border-md); border-radius: 18px; transition: .2s; }
+.log-toggle span::before { content: ''; position: absolute; width: 12px; height: 12px; left: 3px; top: 3px;
+                           background: #fff; border-radius: 50%; transition: .2s; }
+.log-toggle input:checked + span { background: var(--accent); }
+.log-toggle input:checked + span::before { transform: translateX(14px); }
+.log-toggle input:focus-visible + span { box-shadow: 0 0 0 3px rgba(99,102,241,.25); }
+</style>
 
 <!-- Category tabs -->
 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">
@@ -149,8 +159,21 @@
   <span class="text-muted text-sm">
     {{ tab_labels.get(cat) }} &nbsp;·&nbsp; showing up to 200 most recent
   </span>
-  <input id="log-filter" type="search" placeholder="Filter by user, event, detail…"
-         oninput="filterLogRows()" class="filter-input" style="width:260px">
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    {% if status_toggle %}
+    <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);cursor:pointer;margin:0"
+           title="Devices coming online and going offline">
+      <span class="log-toggle">
+        <input type="checkbox" {% if hide_status %}checked{% endif %}
+               onchange="location.href='/audit?cat={{ cat }}' + (this.checked ? '' : '&onoff=1')">
+        <span></span>
+      </span>
+      Hide online/offline
+    </label>
+    {% endif %}
+    <input id="log-filter" type="search" placeholder="Filter by user, event, detail…"
+           oninput="filterLogRows()" class="filter-input" style="width:260px">
+  </div>
 </div>
 
 {% if events %}
@@ -165,7 +188,7 @@
         <td class="text-muted text-sm mono" style="white-space:nowrap">{{ e.created_at | localtime }}</td>
         <td class="text-sm" style="white-space:nowrap;color:var(--text-2)">{{ e.user_email or '—' }}</td>
         {% if cat == 'all' %}<td style="white-space:nowrap">{{ cat_pill(e.category) }}</td>{% endif %}
-        <td><code>{{ e.event }}</code></td>
+        <td>{% if e.rid %}<a href="/devices/{{ e.rid }}/timeline" title="Connection timeline" style="text-decoration:none"><code>{{ e.event }}</code></a>{% else %}<code>{{ e.event }}</code>{% endif %}</td>
         <td class="text-sm" style="color:var(--text-2);max-width:400px;word-break:break-all">{{ e.detail or '' }}</td>
       </tr>
     {% endfor %}

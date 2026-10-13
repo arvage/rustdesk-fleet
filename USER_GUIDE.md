@@ -306,6 +306,13 @@ has the same data.
 - **All activity**, **Clients**, **Remote sessions**, **Installers**,
   **Groups**, **Users & auth**, **Notifications**, **Email deliveries**,
   **Server**, **Other**.
+  **All activity** (the tab the page opens on) merges everything into one
+  timeline — the event log plus remote sessions, file transfers and, for
+  roles that can manage notifications, notification emails; click a
+  `remote_session` or `file_transfer` entry to open that device's timeline.
+  **Hide online/offline** (on by default, on All activity and Clients)
+  leaves out devices coming online and going offline, which otherwise
+  crowd out everything else; switch it off to see them.
   Changes to dynamic groups are under Groups. Email template and design
   changes are under Notifications. Devices registering, going offline and
   coming back online are under Clients.

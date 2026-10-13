@@ -66,6 +66,76 @@ _EVENT_CATEGORY = {e: c for c, evs in _CATEGORY_EVENTS.items() for e in evs}
 _KNOWN_EVENTS = list(_EVENT_CATEGORY)
 
 
+_ALL_LIMIT = 200
+
+# Device status flips. The status watcher logs one per device per change, so
+# on a real fleet they drown out everything else; the All activity and Clients
+# tabs hide them unless "Hide online/offline" is switched off.
+_STATUS_EVENTS = ("device_online", "device_offline")
+
+
+def _all_activity(conn, include_deliveries: bool, hide_status: bool) -> list[dict]:
+    """The All activity tab: the event log merged with remote sessions, file
+    transfers and (if the viewer may see them) notification emails — the
+    other activity that lives in its own tables — newest first."""
+    from app.notifications import EVENT_LABELS
+
+    where = "WHERE event NOT IN ('device_online', 'device_offline')" if hide_status else ""
+    rows = conn.execute(
+        f"SELECT * FROM provisioning_events {where} ORDER BY created_at DESC LIMIT ?", (_ALL_LIMIT,)
+    ).fetchall()
+    items = [dict(r, category=category_of(r["event"])) for r in rows]
+
+    for s in map(_row, conn.execute(_LIST_SQL.format(where=""), (_ALL_LIMIT,)).fetchall()):
+        device = s["device_name"] or s["rustdesk_id"]
+        parts = [f"{device} ({s['rustdesk_id']})"]
+        if s["peer_id"] and s["peer_name"]:
+            parts.append(f"by {s['peer_name']} ({s['peer_id']})")
+        if s["peer_ip"]:
+            parts.append(f"from {s['peer_ip']}")
+        parts.append(f"{s['conn_type_label'] or 'connection'} · "
+                     + ("active" if s["active"] else s["duration_str"]))
+        items.append({
+            "created_at": s["started_at"], "category": "sessions",
+            "event": "remote_session", "user_email": s["peer_name"] or s["peer_id"] or "",
+            "detail": " · ".join(parts), "rid": s["rustdesk_id"],
+        })
+
+    for f in conn.execute(
+        """SELECT f.*, COALESCE(d.label, di.hostname) AS device_name
+           FROM device_file_transfers f
+           LEFT JOIN devices d      ON d.rustdesk_id  = f.rustdesk_id
+           LEFT JOIN device_info di ON di.rustdesk_id = f.rustdesk_id
+           ORDER BY f.created_at DESC LIMIT ?""",
+        (_ALL_LIMIT,),
+    ):
+        n = f["file_count"]
+        where = f["path"] or "clipboard paste"
+        verb = "sent from" if f["direction"] == 0 else "sent to"
+        items.append({
+            "created_at": f["created_at"], "category": "sessions",
+            "event": "file_transfer", "user_email": f["peer_name"] or f["peer_id"] or "",
+            "detail": f"{n} file{'s' if n != 1 else ''} {verb} "
+                      f"{f['device_name'] or f['rustdesk_id']} ({f['rustdesk_id']}) · {where}",
+            "rid": f["rustdesk_id"],
+        })
+
+    if include_deliveries:
+        for d in conn.execute(
+            "SELECT * FROM notification_log ORDER BY created_at DESC LIMIT ?", (_ALL_LIMIT,)
+        ):
+            items.append({
+                "created_at": d["created_at"], "category": "deliveries",
+                "event": "email_sent" if d["status"] == "sent" else "email_failed",
+                "user_email": "",
+                "detail": f"{EVENT_LABELS.get(d['event_type'], d['event_type'])} → {d['recipients']}"
+                          + (f" · {d['error']}" if d["error"] else ""),
+            })
+
+    items.sort(key=lambda e: e["created_at"] or "", reverse=True)
+    return items[:_ALL_LIMIT]
+
+
 def category_of(event: str) -> str:
     if event in _EVENT_CATEGORY:
         return _EVENT_CATEGORY[event]
@@ -91,8 +161,10 @@ async def audit(
     request: Request,
     cat: str = "all",
     rid: str = "",
+    onoff: int = 0,
     current_user: dict = Depends(require_auth),
 ):
+    hide_status = not onoff
     can_see_deliveries = user_can(current_user, "manage_notifications")
     tabs = [t for t in TABS if t[0] != "deliveries" or can_see_deliveries]
     if cat not in TAB_LABELS or (cat == "deliveries" and not can_see_deliveries):
@@ -104,11 +176,12 @@ async def audit(
     counts: dict[str, int] = {}
     for row in conn.execute("SELECT event, COUNT(*) AS n FROM provisioning_events GROUP BY event"):
         counts[category_of(row["event"])] = counts.get(category_of(row["event"]), 0) + row["n"]
-    counts["all"] = sum(counts.values())
     counts["sessions"] = conn.execute("SELECT COUNT(*) FROM device_sessions").fetchone()[0]
     active_count = conn.execute("SELECT COUNT(*) FROM device_sessions WHERE ended_at IS NULL").fetchone()[0]
     if can_see_deliveries:
         counts["deliveries"] = conn.execute("SELECT COUNT(*) FROM notification_log").fetchone()[0]
+    counts["all"] = sum(counts.values()) + conn.execute(
+        "SELECT COUNT(*) FROM device_file_transfers").fetchone()[0]
 
     events = None
     sessions = None
@@ -123,10 +196,7 @@ async def audit(
     elif cat == "deliveries":
         deliveries = get_log(200)
     elif cat == "all":
-        rows = conn.execute(
-            "SELECT * FROM provisioning_events ORDER BY created_at DESC LIMIT 200"
-        ).fetchall()
-        events = [dict(r, category=category_of(r["event"])) for r in rows]
+        events = _all_activity(conn, can_see_deliveries, hide_status)
     elif cat == "other":
         ph = ",".join("?" * len(_KNOWN_EVENTS))
         rows = conn.execute(
@@ -137,6 +207,8 @@ async def audit(
         events = [dict(r, category="other") for r in rows]
     else:
         evs = _CATEGORY_EVENTS.get(cat, [])
+        if hide_status:
+            evs = [e for e in evs if e not in _STATUS_EVENTS]
         ph = ",".join("?" * len(evs)) or "''"
         rows = conn.execute(
             f"SELECT * FROM provisioning_events WHERE event IN ({ph})"
@@ -162,5 +234,7 @@ async def audit(
             "counts": counts,
             "active_count": active_count,
             "filter_rid": rid,
+            "hide_status": hide_status,
+            "status_toggle": cat in ("all", "clients"),
         },
     )
