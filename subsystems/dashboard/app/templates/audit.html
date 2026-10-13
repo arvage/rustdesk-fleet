@@ -5,7 +5,7 @@
 
 {% set cat_colors = {
   'clients': '#3B82F6', 'sessions': '#8B5CF6', 'installers': '#0EA5E9',
-  'groups': '#10B981', 'users': '#F59E0B', 'notifications': '#EC4899',
+  'groups': '#10B981', 'users': '#F59E0B', 'notifications': '#EC4899', 'deliveries': '#F472B6',
   'server': '#64748B', 'other': '#94A3B8'
 } %}
 
@@ -60,15 +60,23 @@
 {% if sessions %}
 <div class="card"><div class="table-wrap">
   <table class="js-sort">
-    <thead><tr><th>Device</th><th>Client Group</th><th>Started</th><th>Ended</th><th>Duration</th><th>Status</th></tr></thead>
+    <thead><tr><th>Device</th><th>Connected by</th><th>From IP</th><th>Type</th><th>Client Group</th><th>Started</th><th>Ended</th><th>Duration</th><th>Status</th></tr></thead>
     <tbody id="log-tbody">
     {% for s in sessions %}
-      <tr data-search="{{ s.rustdesk_id }} {{ s.device_name }} {{ s.group_name or '' }}">
+      <tr data-search="{{ s.rustdesk_id }} {{ s.device_name }} {{ s.group_name or '' }} {{ s.peer_name or '' }} {{ s.peer_id or '' }} {{ s.peer_device_name or '' }} {{ s.peer_ip or '' }} {{ s.conn_type_label }}">
         <td style="white-space:nowrap">
           {% if s.device_name %}<span style="font-weight:500">{{ s.device_name }}</span>
           <a href="/audit?cat=sessions&rid={{ s.rustdesk_id }}" style="font-size:11px;display:block;text-decoration:none;color:var(--text-3)"><code>{{ s.rustdesk_id | format_rid }}</code></a>
           {% else %}<a href="/audit?cat=sessions&rid={{ s.rustdesk_id }}" style="text-decoration:none"><code>{{ s.rustdesk_id | format_rid }}</code></a>{% endif %}
         </td>
+        <td style="white-space:nowrap">
+          {% if s.peer_id or s.peer_name %}
+          <span style="font-weight:500">{{ s.peer_name or s.peer_device_name or '—' }}</span>
+          {% if s.peer_id %}<span style="font-size:11px;display:block;color:var(--text-3)"><code>{{ s.peer_id | format_rid }}</code>{% if s.peer_device_name and s.peer_name %} · {{ s.peer_device_name }}{% endif %}</span>{% endif %}
+          {% else %}<span class="text-muted text-sm">—</span>{% endif %}
+        </td>
+        <td class="text-sm mono" style="white-space:nowrap;color:var(--text-2)">{{ s.peer_ip or '—' }}</td>
+        <td class="text-sm" style="white-space:nowrap;color:var(--text-2)">{{ s.conn_type_label or '—' }}</td>
         <td>{% if s.group_name %}<a href="/groups/{{ s.group_slug }}" style="color:var(--accent);text-decoration:none;font-size:13px">{{ s.group_name }}</a>{% else %}<span class="text-muted text-sm">—</span>{% endif %}</td>
         <td class="text-muted text-sm mono" style="white-space:nowrap">{{ s.started_at | localtime }}</td>
         <td class="text-muted text-sm mono" style="white-space:nowrap">{{ s.ended_at | localtime if s.ended_at else '—' }}</td>
@@ -82,12 +90,54 @@
 <div id="no-log-results" style="display:none;padding:40px;text-align:center;color:var(--text-3);font-size:13px">No sessions match your filter.</div>
 </div>
 <p class="text-muted text-sm" style="margin-top:12px">
-  A session is one remote connection to a device, as reported by the device's RustDesk client — which device was
-  accessed and for how long. The OSS client does not report which technician connected.
+  A session is one remote connection to a device, as reported by the device's RustDesk client. "Connected by" is the
+  name and RustDesk ID of the computer that connected (the name is whatever that RustDesk client reports, usually its
+  OS username); sessions recorded before this was added show —.
 </p>
 {% else %}
 <div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🕑</div>
   <p>No sessions recorded yet.</p><p>Remote connections to your devices will appear here as they happen.</p>
+</div></div></div>
+{% endif %}
+
+{# ── Email deliveries tab ─────────────────────────────────────────────── #}
+{% elif cat == 'deliveries' %}
+
+<div style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+  <span class="text-muted text-sm">
+    Alert emails sent by the server &nbsp;·&nbsp; showing up to 200 most recent
+  </span>
+  <input id="log-filter" type="search" placeholder="Filter by event, recipient, error…"
+         oninput="filterLogRows()" class="filter-input" style="width:260px">
+</div>
+
+{% if deliveries %}
+<div class="card"><div class="table-wrap">
+  <table class="js-sort">
+    <thead><tr><th>Time</th><th>Event</th><th>Subject</th><th>Recipients</th><th>Status</th></tr></thead>
+    <tbody id="log-tbody">
+    {% for d in deliveries %}
+      <tr data-search="{{ d.event_type }} {{ event_labels.get(d.event_type, '') }} {{ d.subject }} {{ d.recipients }} {{ d.status }} {{ d.error or '' }}">
+        <td class="text-muted text-sm mono" style="white-space:nowrap">{{ d.created_at | localtime }}</td>
+        <td class="text-sm" style="white-space:nowrap">{{ event_labels.get(d.event_type, d.event_type) }}</td>
+        <td class="text-sm" style="color:var(--text-2);max-width:320px;word-break:break-word">{{ d.subject }}</td>
+        <td class="text-sm" style="color:var(--text-2);max-width:260px;word-break:break-all">{{ d.recipients }}</td>
+        <td>
+          {% if d.status == 'sent' %}<span class="badge badge-active">sent</span>
+          {% else %}<span class="badge badge-failed">failed</span>
+          {% if d.error %}<div class="text-sm" style="color:var(--danger);margin-top:4px;max-width:320px;word-break:break-word">{{ d.error }}</div>{% endif %}
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div id="no-log-results" style="display:none;padding:40px;text-align:center;color:var(--text-3);font-size:13px">No deliveries match your filter.</div>
+</div>
+{% else %}
+<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">✉️</div>
+  <p>No notification emails sent yet.</p>
 </div></div></div>
 {% endif %}
 

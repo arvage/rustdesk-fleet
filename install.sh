@@ -339,7 +339,7 @@ server {
     server_name _;
     client_max_body_size 64k;
     access_log off;
-    location ~ ^/api/(heartbeat|sysinfo|sysinfo_ver)$ {
+    location ~ ^/api/(heartbeat|sysinfo|sysinfo_ver|audit/conn)$ {
         limit_except POST { deny all; }
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host              $host;

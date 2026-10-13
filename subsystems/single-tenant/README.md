@@ -217,8 +217,8 @@ allow-remote-config-modification = "Y"  # "N" if the group sets it off
 key = "<server public key>"
 ```
 
-- `api-server` makes the client report its details and heartbeat to the
-  dashboard over HTTPS (see `DEPLOYMENT.md` §7). Older installers lack
+- `api-server` makes the client report its details, heartbeat and
+  per-connection audit (who connected) to the dashboard over HTTPS (see `DEPLOYMENT.md` §7). Older installers lack
   it, and those clients fall back to plain HTTP on port 21114.
 - The two `allow-*` options are the group's **Client Settings** (group
   page). The dashboard can also push them to devices that are already

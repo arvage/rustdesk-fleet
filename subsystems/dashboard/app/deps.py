@@ -325,9 +325,9 @@ def run_migrations() -> None:
     # Remote-session audit log. One row per active connection ("conn") a device
     # reports in its heartbeat (routes/client_api.py): opened when the conn first
     # appears, closed when it disappears or the device stops heartbeating. The
-    # RustDesk client reports the device-side connection, not the controller's
-    # identity, so this records which device was accessed, when, and for how long
-    # — not which tech connected (not available from the OSS client).
+    # Heartbeats only carry connection ids; who connected (the controller's
+    # RustDesk id + name), from which IP, and the connection type come from the
+    # client's /api/audit/conn reports, matched to the row by conn_ref.
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS device_sessions (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -341,6 +341,12 @@ def run_migrations() -> None:
         CREATE INDEX IF NOT EXISTS idx_device_sessions_open ON device_sessions(ended_at);
         CREATE INDEX IF NOT EXISTS idx_device_sessions_started ON device_sessions(started_at);
     """)
+    conn.commit()
+    sess_cols = {row[1] for row in conn.execute("PRAGMA table_info(device_sessions)").fetchall()}
+    for col, ddl in (("peer_id", "TEXT"), ("peer_name", "TEXT"),
+                     ("peer_ip", "TEXT"), ("conn_type", "INTEGER")):
+        if col not in sess_cols:
+            conn.execute(f"ALTER TABLE device_sessions ADD COLUMN {col} {ddl}")
     conn.commit()
 
     # Off-site backup destination (singleton). provider 's3' covers AWS S3,

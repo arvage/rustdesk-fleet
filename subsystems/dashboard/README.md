@@ -59,8 +59,9 @@ Staff pages (all require login):
 | `GET /admin/export/devices.csv` | Device inventory CSV (`manage_devices`) |
 | `POST /admin/restart-relay`, `POST /admin/logs/prune` | Restart hbbs/hbbr; prune old audit events (`manage_system`) |
 | `GET /account` + `POST /account/...` | Own profile, password, passkeys, sign-in method |
-| `GET /notifications` + `POST /notifications/...` | SMTP settings, per-event toggles, server-health alert thresholds, test email, send log (`manage_notifications`) |
-| `GET /audit` | **Logs** — categorized tabs (All / Clients / Remote sessions / Installers / Groups / Users & auth / Notifications / Server / Other), per-tab filter; the Remote sessions tab reads the session audit log |
+| `GET /notifications` + `POST /notifications/...` | SMTP settings, server-health alert thresholds, test email (`manage_notifications`) |
+| `POST /notifications/events/{event_type}` | Auto-save a single event-trigger toggle (form field `enabled=1`/`0`); returns JSON (`manage_notifications`) |
+| `GET /audit` | **Logs** — categorized tabs (All / Clients / Remote sessions / Installers / Groups / Users & auth / Notifications / Email deliveries / Server / Other), per-tab filter; Remote sessions reads `device_sessions`, Email deliveries reads `notification_log` (tab shown only with `manage_notifications`) |
 | `GET /sessions` | Redirects to `/audit?cat=sessions` (kept for old links) |
 | `GET /api/devices`, `GET /api/devices/status`, `GET /api/devices/{id}/sessions`, `GET /api/server/health` | JSON for the live tables, per-device session history, and server-health tiles |
 | `GET /setup`, `GET/POST /login`, `/login/webauthn/...`, `GET /logout` | First-run setup, password and passkey sign-in |
@@ -71,7 +72,7 @@ Public, no login:
 |---|---|
 | `GET /d/{token}` | Client-facing download page for a shared link (noindex, no-referrer) |
 | `GET /d/{token}/{platform}` | The installer itself; counts toward the link's download limit |
-| `POST /api/sysinfo`, `/api/heartbeat`, `/api/sysinfo_ver` | RustDesk client reporting. Accepted only when id + uuid match the hbbs peer table. Also served on port 21114 (see `DEPLOYMENT.md` §7) |
+| `POST /api/sysinfo`, `/api/heartbeat`, `/api/sysinfo_ver`, `/api/audit/conn` | RustDesk client reporting (audit/conn = per-connection open/authorized/close reports). Accepted only when id + uuid match the hbbs peer table; audit/conn answers 400 otherwise. Also served on port 21114 (see `DEPLOYMENT.md` §7) |
 
 ## Features
 
@@ -111,8 +112,12 @@ Public, no login:
   `docker ps`). Meters mark the configured alert thresholds.
 - **Session audit**: the heartbeat's active-connection list is turned into a
   `device_sessions` log (open/close/duration), surfaced on the Logs "Remote
-  sessions" tab and per-device in the details modal. Records which device was
-  accessed and for how long (the OSS client doesn't report the controller).
+  sessions" tab and per-device in the details modal. The client's
+  `/api/audit/conn` reports, matched by connection id (`conn_ref`), add who
+  connected (`peer_id`, `peer_name` — the controller's RustDesk id and
+  reported name), the connecting IP (`peer_ip`) and the connection type
+  (`conn_type`: 0 remote, 1 file transfer, 2 port forward, 3 view camera,
+  4 terminal). Audit retries within 5 minutes are matched to the same row.
 - **Backups** (`subsystems/single-tenant/backup.py`): nightly systemd timer
   (as root) + on-demand, snapshotting the hbbs/hbbr keypair, hbbs peer DB and
   the dashboard DB (consistent SQLite online-backup copies), with rotation,
@@ -176,7 +181,10 @@ Public, no login:
   always-dark sidebar and user modals and the public `/d/` page keep fixed
   colors.
 - **Logs**: categorized audit log (clients, remote sessions, installers,
-  groups, users & auth, server) of provisioning and admin actions.
+  groups, users & auth, notifications, email deliveries, server) of
+  provisioning and admin actions.
+- **Notifications page**: event-trigger toggles auto-save individually via
+  `fetch`; the delivery log lives on Logs → Email deliveries.
 
 Heartbeat/sysinfo requests are excluded from the uvicorn access log
 (`app/main.py`) — devices post every few seconds.

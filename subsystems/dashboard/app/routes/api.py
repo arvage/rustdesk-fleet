@@ -310,18 +310,14 @@ async def api_devices_list(
 @router.get("/devices/{rid}/sessions")
 async def api_device_sessions(rid: str, _: dict = Depends(require_auth)):
     """Recent remote-access sessions for one device (for the detail modal)."""
-    from app.routes.sessions import _LIST_SQL, fmt_duration
+    from app.routes.sessions import _LIST_SQL, _row
     conn = get_db()
     rows = conn.execute(_LIST_SQL.format(where="WHERE s.rustdesk_id = ?"), (rid, 20)).fetchall()
     conn.close()
     return JSONResponse({"sessions": [
-        {
-            "started_at": r["started_at"],
-            "ended_at": r["ended_at"],
-            "active": r["ended_at"] is None,
-            "duration_str": fmt_duration(r["duration_s"]),
-        }
-        for r in rows
+        {k: s[k] for k in ("started_at", "ended_at", "active", "duration_str",
+                           "peer_id", "peer_name", "peer_ip", "conn_type_label")}
+        for s in map(_row, rows)
     ]})
 
 

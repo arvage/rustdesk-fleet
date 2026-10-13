@@ -165,8 +165,10 @@
 <div class="help-sec" id="s10">
   <h2><span class="n">10</span> Logs</h2>
   <ul>
-    <li>Audit trail in category tabs: All, Clients, <strong>Remote sessions</strong>, Installers, Groups, Users &amp; auth, Notifications, Server, Other — each with a filter.</li>
-    <li><strong>Remote sessions</strong> shows each connection to a device: which device, when, and how long. (The client reports the device side, not which technician connected.)</li>
+    <li>Audit trail in category tabs: All, Clients, <strong>Remote sessions</strong>, Installers, Groups, Users &amp; auth, Notifications, <strong>Email deliveries</strong>, Server, Other — each with a filter.</li>
+    <li><strong>Remote sessions</strong> shows each connection to a device: which device, who connected, from which IP, the connection type (remote control, file transfer, port forward, camera, terminal), when, and how long.</li>
+    <li><strong>Connected by</strong> is the connecting computer, not a dashboard user — the name its RustDesk reports (usually the technician's OS username) and its RustDesk ID, plus its device name if it's in the fleet. Older sessions show —.</li>
+    <li><strong>Email deliveries</strong> lists notification emails sent (last 200): event, subject, recipients, sent/failed with the error. Visible to roles that can manage notifications.</li>
   </ul>
 </div>
 
@@ -184,10 +186,10 @@
 <div class="help-sec" id="s12">
   <h2><span class="n">12</span> Notifications &amp; alerts</h2>
   <ul>
-    <li><strong>SMTP</strong> for outbound mail (send a test). <strong>Event triggers</strong> choose which events email you: device registered / came online / went offline / deleted, installer built / deleted / downloaded, user created / deleted, new server or client version, memory or disk high.</li>
+    <li><strong>SMTP</strong> for outbound mail (send a test). <strong>Event triggers</strong> choose which events email you: device registered / came online / went offline / deleted, installer built / deleted / downloaded, user created / deleted, new server or client version, memory or disk high. Toggles save as soon as you flip them.</li>
     <li>Device alerts are checked every 30 seconds. <strong>New device registered</strong> fires as soon as a device registers — it doesn't wait for a group. <strong>Came online</strong> / <strong>went offline</strong> fire on state changes of known devices. A dashboard restart never floods you.</li>
     <li><strong>Server health alerts</strong> — set memory and disk thresholds; you're emailed when usage crosses them (debounced). These are the markers on the Server Health tiles.</li>
-    <li><strong>Delivery log</strong> shows recent sends and whether they succeeded.</li>
+    <li>Sent emails are listed under <strong>Logs → Email deliveries</strong>.</li>
   </ul>
 </div>
 

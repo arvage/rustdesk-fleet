@@ -48,6 +48,7 @@
 }
 .toggle input:checked + .toggle-slider { background: #3B82F6; }
 .toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
+.toggle input:disabled + .toggle-slider { opacity: .6; cursor: wait; }
 </style>
 
 <div style="display:flex;flex-direction:column;gap:20px">
@@ -194,18 +195,17 @@
     </form>
   </div>
 
-  <!-- ── Bottom two cards side by side ────────────────────────────────────── -->
-  <div class="grid-2col card-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
-
     <!-- Event triggers -->
     <div class="card">
       <div class="card-header">
         <div>
           <h2 style="font-size:13px;font-weight:600;color:var(--text-1);margin:0">Event triggers</h2>
-          <div style="font-size:12px;color:var(--text-3);margin-top:2px">Choose which events send an email.</div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:2px">Choose which events send an email. Changes save automatically.
+            Sent emails are listed under <a href="/audit?cat=deliveries" style="color:var(--accent)">Logs → Email deliveries</a>.</div>
         </div>
+        <span id="trigger-status" style="font-size:12px;flex-shrink:0"></span>
       </div>
-      <form method="post" action="/notifications/events" class="notif-form">
+      <div class="notif-form">
         <div style="padding:0 18px">
           <table style="width:100%;border-collapse:collapse">
             <thead>
@@ -231,7 +231,7 @@
                 </td>
                 <td style="padding:11px 0;text-align:right;border-bottom:1px solid var(--border)">
                   <label class="toggle" style="margin:0">
-                    <input type="checkbox" name="{{ et }}" value="1"
+                    <input type="checkbox" class="js-trigger" data-event="{{ et }}"
                            {% if event_states.get(et, True) %}checked{% endif %}>
                     <span class="toggle-slider"></span>
                   </label>
@@ -241,72 +241,38 @@
             </tbody>
           </table>
         </div>
-        <div style="padding:14px 18px;border-top:1px solid var(--border)">
-          <button type="submit" class="btn btn-primary btn-sm">Save triggers</button>
-        </div>
-      </form>
+      </div>
     </div>
 
-    <!-- Delivery log -->
-    <div class="card">
-      <div class="card-header">
-        <div>
-          <h2 style="font-size:13px;font-weight:600;color:var(--text-1);margin:0">Delivery log</h2>
-          <div style="font-size:12px;color:var(--text-3);margin-top:2px">Last 50 notification attempts.</div>
-        </div>
-      </div>
-      {% if log %}
-      <div style="padding:0 18px">
-        <table class="js-sort" style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead>
-            <tr>
-              <th style="text-align:left;padding:12px 0 8px;font-size:11px;font-weight:600;
-                         color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;
-                         border-bottom:1px solid var(--border);white-space:nowrap">
-                When
-              </th>
-              <th style="text-align:left;padding:12px 8px 8px;font-size:11px;font-weight:600;
-                         color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;
-                         border-bottom:1px solid var(--border)">
-                Event
-              </th>
-              <th style="text-align:left;padding:12px 0 8px;font-size:11px;font-weight:600;
-                         color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;
-                         border-bottom:1px solid var(--border)">
-                Status
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for entry in log %}
-            <tr {% if entry.error %}title="{{ entry.error | e }}"{% endif %}>
-              <td style="padding:9px 0;color:var(--text-3);white-space:nowrap;
-                         border-bottom:1px solid var(--border);font-size:12px">
-                {{ entry.created_at | localtime }}
-              </td>
-              <td style="padding:9px 8px;color:var(--text-1);border-bottom:1px solid var(--border);
-                         font-size:12px;word-break:break-word">
-                {{ entry.event_type }}
-              </td>
-              <td style="padding:9px 0;border-bottom:1px solid var(--border)">
-                {% if entry.status == 'sent' %}
-                <span class="badge badge-active">sent</span>
-                {% else %}
-                <span class="badge badge-failed" title="{{ entry.error or '' }}">failed</span>
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <div style="padding:18px">
-        <p style="color:var(--text-3);font-size:13px;margin:0">No notifications sent yet.</p>
-      </div>
-      {% endif %}
-    </div>
-
-  </div><!-- /bottom grid -->
 </div>
+
+<script>
+(function () {
+  const status = document.getElementById('trigger-status');
+  let hideTimer;
+  function show(msg, color) {
+    clearTimeout(hideTimer);
+    status.textContent = msg;
+    status.style.color = color;
+    hideTimer = setTimeout(() => { status.textContent = ''; }, 2500);
+  }
+  document.querySelectorAll('.js-trigger').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const body = new FormData();
+      body.append('enabled', cb.checked ? '1' : '0');
+      cb.disabled = true;
+      try {
+        const res = await fetch(`/notifications/events/${encodeURIComponent(cb.dataset.event)}`,
+                                { method: 'POST', body });
+        if (!res.ok) throw new Error();
+        show('Saved', 'var(--success)');
+      } catch (_) {
+        cb.checked = !cb.checked;
+        show('Save failed', 'var(--danger)');
+      }
+      cb.disabled = false;
+    });
+  });
+})();
+</script>
 {% endblock %}

@@ -797,7 +797,7 @@ function openDetailModal(rid) {
 function loadDetailSessions(rid) {
   const box = document.getElementById('detail-sessions');
   if (!box) return;
-  const head = '<tr><td colspan="3" style="padding:14px 0 4px;font-size:11px;color:var(--text-3);'
+  const head = '<tr><td colspan="4" style="padding:14px 0 4px;font-size:11px;color:var(--text-3);'
     + 'text-transform:uppercase;letter-spacing:.06em;font-weight:600;border:none;'
     + 'border-bottom:1px solid var(--border-lt)">Recent sessions</td></tr>';
   box.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse">' + head
@@ -812,6 +812,7 @@ function loadDetailSessions(rid) {
       } else {
         rows = ss.map(s =>
           '<tr><td style="color:var(--text-1);padding:4px 10px 4px 0;white-space:nowrap;border:none">' + esc(toLA(s.started_at)) + '</td>'
+          + '<td style="color:var(--text-2);padding:4px 10px 4px 0;border:none">' + esc(s.peer_name || s.peer_id || '—') + '</td>'
           + '<td style="color:var(--text-3);padding:4px 10px 4px 0;white-space:nowrap;border:none">' + esc(s.duration_str) + '</td>'
           + '<td style="padding:4px 0;border:none;text-align:right">'
           + (s.active ? '<span class="badge badge-active">active</span>' : '<span class="badge badge-offline">ended</span>')

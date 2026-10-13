@@ -185,9 +185,9 @@ server {
     }
 }
 
-# RustDesk client reporting (sysinfo + heartbeat) for clients that use the
-# default http://<rendezvous-host>:21114. Only the three client endpoints are
-# exposed — the dashboard itself is not reachable on this port.
+# RustDesk client reporting (sysinfo + heartbeat + connection audit) for clients
+# that use the default http://<rendezvous-host>:21114. Only the client
+# reporting endpoints are exposed — the dashboard itself is not reachable on this port.
 # Remove this block once every client reports over HTTPS (see Section 7).
 server {
     listen 21114;
@@ -197,7 +197,7 @@ server {
     client_max_body_size 64k;
     access_log off;
 
-    location ~ ^/api/(heartbeat|sysinfo|sysinfo_ver)$ {
+    location ~ ^/api/(heartbeat|sysinfo|sysinfo_ver|audit/conn)$ {
         limit_except POST { deny all; }
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host              $host;
@@ -299,6 +299,16 @@ logged-in user, CPU, RAM, client version — plus a heartbeat every ~15 s
 these at `/api/sysinfo`, `/api/heartbeat` and `/api/sysinfo_ver`
 (`subsystems/dashboard/app/routes/client_api.py`) and uses them for the
 Computer/OS columns and for online / in-session status.
+
+Each incoming remote connection is also reported to `/api/audit/conn`:
+once when it opens (with the connecting IP), once when it's authorized
+(with the connecting computer's RustDesk ID and name and the connection
+type), and once when it closes. The dashboard attaches these to the
+matching session, which is how Logs → Remote sessions shows **Connected
+by**, **From IP** and **Type**. The 21114 nginx block must include
+`audit/conn` in its `location` regex — if it doesn't, nginx answers 404
+(silently, since that block has `access_log off`) and those columns stay
+empty for clients on older installers.
 
 Where a client sends its reports:
 
@@ -592,6 +602,7 @@ journalctl -u rustdesk-dashboard -n 50       # no tracebacks
 # Device reporting (if the port-21114 block is enabled)
 curl -s -o /dev/null -w '%{http_code}\n' http://rds.example.com:21114/        # 404 — dashboard not exposed
 curl -s -X POST -d '{}' http://rds.example.com:21114/api/heartbeat             # {} — receiver reachable
+curl -s -X POST -d '{}' http://rds.example.com:21114/api/audit/conn            # REJECTED — audit receiver reachable (not nginx 404)
 sqlite3 /opt/rustdesk-fleet/fleet.sqlite3 \
   "select count(*) from device_info where heartbeat_at > datetime('now','-1 minute')"  # devices checking in
 ```

@@ -101,8 +101,8 @@ The tables throughout the dashboard can be adjusted to show what you care about:
   Numbers, data sizes (e.g. `16 GB`), percentages and session durations sort
   by value, not alphabetically. Action columns (Connect, Edit, View) aren't
   sortable. Available on every table: Devices, Client Groups, the device list
-  inside a group, Installers, Download Links, Logs, Users, the Notifications
-  delivery log and Admin backups.
+  inside a group, Installers, Download Links, Logs (including Email
+  deliveries), Users and Admin backups.
 - **Columns** (Devices and the device list inside a group) — click the
   **Columns** button above the table to show or hide columns. The extra
   client-reported detail columns (**User, OS Build, CPU, Cores, Memory, Client
@@ -304,13 +304,27 @@ has the same data.
 **Logs** is the audit trail, split into category tabs:
 
 - **All activity**, **Clients**, **Remote sessions**, **Installers**,
-  **Groups**, **Users & auth**, **Notifications**, **Server**, **Other**.
+  **Groups**, **Users & auth**, **Notifications**, **Email deliveries**,
+  **Server**, **Other**.
   Changes to dynamic groups are under Groups. Email template and design
   changes are under Notifications. Devices registering, going offline and
   coming back online are under Clients.
 - **Remote sessions** shows each remote connection to a device — which device
-  was accessed, when, and for how long. (The RustDesk client reports the
-  device side of the connection, not which technician connected.)
+  was accessed, who connected, from which IP, the connection type (remote
+  control, file transfer, port forward, view camera or terminal), when, and
+  for how long.
+  - **Connected by** is the connecting *computer*, not a dashboard user: the
+    name its RustDesk client reports (usually the technician's OS username)
+    and its RustDesk ID. If that computer is itself a fleet device, its device
+    name is shown too. To tie IDs to people, note each technician's RustDesk ID.
+  - Sessions recorded before this was added, or from clients that can't send
+    connection reports, show **—** in these columns. Clients on older
+    installers send them over port 21114, which must be open (see
+    `DEPLOYMENT.md` §7).
+- **Email deliveries** lists every notification email the server sent (up to
+  the 200 most recent): time, event, subject, recipients, and sent/failed —
+  with the error shown for failures. Only visible to roles with the
+  manage-notifications capability.
 
 Each tab has a filter box and a count badge.
 
@@ -352,7 +366,8 @@ Backups protect the one thing that can't be regenerated — the server keypair
 - **Event triggers** — toggle which events send email: device registered,
   came online, went offline, deleted; installer built, deleted, downloaded via
   link; user created or deleted; new server or client version; server memory or
-  disk high. New events start switched on.
+  disk high. New events start switched on. Each toggle **saves as soon as you
+  flip it** (a "Saved" note appears; if the save fails the toggle flips back).
 - **When device alerts fire**: the dashboard checks every 30 seconds.
   - **New device registered** fires on the next check after a device
     registers with the server, whether or not it has a client group yet.
@@ -366,7 +381,7 @@ Backups protect the one thing that can't be regenerated — the server keypair
 - **Server health alerts** — set the **memory** and **disk** thresholds; you're
   emailed when usage crosses them (debounced, so you're not spammed). These
   thresholds are the markers shown on the Server Health tiles.
-- **Delivery log** — the last notifications sent and whether they succeeded.
+- **Delivery log** — moved to **Logs → Email deliveries** (see §10).
 
 ### Email templates
 

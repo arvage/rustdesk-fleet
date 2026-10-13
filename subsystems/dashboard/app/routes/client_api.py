@@ -9,6 +9,10 @@ server — `api-server` if configured, otherwise http://<rendezvous-host>:21114:
                   logged-in user changes)
   /api/heartbeat  id + version every ~15 s, every 3 s while sessions are open
                   (with "conns": the active connection ids)
+  /api/audit/conn src/server/connection.rs, per incoming connection:
+                  {"action":"new","ip":…} when it opens, {"peer":[id,name],
+                  "type":…} once authorized, {"action":"close"} when it ends;
+                  each tagged with the device id/uuid and "conn_id"
 
 These endpoints are unauthenticated by design (the client sends no
 credentials), so every report is checked against the hbbs peer table: the
@@ -156,6 +160,35 @@ def _reconcile_sessions(conn, rid: str, conns: list) -> None:
             )
 
 
+# Connection types the client reports in /api/audit/conn ("type").
+CONN_TYPES = {0: "Remote control", 1: "File transfer", 2: "Port forward",
+              3: "View camera", 4: "Terminal"}
+
+# The client retries an audit post for up to ~2 min, so a "new" that arrives
+# for a conn we opened that recently is a retry, not a fresh connection.
+_AUDIT_RETRY_WINDOW_S = 300
+
+
+def _audit_session_id(conn, rid: str, ref: str, create: bool) -> int | None:
+    """The device_sessions row for this conn: the open one, else (when the
+    report is a late retry) one started moments ago; inserted if `create`."""
+    row = conn.execute(
+        f"""SELECT id FROM device_sessions
+            WHERE rustdesk_id = ? AND conn_ref = ?
+              AND (ended_at IS NULL OR started_at > datetime('now', '-{_AUDIT_RETRY_WINDOW_S} seconds'))
+            ORDER BY (ended_at IS NULL) DESC, id DESC LIMIT 1""",
+        (rid, ref),
+    ).fetchone()
+    if row:
+        return row["id"]
+    if not create:
+        return None
+    cur = conn.execute(
+        "INSERT INTO device_sessions (rustdesk_id, conn_ref) VALUES (?, ?)", (rid, ref)
+    )
+    return cur.lastrowid
+
+
 def sweep_stale_sessions() -> int:
     """Close sessions for devices that stopped heartbeating mid-session.
     Returns the number of sessions closed. Safe to call periodically."""
@@ -207,6 +240,47 @@ async def client_sysinfo(request: Request):
     conn.commit()
     conn.close()
     return PlainTextResponse("SYSINFO_UPDATED")
+
+
+@router.post("/api/audit/conn")
+async def client_audit_conn(request: Request):
+    data = await _read_json(request)
+    rid = _verify(data) if data else None
+    if rid is None or data.get("conn_id") is None:
+        # 4xx: the client treats it as final and doesn't retry.
+        return PlainTextResponse("REJECTED", status_code=400)
+
+    ref = str(data.get("conn_id"))
+    peer = data.get("peer")
+    conn = get_db()
+    if data.get("action") == "close":
+        sid = _audit_session_id(conn, rid, ref, create=False)
+        if sid:
+            conn.execute(
+                """UPDATE device_sessions SET ended_at = datetime('now'), last_seen_at = datetime('now')
+                   WHERE id = ? AND ended_at IS NULL""",
+                (sid,),
+            )
+    elif data.get("action") == "new":
+        sid = _audit_session_id(conn, rid, ref, create=True)
+        ip = str(data.get("ip") or "").replace("::ffff:", "")[:64]
+        if ip:
+            conn.execute("UPDATE device_sessions SET peer_ip = ? WHERE id = ?", (ip, sid))
+    elif isinstance(peer, list) and peer:
+        sid = _audit_session_id(conn, rid, ref, create=True)
+        try:
+            ctype = int(data.get("type"))
+        except (TypeError, ValueError):
+            ctype = None
+        conn.execute(
+            "UPDATE device_sessions SET peer_id = ?, peer_name = ?, conn_type = ? WHERE id = ?",
+            (str(peer[0] or "")[:64] or None,
+             str(peer[1] if len(peer) > 1 and peer[1] is not None else "")[:200] or None,
+             ctype, sid),
+        )
+    conn.commit()
+    conn.close()
+    return PlainTextResponse("")
 
 
 @router.post("/api/sysinfo_ver")

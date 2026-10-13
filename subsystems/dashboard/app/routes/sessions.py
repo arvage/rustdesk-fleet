@@ -11,14 +11,18 @@ router = APIRouter()
 # first), then most-recently-started.
 _LIST_SQL = """
     SELECT s.rustdesk_id, s.started_at, s.ended_at,
+           s.peer_id, s.peer_name, s.peer_ip, s.conn_type,
            d.label, cg.display_name AS group_name, cg.slug AS group_slug,
-           di.hostname,
+           di.hostname, COALESCE(pd.label, pdi.hostname) AS peer_device_name,
            CAST((julianday(COALESCE(s.ended_at, 'now')) - julianday(s.started_at)) * 86400
                 AS INTEGER) AS duration_s
     FROM device_sessions s
     LEFT JOIN devices d       ON d.rustdesk_id  = s.rustdesk_id
     LEFT JOIN client_groups cg ON cg.id         = d.group_id
     LEFT JOIN device_info di   ON di.rustdesk_id = s.rustdesk_id
+    -- The controller may itself be a fleet device; if so, show its name too.
+    LEFT JOIN devices pd       ON pd.rustdesk_id  = s.peer_id
+    LEFT JOIN device_info pdi  ON pdi.rustdesk_id = s.peer_id
     {where}
     ORDER BY (s.ended_at IS NULL) DESC, s.started_at DESC
     LIMIT ?
@@ -46,6 +50,8 @@ def _row(r) -> dict:
     d["active"] = r["ended_at"] is None
     d["duration_str"] = fmt_duration(r["duration_s"])
     d["device_name"] = r["label"] or r["hostname"] or ""
+    from app.routes.client_api import CONN_TYPES
+    d["conn_type_label"] = CONN_TYPES.get(r["conn_type"], "") if r["conn_type"] is not None else ""
     return d
 
 

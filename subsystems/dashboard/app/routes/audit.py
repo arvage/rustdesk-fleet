@@ -3,13 +3,15 @@ from fastapi.responses import HTMLResponse
 
 from app.auth import require_auth
 from app.deps import get_db
+from app.notifications import EVENT_LABELS, get_log
+from app.permissions import user_can
 from app.routes.sessions import _LIST_SQL, _row
 from app.templates_config import templates
 
 router = APIRouter()
 
-# Tabs shown on the Logs page, in order. "sessions" is special — it reads from
-# device_sessions rather than provisioning_events.
+# Tabs shown on the Logs page, in order. "sessions" and "deliveries" are special —
+# they read from device_sessions / notification_log rather than provisioning_events.
 TABS = [
     ("all", "All activity"),
     ("clients", "Clients"),
@@ -18,6 +20,7 @@ TABS = [
     ("groups", "Groups"),
     ("users", "Users & auth"),
     ("notifications", "Notifications"),
+    ("deliveries", "Email deliveries"),
     ("server", "Server"),
     ("other", "Other"),
 ]
@@ -90,7 +93,9 @@ async def audit(
     rid: str = "",
     current_user: dict = Depends(require_auth),
 ):
-    if cat not in TAB_LABELS:
+    can_see_deliveries = user_can(current_user, "manage_notifications")
+    tabs = [t for t in TABS if t[0] != "deliveries" or can_see_deliveries]
+    if cat not in TAB_LABELS or (cat == "deliveries" and not can_see_deliveries):
         cat = "all"
 
     conn = get_db()
@@ -102,9 +107,12 @@ async def audit(
     counts["all"] = sum(counts.values())
     counts["sessions"] = conn.execute("SELECT COUNT(*) FROM device_sessions").fetchone()[0]
     active_count = conn.execute("SELECT COUNT(*) FROM device_sessions WHERE ended_at IS NULL").fetchone()[0]
+    if can_see_deliveries:
+        counts["deliveries"] = conn.execute("SELECT COUNT(*) FROM notification_log").fetchone()[0]
 
     events = None
     sessions = None
+    deliveries = None
 
     if cat == "sessions":
         if rid:
@@ -112,6 +120,8 @@ async def audit(
         else:
             rows = conn.execute(_LIST_SQL.format(where=""), (300,)).fetchall()
         sessions = [_row(r) for r in rows]
+    elif cat == "deliveries":
+        deliveries = get_log(200)
     elif cat == "all":
         rows = conn.execute(
             "SELECT * FROM provisioning_events ORDER BY created_at DESC LIMIT 200"
@@ -144,8 +154,10 @@ async def audit(
             "current_user": current_user,
             "events": events,
             "sessions": sessions,
+            "deliveries": deliveries,
+            "event_labels": EVENT_LABELS,
             "cat": cat,
-            "tabs": TABS,
+            "tabs": tabs,
             "tab_labels": TAB_LABELS,
             "counts": counts,
             "active_count": active_count,

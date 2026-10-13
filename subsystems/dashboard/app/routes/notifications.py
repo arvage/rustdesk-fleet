@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.auth import require_auth
 from app.deps import get_db, log_event
 from app.notifications import (
-    EVENT_LABELS, get_settings, get_event_states, get_log, send_test_email
+    EVENT_LABELS, get_settings, get_event_states, send_test_email
 )
 from app.templates_config import templates
 
@@ -28,7 +28,6 @@ async def notifications_page(
     _require_admin(current_user)
     settings = get_settings()
     event_states = get_event_states()
-    log = get_log(50)
     return templates.TemplateResponse(
         request,
         "notifications.html",
@@ -37,7 +36,6 @@ async def notifications_page(
             "settings": settings,
             "event_states": event_states,
             "event_labels": EVENT_LABELS,
-            "log": log,
         },
     )
 
@@ -103,27 +101,29 @@ async def notifications_save(
     return RedirectResponse("/notifications", status_code=303)
 
 
-@router.post("/notifications/events")
-async def notifications_events(
+@router.post("/notifications/events/{event_type}")
+async def notifications_event_toggle(
+    event_type: str,
     request: Request,
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
+    if event_type not in EVENT_LABELS:
+        return JSONResponse({"ok": False, "error": "Unknown event."}, status_code=404)
     form = await request.form()
+    enabled = 1 if form.get("enabled") == "1" else 0
 
     conn = get_db()
-    for et in EVENT_LABELS:
-        enabled = 1 if form.get(et) == "1" else 0
-        conn.execute(
-            "INSERT OR REPLACE INTO notification_events (event_type, enabled) VALUES (?, ?)",
-            (et, enabled),
-        )
-    log_event(conn, "notification_triggers_updated", "", current_user["email"])
+    conn.execute(
+        "INSERT OR REPLACE INTO notification_events (event_type, enabled) VALUES (?, ?)",
+        (event_type, enabled),
+    )
+    log_event(conn, "notification_triggers_updated",
+              f"{event_type}={'on' if enabled else 'off'}", current_user["email"])
     conn.commit()
     conn.close()
 
-    _set_flash(request, "success", "Event triggers updated.")
-    return RedirectResponse("/notifications", status_code=303)
+    return JSONResponse({"ok": True, "enabled": bool(enabled)})
 
 
 @router.post("/notifications/health-alerts")
