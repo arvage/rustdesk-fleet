@@ -35,7 +35,7 @@ Staff pages (all require login):
 | `POST /installers/update-version` | Move installers to the latest RustDesk client release, optionally rebuilding every group's installers in the background (`update_server`) |
 | `POST /server/backup`, `GET /server/backup/download/latest` | Run a backup now / download the newest archive (`manage_backups`) |
 | `GET /devices` | Device inventory sorted by label (unlabeled last): Computer / OS / client version (client-reported), live online · in session · offline status, group filter; **Recently registered** panel (last 7 days, no client group yet); **ⓘ details** modal per device (full reported details + recent sessions) |
-| `POST /devices/{id}/edit` · `/delete`, `POST /devices/sync` | Label/group a device (`manage_devices`); delete hides it and clears its details/sessions — a verified heartbeat later auto-un-hides it; import peers from hbbs. Edit and delete accept a `next` local path to return to (the group page uses it) |
+| `POST /devices/{id}/edit` · `/delete`, `POST /devices/sync` | Label/group a device (`manage_devices`); delete hides it and clears its details/sessions/file transfers — a verified heartbeat later auto-un-hides it; import peers from hbbs. Edit and delete accept a `next` local path to return to (the group page uses it) |
 | `POST /devices/{id}/assign-group` | Set a device's client group without touching its label (Recently registered panel; `manage_devices`) |
 | `GET /groups`, `POST /groups` | Group list (with live "X / Y online"), create group |
 | `GET /groups/{slug}` | Group detail: devices (sorted by label, with the same **Edit** modal as Devices), Client Settings, branding, installers, download links |
@@ -62,6 +62,7 @@ Staff pages (all require login):
 | `GET /notifications` + `POST /notifications/...` | SMTP settings, server-health alert thresholds, test email (`manage_notifications`) |
 | `POST /notifications/events/{event_type}` | Auto-save a single event-trigger toggle (form field `enabled=1`/`0`); returns JSON (`manage_notifications`) |
 | `GET /audit` | **Logs** — categorized tabs (All / Clients / Remote sessions / Installers / Groups / Users & auth / Notifications / Email deliveries / Server / Other), per-tab filter; Remote sessions reads `device_sessions`, Email deliveries reads `notification_log` (tab shown only with `manage_notifications`) |
+| `GET /devices/{id}/timeline?range=24h\|7d\|30d&back=N` | Per-device **connection timeline** (ScreenConnect-style): online lane from `device_online`/`device_offline` events, one lane per connecting peer from `device_sessions` with file-transfer markers from `device_file_transfers`, device-event markers, summary and event list (`app/routes/timeline.py`) |
 | `GET /sessions` | Redirects to `/audit?cat=sessions` (kept for old links) |
 | `GET /api/devices`, `GET /api/devices/status`, `GET /api/devices/{id}/sessions`, `GET /api/server/health` | JSON for the live tables, per-device session history, and server-health tiles |
 | `GET /setup`, `GET/POST /login`, `/login/webauthn/...`, `GET /logout` | First-run setup, password and passkey sign-in |
@@ -72,7 +73,7 @@ Public, no login:
 |---|---|
 | `GET /d/{token}` | Client-facing download page for a shared link (noindex, no-referrer) |
 | `GET /d/{token}/{platform}` | The installer itself; counts toward the link's download limit |
-| `POST /api/sysinfo`, `/api/heartbeat`, `/api/sysinfo_ver`, `/api/audit/conn` | RustDesk client reporting (audit/conn = per-connection open/authorized/close reports). Accepted only when id + uuid match the hbbs peer table; audit/conn answers 400 otherwise. Also served on port 21114 (see `DEPLOYMENT.md` §7) |
+| `POST /api/sysinfo`, `/api/heartbeat`, `/api/sysinfo_ver`, `/api/audit/conn`, `/api/audit/file` | RustDesk client reporting (audit/conn = per-connection open/authorized/close reports; audit/file = file transfers and clipboard file pastes). Accepted only when id + uuid match the hbbs peer table; the audit endpoints answer 400 otherwise. Also served on port 21114 (see `DEPLOYMENT.md` §7) |
 
 ## Features
 
@@ -118,6 +119,12 @@ Public, no login:
   reported name), the connecting IP (`peer_ip`) and the connection type
   (`conn_type`: 0 remote, 1 file transfer, 2 port forward, 3 view camera,
   4 terminal). Audit retries within 5 minutes are matched to the same row.
+- **File transfer audit**: `/api/audit/file` reports are stored in
+  `device_file_transfers` (direction 0 = sent from the device, 1 = sent to
+  it; folder path, empty for clipboard pastes; full file count; largest ≤10
+  `[name, size]` pairs), linked to the session by connection id and
+  deduplicated by the client's `nonce`. Shown on the connection timeline;
+  deleting a device clears them with its sessions.
 - **Backups** (`subsystems/single-tenant/backup.py`): nightly systemd timer
   (as root) + on-demand, snapshotting the hbbs/hbbr keypair, hbbs peer DB and
   the dashboard DB (consistent SQLite online-backup copies), with rotation,
@@ -217,7 +224,7 @@ Daemon threads started at import (one uvicorn worker, so each runs once):
 
 Created by `run_migrations()` in `/opt/rustdesk-fleet/fleet.sqlite3`
 alongside the single-tenant schema: `notification_settings`,
-`notification_events`, `notification_log`, `device_sessions`, `device_info`,
+`notification_events`, `notification_log`, `device_sessions`, `device_file_transfers`, `device_info`,
 `download_links`, `backup_config`, `signing_config`, `roles`,
 `webauthn_credentials`, `dynamic_groups`, `email_templates`, `email_design`.
 

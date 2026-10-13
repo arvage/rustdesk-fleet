@@ -321,6 +321,19 @@ has the same data.
     connection reports, show **—** in these columns. Clients on older
     installers send them over port 21114, which must be open (see
     `DEPLOYMENT.md` §7).
+- **Connection timeline** — click a device's name in Remote sessions (or
+  **Connection timeline →** in the device's ⓘ details) for a ScreenConnect-style
+  timeline of that device: a **Device online** row, one row per computer that
+  connected with a bar per session (colored by type; striped while active;
+  hover for times, duration and IP), orange **file transfer** markers on
+  that computer's row (↑ files sent from the device, ↓ files sent to it —
+  via the file transfer window or clipboard paste; hover for the count,
+  size, folder and file names), and **Device events** (registered,
+  label/group changed, deleted, restored). Choose **24h / 7d / 30d** and step
+  **Earlier / Later**. Totals at the top (sessions, time connected, computers,
+  file transfers, % online) and a chronological event list below; clicking a bar highlights
+  its start/end in the list. Online history before Oct 12, 2026 has gaps
+  (shown hatched) because "came online" wasn't recorded until then.
 - **Email deliveries** lists every notification email the server sent (up to
   the 200 most recent): time, event, subject, recipients, and sent/failed —
   with the error shown for failures. Only visible to roles with the
@@ -436,6 +449,7 @@ in this browser, so set it once on each browser or device you use.
 | Restore the server | Admin → Backup & Restore → Restore |
 | Get alerted on low disk/memory | Admin → Notifications → health thresholds |
 | See who connected to what | Logs → Remote sessions |
+| See a device's connection history over time | Logs → Remote sessions → click the device, or Devices → ⓘ → Connection timeline |
 | Export the device list | Admin → Export device inventory (CSV) |
 | Find Windows 10 / stale / low-spec machines | Dynamic Groups → New (pick a template) |
 | Give a newly registered device a group | Devices → Recently registered → Assign to Group |

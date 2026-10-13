@@ -168,6 +168,7 @@
     <li>Audit trail in category tabs: All, Clients, <strong>Remote sessions</strong>, Installers, Groups, Users &amp; auth, Notifications, <strong>Email deliveries</strong>, Server, Other — each with a filter.</li>
     <li><strong>Remote sessions</strong> shows each connection to a device: which device, who connected, from which IP, the connection type (remote control, file transfer, port forward, camera, terminal), when, and how long.</li>
     <li><strong>Connected by</strong> is the connecting computer, not a dashboard user — the name its RustDesk reports (usually the technician's OS username) and its RustDesk ID, plus its device name if it's in the fleet. Older sessions show —.</li>
+    <li><strong>Connection timeline</strong> — click a device in Remote sessions (or <em>Connection timeline →</em> in its ⓘ details): a row for when it was online, one row per connecting computer with a bar per session (colored by type, hover for details) and orange file-transfer markers (↑ sent from the device, ↓ sent to it, including clipboard pastes), and device events. Pick 24h / 7d / 30d and step Earlier / Later; an event list sits below.</li>
     <li><strong>Email deliveries</strong> lists notification emails sent (last 200): event, subject, recipients, sent/failed with the error. Visible to roles that can manage notifications.</li>
   </ul>
 </div>
@@ -225,6 +226,7 @@
     <tr><td>Restore the server</td><td>Admin → Backup &amp; Restore → Restore</td></tr>
     <tr><td>Get alerted on low disk/memory</td><td>Admin → Notifications → health thresholds</td></tr>
     <tr><td>See who connected to what</td><td>Logs → Remote sessions</td></tr>
+    <tr><td>See a device's connection history over time</td><td>Remote sessions → click the device, or Devices → ⓘ → Connection timeline</td></tr>
     <tr><td>Export the device list</td><td>Admin → Export device inventory (CSV)</td></tr>
     <tr><td>Find Windows 10 / stale / low-spec machines</td><td>Dynamic Groups → New (pick a template)</td></tr>
     <tr><td>Prepare recommendations for a client</td><td>Admin → Reports → Client group health / OS support (filter to the client)</td></tr>

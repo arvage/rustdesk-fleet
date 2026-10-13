@@ -349,6 +349,33 @@ def run_migrations() -> None:
             conn.execute(f"ALTER TABLE device_sessions ADD COLUMN {col} {ddl}")
     conn.commit()
 
+    # File transfers reported by the client's /api/audit/file (file-transfer
+    # sessions and clipboard file copy/paste), linked to their session when the
+    # connection id matches one. direction: 0 = sent from the device to the
+    # connecting computer, 1 = received by the device. files = JSON list of the
+    # largest ≤10 [name, size] pairs; file_count is the full count. nonce
+    # dedups the client's retries.
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS device_file_transfers (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            rustdesk_id  TEXT NOT NULL,
+            session_id   INTEGER,
+            conn_ref     TEXT,
+            peer_id      TEXT,
+            peer_name    TEXT,
+            peer_ip      TEXT,
+            direction    INTEGER NOT NULL,
+            path         TEXT,
+            is_file      INTEGER NOT NULL DEFAULT 0,
+            file_count   INTEGER NOT NULL DEFAULT 0,
+            files        TEXT,
+            nonce        TEXT UNIQUE,
+            created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_file_transfers_rid ON device_file_transfers(rustdesk_id, created_at);
+    """)
+    conn.commit()
+
     # Off-site backup destination (singleton). provider 's3' covers AWS S3,
     # Wasabi, Backblaze B2, DigitalOcean Spaces and any S3-compatible store
     # (boto3, native); provider 'rclone' covers Google Drive, OneDrive,

@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+{% block title %}Timeline · {{ device_name }} — RustDesk Fleet{% endblock %}
+{% block page_title %}Connection timeline{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% set span = end - start %}
+{% macro pos(t) -%}{{ '%.3f' | format(((t - start) / span * 100) if t > start else 0) }}{%- endmacro %}
+{% macro width(s, e) -%}
+  {%- set a = s if s > start else start -%}{%- set b = e if e < end else end -%}
+  {{ '%.3f' | format(((b - a) / span * 100) if b > a else 0) }}
+{%- endmacro %}
+{% set type_colors = {0: '#3B82F6', 1: '#0EA5E9', 2: '#F59E0B', 3: '#8B5CF6', 4: '#10B981', -1: '#64748B'} %}
+
+{% block content %}
+<style>
+.tl { position: relative; }
+.tl-row { display: grid; grid-template-columns: 210px 1fr; align-items: stretch; border-bottom: 1px solid var(--border); }
+.tl-row:last-child { border-bottom: none; }
+.tl-label { padding: 10px 14px; font-size: 13px; color: var(--text-1); border-right: 1px solid var(--border);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-label small { display: block; font-size: 11px; color: var(--text-3); margin-top: 1px; }
+.tl-track { position: relative; min-height: 44px; }
+.tl-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); pointer-events: none; }
+.tl-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--danger); opacity: .55; pointer-events: none; }
+.tl-bar { position: absolute; top: 11px; height: 22px; min-width: 4px; border-radius: 4px; cursor: pointer;
+          box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); transition: filter .1s, box-shadow .1s; }
+.tl-bar:hover, .tl-bar.hl { filter: brightness(1.12); box-shadow: 0 0 0 2px var(--accent); }
+.tl-bar.active { background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.22) 0 6px, transparent 6px 12px); }
+.tl-online { position: absolute; top: 16px; height: 12px; border-radius: 3px; }
+.tl-online.online  { background: var(--success); opacity: .75; }
+.tl-online.offline { background: var(--neutral-bg); box-shadow: inset 0 0 0 1px var(--border-md); }
+.tl-online.unknown { background: repeating-linear-gradient(135deg, var(--border-md) 0 3px, transparent 3px 7px); }
+.tl-marker { position: absolute; top: 15px; width: 12px; height: 12px; margin-left: -6px; transform: rotate(45deg);
+             background: var(--accent); border-radius: 2px; cursor: default; }
+.tl-file { position: absolute; top: 13px; width: 18px; height: 18px; margin-left: -9px; border-radius: 50%;
+           background: var(--surface); border: 2px solid #F97316; color: #F97316; font-size: 11px; font-weight: 700;
+           line-height: 14px; text-align: center; cursor: pointer; z-index: 2; }
+.tl-file:hover, .tl-file.hl { background: #F97316; color: #fff; }
+.tl-axis { position: relative; height: 28px; }
+.tl-tick { position: absolute; top: 8px; transform: translateX(-50%); font-size: 11px; color: var(--text-3); white-space: nowrap; }
+#tl-tip { position: fixed; z-index: 50; pointer-events: none; display: none; max-width: 320px;
+          background: var(--surface); color: var(--text-1); border: 1px solid var(--border-md); border-radius: 8px;
+          box-shadow: var(--shadow-md); padding: 8px 10px; font-size: 12px; line-height: 1.45; }
+.tl-chip { display: inline-flex; align-items: center; padding: 5px 11px; border-radius: 999px; font-size: 12px;
+           text-decoration: none; border: 1px solid var(--border-md); background: var(--surface); color: var(--text-2); }
+.tl-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tl-legend { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); }
+.tl-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.tl-stat { padding: 12px 16px; }
+.tl-stat .v { font-size: 18px; font-weight: 700; color: var(--text-1); }
+.tl-stat .k { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+tr.ev-hl td { background: var(--accent-soft); }
+@media (max-width: 760px) { .tl-row { grid-template-columns: 120px 1fr; } }
+</style>
+
+<!-- Header -->
+<div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+  <div>
+    <div style="font-size:18px;font-weight:700;color:var(--text-1)">{{ device_name }}</div>
+    <div class="text-muted text-sm" style="margin-top:3px">
+      <code>{{ device.rustdesk_id | format_rid }}</code>
+      {% if device.group_name %} &nbsp;·&nbsp; <a href="/groups/{{ device.group_slug }}" style="color:var(--accent);text-decoration:none">{{ device.group_name }}</a>{% endif %}
+      {% if device.os %} &nbsp;·&nbsp; {{ device.os }}{% endif %}
+      &nbsp;·&nbsp; <a href="/audit?cat=sessions&rid={{ device.rustdesk_id }}" style="color:var(--accent);text-decoration:none">Session log</a>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+    {% for r in ranges %}
+    <a class="tl-chip {% if r == rng %}on{% endif %}" href="?range={{ r }}">{{ r }}</a>
+    {% endfor %}
+    <span style="width:8px"></span>
+    <a class="btn btn-ghost btn-sm" href="?range={{ rng }}&back={{ back + 1 }}" title="Earlier">‹ Earlier</a>
+    {% if back > 0 %}
+    <a class="btn btn-ghost btn-sm" href="?range={{ rng }}&back={{ back - 1 }}" title="Later">Later ›</a>
+    <a class="btn btn-ghost btn-sm" href="?range={{ rng }}">Now</a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Summary -->
+<div class="card" style="margin-bottom:16px">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+    <div class="tl-stat"><div class="k">Sessions</div><div class="v">{{ summary.sessions }}</div></div>
+    <div class="tl-stat"><div class="k">Time connected</div><div class="v">{{ summary.connected }}</div></div>
+    <div class="tl-stat"><div class="k">Computers connected</div><div class="v">{{ summary.peers }}</div></div>
+    <div class="tl-stat"><div class="k">File transfers</div><div class="v">{{ summary.transfers }}</div></div>
+    <div class="tl-stat"><div class="k">Online</div><div class="v">{{ summary.uptime }}</div></div>
+  </div>
+</div>
+
+<!-- Timeline -->
+<div class="card" style="margin-bottom:16px">
+  <div class="card-header" style="flex-wrap:wrap;gap:10px">
+    <h2>Timeline
+      <span class="text-muted" style="font-weight:400" data-ts-range="{{ start }},{{ end }}"></span>
+    </h2>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      {% for k, label in conn_types.items() %}
+      <span class="tl-legend"><i style="background:{{ type_colors[k] }}"></i>{{ label }}</span>
+      {% endfor %}
+      <span class="tl-legend"><i style="border:2px solid #F97316;border-radius:50%;width:8px;height:8px"></i>File transfer</span>
+      <span class="tl-legend"><i style="background:var(--success);opacity:.75"></i>Online</span>
+      <span class="tl-legend"><i style="background:repeating-linear-gradient(135deg,var(--border-md) 0 3px,transparent 3px 7px)"></i>Unknown</span>
+    </div>
+  </div>
+
+  <div class="tl">
+    <!-- Axis -->
+    <div class="tl-row" style="border-bottom:1px solid var(--border)">
+      <div class="tl-label" style="padding:6px 14px"></div>
+      <div class="tl-axis">
+        {% for tk in ticks %}<span class="tl-tick" style="left:{{ pos(tk.t) }}%">{{ tk.label }}</span>{% endfor %}
+      </div>
+    </div>
+
+    {% macro gridlines() -%}
+      {% for tk in ticks %}<span class="tl-grid" style="left:{{ pos(tk.t) }}%"></span>{% endfor %}
+      {% if now <= end %}<span class="tl-now" style="left:calc({{ pos(now) }}% - 1px)"></span>{% endif %}
+    {%- endmacro %}
+
+    <!-- Device online lane -->
+    <div class="tl-row">
+      <div class="tl-label">Device online<small>from status changes</small></div>
+      <div class="tl-track">
+        {{ gridlines() }}
+        {% for sp in online %}
+        <span class="tl-online {{ sp.state }}" style="left:{{ pos(sp.s) }}%;width:{{ width(sp.s, sp.e) }}%"
+              data-tip="{{ {'online':'Online','offline':'Offline','unknown':'Status not recorded'}[sp.state] }}" data-s="{{ sp.s }}" data-e="{{ sp.e }}"></span>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- One lane per connecting computer -->
+    {% for lane in lanes %}
+    <div class="tl-row">
+      <div class="tl-label" title="{{ lane.name }}{% if lane.peer_id %} · {{ lane.peer_id }}{% endif %}">
+        {{ lane.name or (lane.peer_id | format_rid) }}
+        <small>
+          {% if lane.peer_id %}<code>{{ lane.peer_id | format_rid }}</code>{% if lane.peer_device_name and lane.name != lane.peer_device_name %} · {{ lane.peer_device_name }}{% endif %}
+          {% elif not lane.key %}connecting computer not reported
+          {% endif %}
+        </small>
+      </div>
+      <div class="tl-track">
+        {{ gridlines() }}
+        {% for b in lane.bars %}
+        <span class="tl-bar {% if b.active %}active{% endif %}" data-sid="{{ b.id }}"
+              style="left:{{ pos(b.s) }}%;width:{{ width(b.s, b.e) }}%;background-color:{{ type_colors[b.type] }}"
+              data-tip="{{ b.type_label }}{% if b.active %} (active){% endif %} · {{ b.duration }}"
+              {% if b.ip %}data-tip2="From {{ b.ip }}"{% endif %}
+              data-s="{{ b.s }}" data-e="{{ b.e }}"></span>
+        {% endfor %}
+        {% for x in lane.xfers or [] %}
+        <span class="tl-file" style="left:{{ pos(x.t) }}%" {% if x.sid %}data-sid="{{ x.sid }}"{% endif %}
+              data-tip="{{ x.label }}: {{ x.what }}" data-tip2="{{ x.via }}{% if x.names %} — {{ x.names }}{% endif %}"
+              data-s="{{ x.t }}">{{ x.arrow }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+
+    {% if not lanes %}
+    <div class="tl-row">
+      <div class="tl-label text-muted">No connections</div>
+      <div class="tl-track">{{ gridlines() }}</div>
+    </div>
+    {% endif %}
+
+    <!-- Device events -->
+    {% if markers %}
+    <div class="tl-row">
+      <div class="tl-label">Device events</div>
+      <div class="tl-track">
+        {{ gridlines() }}
+        {% for m in markers %}
+        <span class="tl-marker" style="left:{{ pos(m.t) }}%" data-tip="{{ m.label }}" data-s="{{ m.t }}"></span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Event list -->
+<div class="card">
+  <div class="card-header"><h2>Events</h2></div>
+  {% if events %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th style="width:170px">Time</th><th>Event</th><th>Detail</th></tr></thead>
+      <tbody>
+      {% for e in events %}
+        <tr {% if e.sid %}data-sid="{{ e.sid }}"{% endif %}>
+          <td class="text-muted text-sm mono" style="white-space:nowrap" data-ts="{{ e.t }}"></td>
+          <td style="white-space:nowrap">
+            {% set dot = {'connect':'#3B82F6','disconnect':'#94A3B8','online':'#10B981','offline':'#94A3B8','device':'var(--accent)','file':'#F97316'}[e.kind] %}
+            <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:{{ dot }};margin-right:6px;vertical-align:1px"></span>{{ e.title }}
+          </td>
+          <td class="text-sm" style="color:var(--text-2)">{{ e.detail }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body"><p class="text-muted text-sm" style="margin:0">Nothing recorded in this window.</p></div>
+  {% endif %}
+</div>
+
+<p class="text-muted text-sm" style="margin-top:12px">
+  Each row under <em>Device online</em> is one computer that connected, named by what its RustDesk client reports
+  (usually the technician's OS username). Orange markers are file transfers: ↑ files sent from the device,
+  ↓ files sent to it (file transfer window or clipboard paste); sizes cover the largest 10 files. Online history is reconstructed from status changes; hatched stretches are
+  times the status wasn't recorded. Times are Pacific.
+</p>
+
+<div id="tl-tip"></div>
+
+<script>
+(function () {
+  const fmt = (t, withDate) => new Date(t * 1000).toLocaleString('sv-SE', { timeZone: 'America/Los_Angeles' })
+    .slice(withDate ? 0 : 11, 16);
+  const sameDay = (a, b) => fmt(a, true).slice(0, 10) === fmt(b, true).slice(0, 10);
+
+  document.querySelectorAll('[data-ts]').forEach(el => { el.textContent = fmt(+el.dataset.ts, true); });
+  const r = document.querySelector('[data-ts-range]');
+  if (r) { const [s, e] = r.dataset.tsRange.split(',').map(Number); r.textContent = '· ' + fmt(s, true) + ' → ' + fmt(e, true); }
+
+  const esc = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const tip = document.getElementById('tl-tip');
+  document.querySelectorAll('[data-tip]').forEach(el => {
+    el.addEventListener('mousemove', ev => {
+      const s = +el.dataset.s, e = el.dataset.e ? +el.dataset.e : null;
+      const when = e == null ? fmt(s, true)
+        : fmt(s, true) + ' – ' + (sameDay(s, e) ? fmt(e, false) : fmt(e, true));
+      const lane = el.closest('.tl-row').querySelector('.tl-label').childNodes[0].textContent.trim();
+      tip.innerHTML = '<strong>' + esc(lane) + '</strong><br>' + esc(el.dataset.tip)
+        + (el.dataset.tip2 ? '<br>' + esc(el.dataset.tip2) : '')
+        + '<br><span style="color:var(--text-3)">' + when + '</span>';
+      tip.style.display = 'block';
+      const x = Math.min(ev.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+      tip.style.left = x + 'px';
+      tip.style.top = (ev.clientY + 14) + 'px';
+    });
+    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  });
+
+  // Click a session bar to highlight its rows in the event list (and vice versa).
+  function highlight(sid) {
+    document.querySelectorAll('.hl, .ev-hl').forEach(n => n.classList.remove('hl', 'ev-hl'));
+    document.querySelectorAll('.tl-bar[data-sid="' + sid + '"], .tl-file[data-sid="' + sid + '"]').forEach(n => n.classList.add('hl'));
+    const rows = document.querySelectorAll('tr[data-sid="' + sid + '"]');
+    rows.forEach(n => n.classList.add('ev-hl'));
+    return rows;
+  }
+  document.querySelectorAll('.tl-bar, .tl-file[data-sid]').forEach(b => b.addEventListener('click', () => {
+    const rows = highlight(b.dataset.sid);
+    if (rows[0]) rows[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }));
+  document.querySelectorAll('tr[data-sid]').forEach(tr => tr.addEventListener('click', () => {
+    highlight(tr.dataset.sid);
+    const bar = document.querySelector('.tl-bar[data-sid="' + tr.dataset.sid + '"]');
+    if (bar) bar.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }));
+})();
+</script>
+{% endblock %}

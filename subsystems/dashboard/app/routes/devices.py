@@ -212,6 +212,7 @@ async def device_delete(
         )
     conn.execute("DELETE FROM device_info WHERE rustdesk_id = ?", (rustdesk_id,))
     conn.execute("DELETE FROM device_sessions WHERE rustdesk_id = ?", (rustdesk_id,))
+    conn.execute("DELETE FROM device_file_transfers WHERE rustdesk_id = ?", (rustdesk_id,))
     log_event(conn, "device_deleted", rustdesk_id, current_user["email"])
     conn.commit()
     conn.close()

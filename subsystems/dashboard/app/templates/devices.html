@@ -799,7 +799,9 @@ function loadDetailSessions(rid) {
   if (!box) return;
   const head = '<tr><td colspan="4" style="padding:14px 0 4px;font-size:11px;color:var(--text-3);'
     + 'text-transform:uppercase;letter-spacing:.06em;font-weight:600;border:none;'
-    + 'border-bottom:1px solid var(--border-lt)">Recent sessions</td></tr>';
+    + 'border-bottom:1px solid var(--border-lt)">Recent sessions'
+    + '<a href="/devices/' + encodeURIComponent(rid) + '/timeline" style="float:right;text-transform:none;'
+    + 'letter-spacing:0;font-weight:500;color:var(--accent);text-decoration:none">Connection timeline →</a></td></tr>';
   box.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse">' + head
     + '<tr><td style="padding:8px 0;border:none" class="text-muted text-sm">Loading…</td></tr></table>';
   fetch('/api/devices/' + encodeURIComponent(rid) + '/sessions')

@@ -13,6 +13,10 @@ server — `api-server` if configured, otherwise http://<rendezvous-host>:21114:
                   {"action":"new","ip":…} when it opens, {"peer":[id,name],
                   "type":…} once authorized, {"action":"close"} when it ends;
                   each tagged with the device id/uuid and "conn_id"
+  /api/audit/file per file transfer or clipboard file paste: direction
+                  ("type" 0 = sent from the device, 1 = received), "path",
+                  "peer_id", "conn_id", and "info" (a JSON string with the
+                  peer's ip/name, file count and the largest ≤10 files)
 
 These endpoints are unauthenticated by design (the client sends no
 credentials), so every report is checked against the hbbs peer table: the
@@ -278,6 +282,74 @@ async def client_audit_conn(request: Request):
              str(peer[1] if len(peer) > 1 and peer[1] is not None else "")[:200] or None,
              ctype, sid),
         )
+    conn.commit()
+    conn.close()
+    return PlainTextResponse("")
+
+
+@router.post("/api/audit/file")
+async def client_audit_file(request: Request):
+    data = await _read_json(request)
+    rid = _verify(data) if data else None
+    try:
+        direction = int(data.get("type")) if rid else None
+    except (TypeError, ValueError):
+        direction = None
+    if rid is None or direction not in (0, 1):
+        return PlainTextResponse("REJECTED", status_code=400)
+
+    try:
+        info = json.loads(data.get("info") or "{}")
+        if not isinstance(info, dict):
+            info = {}
+    except (TypeError, ValueError):
+        info = {}
+    files = []
+    for f in info.get("files") or []:
+        if isinstance(f, list) and len(f) >= 2:
+            try:
+                files.append([str(f[0])[:260], int(f[1])])
+            except (TypeError, ValueError):
+                continue
+    files = files[:10]
+    try:
+        count = int(info.get("num") or len(files))
+    except (TypeError, ValueError):
+        count = len(files)
+    if count <= 0:
+        return PlainTextResponse("REJECTED", status_code=400)
+
+    ref = str(data.get("conn_id")) if data.get("conn_id") is not None else None
+    peer_id = str(data.get("peer_id") or "")[:64] or None
+    peer_name = str(info.get("name") or "")[:200] or None
+    peer_ip = str(info.get("ip") or "").replace("::ffff:", "")[:64] or None
+    nonce = str(data.get("nonce") or "")[:64] or None
+
+    conn = get_db()
+    if nonce and conn.execute(
+        "SELECT 1 FROM device_file_transfers WHERE nonce = ?", (nonce,)
+    ).fetchone():
+        conn.close()
+        return PlainTextResponse("")   # a retry of a report we already stored
+
+    sid = _audit_session_id(conn, rid, ref, create=False) if ref else None
+    if sid:
+        # Fill in who connected if the conn audit didn't reach us.
+        conn.execute(
+            """UPDATE device_sessions SET peer_id = COALESCE(peer_id, ?),
+                   peer_name = COALESCE(peer_name, ?), peer_ip = COALESCE(peer_ip, ?)
+               WHERE id = ?""",
+            (peer_id, peer_name, peer_ip, sid),
+        )
+    conn.execute(
+        """INSERT INTO device_file_transfers
+               (rustdesk_id, session_id, conn_ref, peer_id, peer_name, peer_ip,
+                direction, path, is_file, file_count, files, nonce)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (rid, sid, ref, peer_id, peer_name, peer_ip, direction,
+         str(data.get("path") or "")[:1000], 1 if data.get("is_file") else 0,
+         count, json.dumps(files), nonce),
+    )
     conn.commit()
     conn.close()
     return PlainTextResponse("")
