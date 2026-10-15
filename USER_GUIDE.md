@@ -73,8 +73,9 @@ bottom. Click any column header to sort differently.
 
 **Recently registered**: devices registered in the last 7 days that don't
 have a client group yet appear in a highlighted panel at the top, newest
-first. **Assign to Group** (needs permission) sets the group without touching
-the label. Once a device has a group it leaves the panel.
+first. **Assign to Group** (needs permission) opens a popup showing the
+device's computer name, where you pick the group and can set or change its
+label in the same step. Once a device has a group it leaves the panel.
 
 - **Filter** with the search box (by ID, label, group, hostname, user, OS).
 - **ⓘ Details** — opens a read-only panel with the full reported details
@@ -459,7 +460,7 @@ in this browser, so set it once on each browser or device you use.
 | See a device's connection history over time | Logs → Remote sessions → click the device, or Devices → ⓘ → Connection timeline |
 | Export the device list | Admin → Export device inventory (CSV) |
 | Find Windows 10 / stale / low-spec machines | Dynamic Groups → New (pick a template) |
-| Give a newly registered device a group | Devices → Recently registered → Assign to Group |
+| Give a newly registered device a group and label | Devices → Recently registered → Assign to Group |
 | Edit a device without leaving its client | Client Groups → group → Edit |
 | Brand a client's installer (name/icon) | Client Groups → group → Branding |
 | Remove the SmartScreen warning | Admin → Installer signing |

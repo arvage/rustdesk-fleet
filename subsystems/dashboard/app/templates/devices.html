@@ -82,7 +82,7 @@
             <a href="rustdesk://{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm" title="Connect via RustDesk" aria-label="Connect" style="color:var(--link)"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.82v6.36a1 1 0 0 1-1.447.894L15 14"/><rect x="1" y="6" width="15" height="12" rx="2"/></svg></a>
             <a href="rustdesk://terminal/{{ d.rustdesk_id }}" class="btn btn-ghost btn-sm" title="Open terminal (RustDesk)" aria-label="Terminal" style="color:var(--text-2)"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></a>
             {% if can_devices %}
-            <button type="button" onclick="openAssignModal('{{ d.rustdesk_id }}')" class="btn btn-primary btn-sm" style="margin-left:4px">Assign to Group</button>
+            <button type="button" data-label="{{ d.label or '' }}" data-hostname="{{ d.hostname or '' }}" onclick="openAssignModal('{{ d.rustdesk_id }}', this.dataset.label, this.dataset.hostname)" class="btn btn-primary btn-sm" style="margin-left:4px">Assign to Group</button>
             {% endif %}
           </td>
         </tr>
@@ -256,9 +256,19 @@
     <div style="margin-bottom:18px;padding:9px 12px;background:var(--surface-2);border:1px solid var(--border-lt);border-radius:8px">
       <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Device ID</span>
       <div><code id="assign-rid" style="font-size:13px;color:var(--text-1);letter-spacing:.04em"></code></div>
+      <div style="margin-top:8px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Computer</span>
+        <div id="assign-hostname" style="font-size:13px;color:var(--text-1);font-weight:500"></div>
+      </div>
     </div>
     {% if groups %}
     <form id="device-assign-form" method="post">
+      <div class="field" style="margin-bottom:14px">
+        <label for="assign-label">Label</label>
+        <input type="text" id="assign-label" name="label"
+               placeholder="e.g. Reception, HR, Server Room…"
+               style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);box-sizing:border-box">
+      </div>
       <div class="field" style="margin-bottom:22px">
         <label for="assign-group">Client Group</label>
         <select id="assign-group" name="group_id" required
@@ -720,15 +730,17 @@ function closeDeviceModal() {
 }
 
 // ── Assign-to-group modal (Recently registered panel) ────────────────────────
-function openAssignModal(rid) {
+function openAssignModal(rid, label, hostname) {
   document.getElementById('assign-rid').textContent = formatRid(rid);
+  document.getElementById('assign-hostname').textContent = hostname || 'Not reported yet';
   const form = document.getElementById('device-assign-form');
   if (form) {
     form.action = '/devices/' + rid + '/assign-group';
     form.reset();
+    document.getElementById('assign-label').value = label || '';
   }
   document.getElementById('assign-modal').style.display = 'flex';
-  setTimeout(() => document.getElementById('assign-group')?.focus(), 50);
+  setTimeout(() => document.getElementById('assign-label')?.focus(), 50);
 }
 
 function closeAssignModal() {

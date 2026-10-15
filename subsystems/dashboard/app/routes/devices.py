@@ -129,11 +129,15 @@ async def device_assign_group(
     request: Request,
     rustdesk_id: str,
     group_id: str = Form(""),
+    label: str | None = Form(None),
     current_user: dict = Depends(require_auth),
 ):
-    """Assign a device to a client group without touching its label
-    (used by the Recently registered panel)."""
+    """Assign a device to a client group, optionally setting its label
+    (used by the Recently registered panel). The label is left untouched
+    when the form doesn't send one."""
     require_perm(current_user, "manage_devices")
+    if label is not None:
+        label = label.strip() or None
     conn = get_db()
     group = conn.execute(
         "SELECT id, display_name FROM client_groups WHERE id = ?",
@@ -148,17 +152,23 @@ async def device_assign_group(
         "SELECT id FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
     ).fetchone()
     if existing:
-        conn.execute(
-            "UPDATE devices SET group_id = ? WHERE rustdesk_id = ?",
-            (group["id"], rustdesk_id),
-        )
+        if label is not None:
+            conn.execute(
+                "UPDATE devices SET group_id = ?, label = ? WHERE rustdesk_id = ?",
+                (group["id"], label, rustdesk_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE devices SET group_id = ? WHERE rustdesk_id = ?",
+                (group["id"], rustdesk_id),
+            )
         log_event(conn, "device_updated", rustdesk_id, current_user["email"])
         conn.commit()
         conn.close()
     else:
         conn.execute(
-            "INSERT INTO devices (rustdesk_id, group_id, status, last_seen) VALUES (?, ?, 'registered', ?)",
-            (rustdesk_id, group["id"], _now_utc()),
+            "INSERT INTO devices (rustdesk_id, label, group_id, status, last_seen) VALUES (?, ?, ?, 'registered', ?)",
+            (rustdesk_id, label, group["id"], _now_utc()),
         )
         log_event(conn, "device_registered", rustdesk_id, current_user["email"])
         conn.commit()
@@ -166,7 +176,7 @@ async def device_assign_group(
         peer = get_hbbs_peers().get(rustdesk_id, {})
         fire_notification("device_registered", {
             "rustdesk_id": rustdesk_id,
-            "label": "",
+            "label": label or "",
             "group_name": group["display_name"],
             "ip": peer.get("ip") or "—",
             "registered_at": peer.get("registered_at") or _now_utc(),

@@ -36,7 +36,7 @@ Staff pages (all require login):
 | `POST /server/backup`, `GET /server/backup/download/latest` | Run a backup now / download the newest archive (`manage_backups`) |
 | `GET /devices` | Device inventory sorted by label (unlabeled last): Computer / OS / client version (client-reported), live online · in session · offline status, group filter; **Recently registered** panel (last 7 days, no client group yet); **ⓘ details** modal per device (full reported details + recent sessions) |
 | `POST /devices/{id}/edit` · `/delete`, `POST /devices/sync` | Label/group a device (`manage_devices`); delete hides it and clears its details/sessions/file transfers — a verified heartbeat later auto-un-hides it; import peers from hbbs. Edit and delete accept a `next` local path to return to (the group page uses it) |
-| `POST /devices/{id}/assign-group` | Set a device's client group without touching its label (Recently registered panel; `manage_devices`) |
+| `POST /devices/{id}/assign-group` | Set a device's client group and, if a `label` field is sent, its label (Recently registered panel; `manage_devices`) |
 | `GET /groups`, `POST /groups` | Group list (with live "X / Y online"), create group |
 | `GET /groups/{slug}` | Group detail: devices (sorted by label, with the same **Edit** modal as Devices), Client Settings, branding, installers, download links |
 | `POST /groups/{slug}/edit` | Rename / change slug / unattended password |
