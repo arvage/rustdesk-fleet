@@ -730,6 +730,18 @@ function closeDeviceModal() {
 }
 
 // ── Assign-to-group modal (Recently registered panel) ────────────────────────
+// Suggested label from the computer name: real words get a capital first
+// letter, anything else (dc1, ws, 0001, srv) goes fully upper-case, and
+// separators are kept — "file-server-01" → "File-Server-01", "ws-0001" → "WS-0001".
+function labelFromHostname(hostname) {
+  return (hostname || '').split(/([\s._-]+)/).map(t => {
+    if (/^[\s._-]*$/.test(t)) return t;
+    const w = t.toLowerCase();
+    const isWord = /^[a-z]{3,}$/.test(w) && /[aeiouy]/.test(w);
+    return isWord ? w[0].toUpperCase() + w.slice(1) : t.toUpperCase();
+  }).join('');
+}
+
 function openAssignModal(rid, label, hostname) {
   document.getElementById('assign-rid').textContent = formatRid(rid);
   document.getElementById('assign-hostname').textContent = hostname || 'Not reported yet';
@@ -737,7 +749,7 @@ function openAssignModal(rid, label, hostname) {
   if (form) {
     form.action = '/devices/' + rid + '/assign-group';
     form.reset();
-    document.getElementById('assign-label').value = label || '';
+    document.getElementById('assign-label').value = label || labelFromHostname(hostname);
   }
   document.getElementById('assign-modal').style.display = 'flex';
   setTimeout(() => document.getElementById('assign-label')?.focus(), 50);
