@@ -297,7 +297,9 @@ has the same data.
 **Admin → Users** (requires the manage-users capability):
 
 - **Add a user** — email, display name, **role**, and group access. Choose an
-  auto-generated or manual password; optionally email the credentials.
+  auto-generated or manual password; optionally email the credentials (they
+  go to the Email address at the top of the form — on a small screen, scroll
+  the form up to reach it).
 - **Change a user's role** or **group access** from the list.
 - **Reset password** — generates a new temporary password.
 - **Passkeys / MFA** — revoke a user's passkeys, reset them to password
