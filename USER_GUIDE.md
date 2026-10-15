@@ -77,8 +77,9 @@ first. **Assign to Group** (needs permission) opens a popup showing the
 device's computer name, where you pick the group and can set or change its
 label in the same step. If the device has no label yet, the label is
 prefilled from the computer name: whole words get a capital first letter and
-codes or numbers go upper-case (`file-server-01` → `File-Server-01`,
-`ws-0001` → `WS-0001`, `dc1` → `DC1`). Once a device has a group it leaves
+codes or numbers go upper-case. If the name contains a word, hyphens become
+spaces (`file-server-01` → `File Server 01`); a name made only of codes keeps
+them (`ws-0001` → `WS-0001`, `dc1` → `DC1`). Once a device has a group it leaves
 the panel.
 
 - **Filter** with the search box (by ID, label, group, hostname, user, OS).

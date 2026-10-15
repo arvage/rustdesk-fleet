@@ -731,15 +731,20 @@ function closeDeviceModal() {
 
 // ── Assign-to-group modal (Recently registered panel) ────────────────────────
 // Suggested label from the computer name: real words get a capital first
-// letter, anything else (dc1, ws, 0001, srv) goes fully upper-case, and
-// separators are kept — "file-server-01" → "File-Server-01", "ws-0001" → "WS-0001".
+// letter, anything else (dc1, ws, 0001, srv) goes fully upper-case. When the
+// name has a real word, hyphens become spaces — "file-server-01" →
+// "File Server 01"; a name of only codes keeps them — "ws-0001" → "WS-0001".
 function labelFromHostname(hostname) {
-  return (hostname || '').split(/([\s._-]+)/).map(t => {
+  let hasWord = false;
+  const parts = (hostname || '').split(/([\s._-]+)/).map(t => {
     if (/^[\s._-]*$/.test(t)) return t;
     const w = t.toLowerCase();
     const isWord = /^[a-z]{3,}$/.test(w) && /[aeiouy]/.test(w);
+    hasWord = hasWord || isWord;
     return isWord ? w[0].toUpperCase() + w.slice(1) : t.toUpperCase();
-  }).join('');
+  });
+  const label = parts.join('');
+  return hasWord ? label.replace(/-+/g, ' ') : label;
 }
 
 function openAssignModal(rid, label, hostname) {
