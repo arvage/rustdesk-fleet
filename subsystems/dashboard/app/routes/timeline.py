@@ -28,7 +28,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.auth import require_auth
 from app.deps import get_db
 from app.routes.client_api import CONN_TYPES
-from app.routes.sessions import fmt_duration
+from app.routes.sessions import DASHBOARD_USER_SQL, fmt_duration
 from app.templates_config import _DISPLAY_TZ, templates
 
 router = APIRouter()
@@ -78,9 +78,10 @@ def _ticks(start: datetime, end: datetime, rng: str) -> list[dict]:
         fmt = lambda d: d.strftime("%a %H:%M") if d.hour == 0 else d.strftime("%H:%M")
         step = timedelta(hours=step_h)
     else:
-        step_d = 1 if rng == "7d" else 5
+        days = (end - start).days
+        step_d = 1 if days <= 10 else max(5, round(days / 7))
         t = local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        fmt = lambda d: d.strftime("%a %b %-d") if rng == "7d" else d.strftime("%b %-d")
+        fmt = lambda d: d.strftime("%a %b %-d") if step_d == 1 else d.strftime("%b %-d")
         step = timedelta(days=step_d)
     out = []
     while t < end:
@@ -162,7 +163,8 @@ async def device_timeline(
 
     sess_rows = conn.execute(
         """SELECT s.id, s.started_at, s.ended_at, s.peer_id, s.peer_name, s.peer_ip, s.conn_type,
-                  COALESCE(pd.label, pdi.hostname) AS peer_device_name
+                  COALESCE(pd.label, pdi.hostname) AS peer_device_name,
+                  """ + DASHBOARD_USER_SQL + """ AS dashboard_user
            FROM device_sessions s
            LEFT JOIN devices pd      ON pd.rustdesk_id  = s.peer_id
            LEFT JOIN device_info pdi ON pdi.rustdesk_id = s.peer_id
@@ -207,8 +209,11 @@ async def device_timeline(
             "name": r["peer_name"] or r["peer_device_name"] or ("Unknown" if not key else ""),
             "peer_id": r["peer_id"] or "",
             "peer_device_name": r["peer_device_name"] or "",
-            "total_s": 0, "count": 0, "bars": [],
+            "total_s": 0, "count": 0, "bars": [], "users": [],
         })
+        user = r["dashboard_user"] or ""
+        if user and user not in lane["users"]:
+            lane["users"].append(user)
         # Time inside the window only, so the summary matches the chart.
         in_window = int((min(e_at or now, end) - max(s_at, start)).total_seconds())
         lane["total_s"] += max(0, in_window)
@@ -224,6 +229,7 @@ async def device_timeline(
             "type_label": CONN_TYPES.get(ctype, "Connection"),
             "ip": r["peer_ip"] or "",
             "duration": fmt_duration(dur),
+            "user": user,
         }
         lane["bars"].append(bar)
         sessions.append({**bar, "lane": lane["name"], "peer_id": r["peer_id"] or ""})
@@ -237,7 +243,7 @@ async def device_timeline(
         lane = lanes.setdefault(key, {
             "key": key, "name": name or ("Unknown" if not key else ""),
             "peer_id": peer_id, "peer_device_name": "",
-            "total_s": 0, "count": 0, "bars": [],
+            "total_s": 0, "count": 0, "bars": [], "users": [],
         })
         try:
             files = json.loads(r["files"] or "[]")
@@ -265,6 +271,8 @@ async def device_timeline(
     events = []
     for s in sessions:
         who = s["lane"] + (f" ({s['peer_id']})" if s["peer_id"] and s["lane"] != s["peer_id"] else "")
+        if s["user"]:
+            who = f"{s['user']} — {who}"
         if s["s"] >= int(start.timestamp()):
             events.append({"t": s["s"], "kind": "connect", "sid": s["id"],
                            "title": f"{s['type_label']} started",
@@ -322,6 +330,174 @@ async def device_timeline(
                 "peers": len([l for l in lane_list if l["key"]]),
                 "transfers": len(transfers),
                 "uptime": f"{round(100 * online_s / known_s)}%" if known_s >= window_s * 0.5 else "—",
+            },
+        },
+    )
+
+
+# ── Fleet-wide timeline ──────────────────────────────────────────────────────
+# Every device's sessions in one window, as one lane per device ("By device")
+# or per person ("By user"). A person is the dashboard user who clicked
+# Connect (see DASHBOARD_USER_SQL), else what the RustDesk client reported.
+
+_VIEWS = ("device", "user")
+_MAX_DAYS = 366
+
+
+def _local_day(s: str):
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _person(r) -> str:
+    return r["dashboard_user"] or r["peer_name"] or r["peer_device_name"] or r["peer_id"] or ""
+
+
+@router.get("/timeline", response_class=HTMLResponse)
+async def fleet_timeline(
+    request: Request,
+    view: str = "device",
+    range: str = "7d",
+    group: str = "",
+    user: str = "",
+    current_user: dict = Depends(require_auth),
+):
+    view = view if view in _VIEWS else "device"
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    # A calendar window (from/to, whole days in the display timezone) wins
+    # over the 24h / 7d / 30d presets.
+    qp = request.query_params
+    d_from, d_to = _local_day(qp.get("from", "")), _local_day(qp.get("to", ""))
+    if d_from or d_to:
+        today = now.astimezone(_DISPLAY_TZ).date()
+        d_to = min(d_to or today, today)
+        d_from = d_from or d_to
+        if d_from > d_to:
+            d_from, d_to = d_to, d_from
+        d_from = max(d_from, d_to - timedelta(days=_MAX_DAYS - 1))
+        rng = "custom"
+        start = datetime.combine(d_from, datetime.min.time(), _DISPLAY_TZ).astimezone(timezone.utc)
+        end = min(datetime.combine(d_to + timedelta(days=1), datetime.min.time(), _DISPLAY_TZ)
+                  .astimezone(timezone.utc), now)
+    else:
+        rng = range if range in RANGES else "7d"
+        end = now
+        start = end - RANGES[rng]
+    tick_rng = rng if rng in RANGES else ("24h" if end - start <= timedelta(days=2) else "7d")
+
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT s.id, s.rustdesk_id, s.started_at, s.ended_at, s.peer_id, s.peer_name,
+                  s.peer_ip, s.conn_type,
+                  COALESCE(d.label, di.hostname, s.rustdesk_id) AS device_name,
+                  cg.display_name AS group_name, cg.slug AS group_slug,
+                  COALESCE(pd.label, pdi.hostname) AS peer_device_name,
+                  """ + DASHBOARD_USER_SQL + """ AS dashboard_user
+           FROM device_sessions s
+           LEFT JOIN devices d        ON d.rustdesk_id   = s.rustdesk_id
+           LEFT JOIN device_info di   ON di.rustdesk_id  = s.rustdesk_id
+           LEFT JOIN client_groups cg ON cg.id           = d.group_id
+           LEFT JOIN devices pd       ON pd.rustdesk_id  = s.peer_id
+           LEFT JOIN device_info pdi  ON pdi.rustdesk_id = s.peer_id
+           WHERE COALESCE(d.hidden, 0) = 0
+             AND s.started_at < ? AND COALESCE(s.ended_at, ?) > ?
+           ORDER BY s.started_at""",
+        (_sql(end), _sql(now), _sql(start)),
+    ).fetchall()
+    groups = conn.execute(
+        "SELECT slug, display_name FROM client_groups ORDER BY display_name"
+    ).fetchall()
+    conn.close()
+
+    # Filter choices come from the whole window, so picking one keeps the others.
+    people = sorted({_person(r) for r in rows if _person(r)}, key=str.lower)
+    if group:
+        rows = [r for r in rows if r["group_slug"] == group]
+    if user:
+        rows = [r for r in rows if _person(r) == user]
+
+    lanes: dict[str, dict] = {}
+    sessions = []
+    total_s = 0
+    for r in rows:
+        s_at = _parse(r["started_at"])
+        e_at = _parse(r["ended_at"])
+        active = e_at is None
+        person = _person(r)
+        # RustDesk's own name for the connecting side, when we show a dashboard user.
+        rd_who = (r["peer_name"] or r["peer_device_name"] or "") if r["dashboard_user"] else ""
+        if view == "device":
+            key = r["rustdesk_id"]
+            lane = lanes.setdefault(key, {
+                "key": key, "name": r["device_name"], "rid": r["rustdesk_id"],
+                "sub": r["group_name"] or "", "total_s": 0, "count": 0, "bars": [],
+            })
+            other = "By " + (person or "unknown")
+        else:
+            key = person
+            lane = lanes.setdefault(key, {
+                "key": key, "name": person or "Unknown", "rid": "",
+                "sub": rd_who or ("not reported" if not person else ""),
+                "total_s": 0, "count": 0, "bars": [],
+            })
+            other = "On " + r["device_name"]
+        in_window = max(0, int((min(e_at or now, end) - max(s_at, start)).total_seconds()))
+        lane["total_s"] += in_window
+        lane["count"] += 1
+        total_s += in_window
+        ctype = r["conn_type"]
+        bar = {
+            "id": r["id"],
+            "s": int(s_at.timestamp()),
+            "e": int((e_at or now).timestamp()),
+            "active": active,
+            "type": ctype if ctype in CONN_TYPES else -1,
+            "type_label": CONN_TYPES.get(ctype, "Connection"),
+            "duration": fmt_duration(int(((e_at or now) - s_at).total_seconds())),
+            "tip2": other + (f" · From {r['peer_ip']}" if r["peer_ip"] else ""),
+        }
+        lane["bars"].append(bar)
+        sessions.append({
+            **bar,
+            "rid": r["rustdesk_id"], "device": r["device_name"],
+            "group_name": r["group_name"] or "", "group_slug": r["group_slug"] or "",
+            "person": person, "rd_who": rd_who, "peer_id": r["peer_id"] or "",
+            "ip": r["peer_ip"] or "",
+        })
+    for lane in lanes.values():
+        lane["total"] = fmt_duration(lane["total_s"])
+    lane_list = sorted(lanes.values(), key=lambda l: (l["key"] == "", -l["total_s"]))
+    sessions.sort(key=lambda s: s["s"], reverse=True)
+
+    return templates.TemplateResponse(
+        request,
+        "timeline.html",
+        {
+            "current_user": current_user,
+            "view": view,
+            "rng": rng,
+            "ranges": list(RANGES),
+            "d_from": start.astimezone(_DISPLAY_TZ).date().isoformat(),
+            "d_to": (end - timedelta(seconds=1)).astimezone(_DISPLAY_TZ).date().isoformat(),
+            "today": now.astimezone(_DISPLAY_TZ).date().isoformat(),
+            "group": group,
+            "user": user,
+            "groups": groups,
+            "people": people,
+            "start": int(start.timestamp()),
+            "end": int(end.timestamp()),
+            "now": int(now.timestamp()),
+            "ticks": _ticks(start, end, tick_rng),
+            "lanes": lane_list,
+            "sessions": sessions,
+            "conn_types": CONN_TYPES,
+            "summary": {
+                "sessions": len(sessions),
+                "connected": fmt_duration(total_s) if sessions else "—",
+                "devices": len({s["rid"] for s in sessions}),
+                "people": len({s["person"] for s in sessions if s["person"]}),
             },
         },
     )

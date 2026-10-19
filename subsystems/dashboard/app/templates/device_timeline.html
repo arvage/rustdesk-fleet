@@ -12,46 +12,7 @@
 {% set type_colors = {0: '#3B82F6', 1: '#0EA5E9', 2: '#F59E0B', 3: '#8B5CF6', 4: '#10B981', -1: '#64748B'} %}
 
 {% block content %}
-<style>
-.tl { position: relative; }
-.tl-row { display: grid; grid-template-columns: 210px 1fr; align-items: stretch; border-bottom: 1px solid var(--border); }
-.tl-row:last-child { border-bottom: none; }
-.tl-label { padding: 10px 14px; font-size: 13px; color: var(--text-1); border-right: 1px solid var(--border);
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tl-label small { display: block; font-size: 11px; color: var(--text-3); margin-top: 1px; }
-.tl-track { position: relative; min-height: 44px; }
-.tl-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); pointer-events: none; }
-.tl-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--danger); opacity: .55; pointer-events: none; }
-.tl-bar { position: absolute; top: 11px; height: 22px; min-width: 4px; border-radius: 4px; cursor: pointer;
-          box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); transition: filter .1s, box-shadow .1s; }
-.tl-bar:hover, .tl-bar.hl { filter: brightness(1.12); box-shadow: 0 0 0 2px var(--accent); }
-.tl-bar.active { background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.22) 0 6px, transparent 6px 12px); }
-.tl-online { position: absolute; top: 16px; height: 12px; border-radius: 3px; }
-.tl-online.online  { background: var(--success); opacity: .75; }
-.tl-online.offline { background: var(--neutral-bg); box-shadow: inset 0 0 0 1px var(--border-md); }
-.tl-online.unknown { background: repeating-linear-gradient(135deg, var(--border-md) 0 3px, transparent 3px 7px); }
-.tl-marker { position: absolute; top: 15px; width: 12px; height: 12px; margin-left: -6px; transform: rotate(45deg);
-             background: var(--accent); border-radius: 2px; cursor: default; }
-.tl-file { position: absolute; top: 13px; width: 18px; height: 18px; margin-left: -9px; border-radius: 50%;
-           background: var(--surface); border: 2px solid #F97316; color: #F97316; font-size: 11px; font-weight: 700;
-           line-height: 14px; text-align: center; cursor: pointer; z-index: 2; }
-.tl-file:hover, .tl-file.hl { background: #F97316; color: #fff; }
-.tl-axis { position: relative; height: 28px; }
-.tl-tick { position: absolute; top: 8px; transform: translateX(-50%); font-size: 11px; color: var(--text-3); white-space: nowrap; }
-#tl-tip { position: fixed; z-index: 50; pointer-events: none; display: none; max-width: 320px;
-          background: var(--surface); color: var(--text-1); border: 1px solid var(--border-md); border-radius: 8px;
-          box-shadow: var(--shadow-md); padding: 8px 10px; font-size: 12px; line-height: 1.45; }
-.tl-chip { display: inline-flex; align-items: center; padding: 5px 11px; border-radius: 999px; font-size: 12px;
-           text-decoration: none; border: 1px solid var(--border-md); background: var(--surface); color: var(--text-2); }
-.tl-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.tl-legend { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); }
-.tl-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
-.tl-stat { padding: 12px 16px; }
-.tl-stat .v { font-size: 18px; font-weight: 700; color: var(--text-1); }
-.tl-stat .k { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
-tr.ev-hl td { background: var(--accent-soft); }
-@media (max-width: 760px) { .tl-row { grid-template-columns: 120px 1fr; } }
-</style>
+{% include "_timeline_styles.html" %}
 
 <!-- Header -->
 <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
@@ -133,9 +94,10 @@ tr.ev-hl td { background: var(--accent-soft); }
     <!-- One lane per connecting computer -->
     {% for lane in lanes %}
     <div class="tl-row">
-      <div class="tl-label" title="{{ lane.name }}{% if lane.peer_id %} · {{ lane.peer_id }}{% endif %}">
-        {{ lane.name or (lane.peer_id | format_rid) }}
+      <div class="tl-label" title="{% if lane.users %}{{ lane.users | join(', ') }} · {% endif %}{{ lane.name }}{% if lane.peer_id %} · {{ lane.peer_id }}{% endif %}">
+        {{ lane.users | join(', ') if lane.users else (lane.name or (lane.peer_id | format_rid)) }}
         <small>
+          {% if lane.users and lane.name %}{{ lane.name }}{% if lane.peer_id %} · {% endif %}{% endif %}
           {% if lane.peer_id %}<code>{{ lane.peer_id | format_rid }}</code>{% if lane.peer_device_name and lane.name != lane.peer_device_name %} · {{ lane.peer_device_name }}{% endif %}
           {% elif not lane.key %}connecting computer not reported
           {% endif %}
@@ -147,7 +109,7 @@ tr.ev-hl td { background: var(--accent-soft); }
         <span class="tl-bar {% if b.active %}active{% endif %}" data-sid="{{ b.id }}"
               style="left:{{ pos(b.s) }}%;width:{{ width(b.s, b.e) }}%;background-color:{{ type_colors[b.type] }}"
               data-tip="{{ b.type_label }}{% if b.active %} (active){% endif %} · {{ b.duration }}"
-              {% if b.ip %}data-tip2="From {{ b.ip }}"{% endif %}
+              {% if b.user or b.ip %}data-tip2="{% if b.user %}By {{ b.user }}{% if b.ip %} · {% endif %}{% endif %}{% if b.ip %}From {{ b.ip }}{% endif %}"{% endif %}
               data-s="{{ b.s }}" data-e="{{ b.e }}"></span>
         {% endfor %}
         {% for x in lane.xfers or [] %}
@@ -208,8 +170,8 @@ tr.ev-hl td { background: var(--accent-soft); }
 </div>
 
 <p class="text-muted text-sm" style="margin-top:12px">
-  Each row under <em>Device online</em> is one computer that connected, named by what its RustDesk client reports
-  (usually the technician's OS username). Orange markers are file transfers: ↑ files sent from the device,
+  Each row under <em>Device online</em> is one computer that connected, named after the dashboard user who
+  clicked Connect for those sessions, or else by what its RustDesk client reports (usually the technician's OS username). Orange markers are file transfers: ↑ files sent from the device,
   ↓ files sent to it (file transfer window or clipboard paste); sizes cover the largest 10 files. Online history is reconstructed from status changes; hatched stretches are
   times the status wasn't recorded. Times are Pacific.
 </p>

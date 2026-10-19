@@ -307,6 +307,20 @@ async def api_devices_list(
     return JSONResponse({"devices": devices, "peer_count": peer_count})
 
 
+@router.post("/devices/{rid}/connect")
+async def api_device_connect(rid: str, current_user: dict = Depends(require_auth)):
+    """Record that this dashboard user clicked Connect/Terminal on a device,
+    so the session that follows can be credited to them."""
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO connect_clicks (rustdesk_id, user_email) VALUES (?, ?)",
+        (rid, current_user["email"]),
+    )
+    conn.commit()
+    conn.close()
+    return JSONResponse({"ok": True})
+
+
 @router.get("/devices/{rid}/sessions")
 async def api_device_sessions(rid: str, _: dict = Depends(require_auth)):
     """Recent remote-access sessions for one device (for the detail modal)."""
@@ -316,7 +330,8 @@ async def api_device_sessions(rid: str, _: dict = Depends(require_auth)):
     conn.close()
     return JSONResponse({"sessions": [
         {k: s[k] for k in ("started_at", "ended_at", "active", "duration_str",
-                           "peer_id", "peer_name", "peer_ip", "conn_type_label")}
+                           "peer_id", "peer_name", "peer_device_name", "peer_ip", "conn_type_label",
+                           "dashboard_user")}
         for s in map(_row, rows)
     ]})
 

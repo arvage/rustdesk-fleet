@@ -74,16 +74,17 @@
     <thead><tr><th>Device</th><th>Connected by</th><th>From IP</th><th>Type</th><th>Client Group</th><th>Started</th><th>Ended</th><th>Duration</th><th>Status</th></tr></thead>
     <tbody id="log-tbody">
     {% for s in sessions %}
-      <tr data-search="{{ s.rustdesk_id }} {{ s.device_name }} {{ s.group_name or '' }} {{ s.peer_name or '' }} {{ s.peer_id or '' }} {{ s.peer_device_name or '' }} {{ s.peer_ip or '' }} {{ s.conn_type_label }}">
+      <tr data-search="{{ s.rustdesk_id }} {{ s.device_name }} {{ s.group_name or '' }} {{ s.dashboard_user or '' }} {{ s.peer_name or '' }} {{ s.peer_id or '' }} {{ s.peer_device_name or '' }} {{ s.peer_ip or '' }} {{ s.conn_type_label }}">
         <td style="white-space:nowrap">
           {% if s.device_name %}<a href="/devices/{{ s.rustdesk_id }}/timeline" title="Connection timeline" style="font-weight:500;color:var(--text-1);text-decoration:none">{{ s.device_name }}</a>
           <a href="/audit?cat=sessions&rid={{ s.rustdesk_id }}" style="font-size:11px;display:block;text-decoration:none;color:var(--text-3)"><code>{{ s.rustdesk_id | format_rid }}</code></a>
           {% else %}<a href="/audit?cat=sessions&rid={{ s.rustdesk_id }}" style="text-decoration:none"><code>{{ s.rustdesk_id | format_rid }}</code></a>{% endif %}
         </td>
         <td style="white-space:nowrap">
-          {% if s.peer_id or s.peer_name %}
-          <span style="font-weight:500">{{ s.peer_name or s.peer_device_name or '—' }}</span>
-          {% if s.peer_id %}<span style="font-size:11px;display:block;color:var(--text-3)"><code>{{ s.peer_id | format_rid }}</code>{% if s.peer_device_name and s.peer_name %} · {{ s.peer_device_name }}{% endif %}</span>{% endif %}
+          {% if s.dashboard_user or s.peer_id or s.peer_name %}
+          {% set rd_name = s.peer_name or s.peer_device_name or '' %}
+          <span style="font-weight:500">{{ s.dashboard_user or rd_name or '—' }}</span>
+          {% if (s.dashboard_user and rd_name) or s.peer_id %}<span style="font-size:11px;display:block;color:var(--text-3)">{% if s.dashboard_user and rd_name %}{{ rd_name }}{% if s.peer_id %} · {% endif %}{% endif %}{% if s.peer_id %}<code>{{ s.peer_id | format_rid }}</code>{% if s.peer_device_name and s.peer_name %} · {{ s.peer_device_name }}{% endif %}{% endif %}</span>{% endif %}
           {% else %}<span class="text-muted text-sm">—</span>{% endif %}
         </td>
         <td class="text-sm mono" style="white-space:nowrap;color:var(--text-2)">{{ s.peer_ip or '—' }}</td>

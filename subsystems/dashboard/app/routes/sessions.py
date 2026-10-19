@@ -9,11 +9,26 @@ router = APIRouter()
 
 # Rows shown on the Sessions page. Open sessions sort to the top (ended_at NULL
 # first), then most-recently-started.
+# Dashboard user behind session `s`: whoever clicked Connect on the device
+# shortly before it started, else the user the connecting RustDesk id is
+# linked to (rustdesk_peer_users).
+DASHBOARD_USER_SQL = """COALESCE(
+           (SELECT COALESCE(u.display_name, c.user_email)
+              FROM connect_clicks c LEFT JOIN users u ON u.email = c.user_email
+             WHERE c.rustdesk_id = s.rustdesk_id
+               AND c.clicked_at BETWEEN datetime(s.started_at, '-3 minutes')
+                                    AND datetime(s.started_at, '+1 minute')
+             ORDER BY c.clicked_at DESC LIMIT 1),
+           (SELECT COALESCE(u.display_name, pu.user_email)
+              FROM rustdesk_peer_users pu LEFT JOIN users u ON u.email = pu.user_email
+             WHERE pu.peer_id = s.peer_id))"""
+
 _LIST_SQL = """
     SELECT s.rustdesk_id, s.started_at, s.ended_at,
            s.peer_id, s.peer_name, s.peer_ip, s.conn_type,
            d.label, cg.display_name AS group_name, cg.slug AS group_slug,
            di.hostname, COALESCE(pd.label, pdi.hostname) AS peer_device_name,
+           """ + DASHBOARD_USER_SQL + """ AS dashboard_user,
            CAST((julianday(COALESCE(s.ended_at, 'now')) - julianday(s.started_at)) * 86400
                 AS INTEGER) AS duration_s
     FROM device_sessions s

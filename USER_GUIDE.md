@@ -85,7 +85,7 @@ the panel.
 - **Filter** with the search box (by ID, label, group, hostname, user, OS).
 - **ⓘ Details** — opens a read-only panel with the full reported details
   (CPU, cores, memory, OS build, logged-in user, client version) and that
-  device's recent remote sessions.
+  device's recent remote sessions with who connected.
 - **Connect** (the video icon) — launches your local RustDesk app to connect
   to that device.
 - **Terminal** (the `>_` icon) — opens a RustDesk terminal session to the
@@ -328,10 +328,21 @@ has the same data.
   was accessed, who connected, from which IP, the connection type (remote
   control, file transfer, port forward, view camera or terminal), when, and
   for how long.
-  - **Connected by** is the connecting *computer*, not a dashboard user: the
-    name its RustDesk client reports (usually the technician's OS username)
-    and its RustDesk ID. If that computer is itself a fleet device, its device
-    name is shown too. To tie IDs to people, note each technician's RustDesk ID.
+  - **Connected by** shows the **dashboard user** who connected, in bold, when
+    the dashboard knows it, with the RustDesk name and ID of the connecting
+    computer underneath. RustDesk itself only reports the connecting
+    computer (its RustDesk ID and the name its client reports, usually the
+    technician's OS username), so the dashboard works out the person two ways:
+    - **Connect clicks** — clicking **Connect** or **Terminal** on a device
+      anywhere in the dashboard is recorded; a session that starts on that
+      device within about 3 minutes is credited to whoever clicked (the latest
+      click wins if two people click).
+    - **Linked RustDesk IDs** — a technician's own computers can be linked to
+      their dashboard user, so every session from those IDs is theirs, even
+      ones started from the RustDesk app directly. Links are stored in the
+      `rustdesk_peer_users` table (no page for them yet).
+    Otherwise the RustDesk name is shown. If the connecting computer is itself
+    a fleet device, its device name is shown too.
   - Sessions recorded before this was added, or from clients that can't send
     connection reports, show **—** in these columns. Clients on older
     installers send them over port 21114, which must be open (see
@@ -344,11 +355,28 @@ has the same data.
   that computer's row (↑ files sent from the device, ↓ files sent to it —
   via the file transfer window or clipboard paste; hover for the count,
   size, folder and file names), and **Device events** (registered,
-  label/group changed, deleted, restored). Choose **24h / 7d / 30d** and step
+  label/group changed, deleted, restored). Rows are named after the dashboard
+  user when known (see Connected by above). Choose **24h / 7d / 30d** and step
   **Earlier / Later**. Totals at the top (sessions, time connected, computers,
   file transfers, % online) and a chronological event list below; clicking a bar highlights
   its start/end in the list. Online history before Oct 12, 2026 has gaps
   (shown hatched) because "came online" wasn't recorded until then.
+
+### Timeline (fleet-wide)
+
+**Timeline** in the sidebar shows remote sessions across every device at once.
+
+- **By device** — one row per device that had sessions in the window, busiest
+  first. Hover a bar for the type, duration, who connected and from which IP;
+  click a device name for its own connection timeline.
+- **By user** — one row per person (dashboard user, else the RustDesk name;
+  sessions with nothing reported are under **Unknown**). Bars show which
+  device they were on; click a person to see By device filtered to them.
+- **Window** — the **24h / 7d / 30d** chips, or pick **From** and **To** dates
+  in the calendar and click **Show** (whole days, Pacific time, up to a year).
+- **Filters** — client group and person; they keep the chosen window.
+- Totals at the top (sessions, time connected, devices, people) and the
+  session list below; clicking a bar highlights its row and vice versa.
 - **Email deliveries** lists every notification email the server sent (up to
   the 200 most recent): time, event, subject, recipients, and sent/failed —
   with the error shown for failures. Only visible to roles with the
@@ -465,6 +493,7 @@ in this browser, so set it once on each browser or device you use.
 | Get alerted on low disk/memory | Admin → Notifications → health thresholds |
 | See who connected to what | Logs → Remote sessions |
 | See a device's connection history over time | Logs → Remote sessions → click the device, or Devices → ⓘ → Connection timeline |
+| See who connected to which devices over a period | Timeline → By user, pick dates |
 | Export the device list | Admin → Export device inventory (CSV) |
 | Find Windows 10 / stale / low-spec machines | Dynamic Groups → New (pick a template) |
 | Give a newly registered device a group and label | Devices → Recently registered → Assign to Group |

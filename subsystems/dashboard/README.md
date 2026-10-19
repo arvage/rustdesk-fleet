@@ -63,6 +63,8 @@ Staff pages (all require login):
 | `POST /notifications/events/{event_type}` | Auto-save a single event-trigger toggle (form field `enabled=1`/`0`); returns JSON (`manage_notifications`) |
 | `GET /audit` | **Logs** — categorized tabs (All / Clients / Remote sessions / Installers / Groups / Users & auth / Notifications / Email deliveries / Server / Other), per-tab filter; All activity (default) merges `provisioning_events` with `device_sessions`, `device_file_transfers` and (with `manage_notifications`) `notification_log`, newest 200. All activity and Clients hide `device_online`/`device_offline` unless `?onoff=1` (the "Hide online/offline" switch); Remote sessions reads `device_sessions`, Email deliveries reads `notification_log` (tab shown only with `manage_notifications`) |
 | `GET /devices/{id}/timeline?range=24h\|7d\|30d&back=N` | Per-device **connection timeline** (ScreenConnect-style): online lane from `device_online`/`device_offline` events, one lane per connecting peer from `device_sessions` with file-transfer markers from `device_file_transfers`, device-event markers, summary and event list (`app/routes/timeline.py`) |
+| `GET /timeline?view=device\|user&range=24h\|7d\|30d` or `&from=YYYY-MM-DD&to=YYYY-MM-DD` | Fleet-wide **timeline**: every device's `device_sessions` in the window, one lane per device or per person, `group`/`user` filters, summary and session list (`app/routes/timeline.py`, `templates/timeline.html`) |
+| `POST /api/devices/{id}/connect` | Records a Connect/Terminal click (`connect_clicks`); sent with `navigator.sendBeacon` from `base.html` on any `rustdesk://` link |
 | `GET /sessions` | Redirects to `/audit?cat=sessions` (kept for old links) |
 | `GET /api/devices`, `GET /api/devices/status`, `GET /api/devices/{id}/sessions`, `GET /api/server/health` | JSON for the live tables, per-device session history, and server-health tiles |
 | `GET /setup`, `GET/POST /login`, `/login/webauthn/...`, `GET /logout` | First-run setup, password and passkey sign-in |
@@ -226,7 +228,16 @@ Created by `run_migrations()` in `/opt/rustdesk-fleet/fleet.sqlite3`
 alongside the single-tenant schema: `notification_settings`,
 `notification_events`, `notification_log`, `device_sessions`, `device_file_transfers`, `device_info`,
 `download_links`, `backup_config`, `signing_config`, `roles`,
-`webauthn_credentials`, `dynamic_groups`, `email_templates`, `email_design`.
+`webauthn_credentials`, `dynamic_groups`, `email_templates`, `email_design`,
+`connect_clicks`, `rustdesk_peer_users`.
+
+**Who connected.** RustDesk's connection audit only names the controlling
+computer (`peer_id`, `peer_name`). `DASHBOARD_USER_SQL` in
+`app/routes/sessions.py` credits a session to a dashboard user: the latest
+`connect_clicks` row for that device from 3 min before to 1 min after it
+started, else the `rustdesk_peer_users` link for its `peer_id`. Links have
+no UI yet; add one with
+`INSERT INTO rustdesk_peer_users (peer_id, user_email) VALUES ('<rustdesk id>', '<user email>')`.
 
 ## Deploying changes
 

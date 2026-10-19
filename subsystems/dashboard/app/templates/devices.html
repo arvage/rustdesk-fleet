@@ -296,7 +296,7 @@
 <!-- Device detail (read-only) modal -->
 <div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px"
      onclick="if(event.target===this)closeDetailModal()">
-  <div style="background:var(--surface);border-radius:14px;padding:28px 28px 22px;width:100%;max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,.22);max-height:90vh;overflow:auto">
+  <div style="background:var(--surface);border-radius:14px;padding:28px 28px 22px;width:100%;max-width:680px;box-shadow:0 20px 60px rgba(0,0,0,.22);max-height:90vh;overflow:auto">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
       <h2 style="font-size:16px;font-weight:700;margin:0">Device Details</h2>
       <button onclick="closeDetailModal()"
@@ -814,13 +814,27 @@ function openDetailModal(rid) {
     }
     if (v === '' || v == null) return '';   // hide empty, non-header rows
     return `<tr><td style="color:var(--text-3);padding:5px 12px 5px 0;white-space:nowrap;`
-      + `border:none;vertical-align:top;width:40%">${esc(k)}</td>`
+      + `border:none;vertical-align:top;width:30%">${esc(k)}</td>`
       + `<td style="color:var(--text-1);padding:5px 0;border:none;word-break:break-word">${esc(v)}</td></tr>`;
   }).join('');
 
   document.getElementById('detail-table').innerHTML = html;
   loadDetailSessions(rid);
   document.getElementById('detail-modal').style.display = 'flex';
+}
+
+// Who connected, as on the Logs page: the dashboard user who clicked Connect
+// (when known), else the RustDesk name; then the RustDesk name, ID and (if the
+// controller is itself a fleet device) its name.
+function connectedBy(s) {
+  if (!s.dashboard_user && !s.peer_id && !s.peer_name) return '<span class="text-muted">—</span>';
+  const rdName = s.peer_name || s.peer_device_name || '';
+  const name = s.dashboard_user || rdName || '—';
+  let sub = s.dashboard_user && rdName ? esc(rdName) : '';
+  if (s.peer_id) sub += (sub ? ' · ' : '') + '<code>' + esc(formatRid(s.peer_id)) + '</code>';
+  if (s.peer_id && s.peer_name && s.peer_device_name) sub += ' · ' + esc(s.peer_device_name);
+  return '<span style="color:var(--text-1);font-weight:500">' + esc(name) + '</span>'
+    + (sub ? '<span style="display:block;font-size:11px;color:var(--text-3)">' + sub + '</span>' : '');
 }
 
 function loadDetailSessions(rid) {
@@ -841,9 +855,11 @@ function loadDetailSessions(rid) {
       if (!ss.length) {
         rows = '<tr><td style="padding:8px 0;border:none" class="text-muted text-sm">No sessions recorded.</td></tr>';
       } else {
-        rows = ss.map(s =>
+        const th = 'style="padding:6px 10px 2px 0;border:none;font-size:11px;font-weight:500;color:var(--text-3);text-align:left"';
+        rows = '<tr><th ' + th + '>Started</th><th ' + th + '>Connected by</th><th ' + th + '>Duration</th><th ' + th + '></th></tr>'
+          + ss.map(s =>
           '<tr><td style="color:var(--text-1);padding:4px 10px 4px 0;white-space:nowrap;border:none">' + esc(toLA(s.started_at)) + '</td>'
-          + '<td style="color:var(--text-2);padding:4px 10px 4px 0;border:none">' + esc(s.peer_name || s.peer_id || '—') + '</td>'
+          + '<td style="padding:4px 10px 4px 0;border:none">' + connectedBy(s) + '</td>'
           + '<td style="color:var(--text-3);padding:4px 10px 4px 0;white-space:nowrap;border:none">' + esc(s.duration_str) + '</td>'
           + '<td style="padding:4px 0;border:none;text-align:right">'
           + (s.active ? '<span class="badge badge-active">active</span>' : '<span class="badge badge-offline">ended</span>')

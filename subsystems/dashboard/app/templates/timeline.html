@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}Timeline — RustDesk Fleet{% endblock %}
+{% block page_title %}Connection timeline{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% set span = end - start %}
+{% macro pos(t) -%}{{ '%.3f' | format(((t - start) / span * 100) if t > start else 0) }}{%- endmacro %}
+{% macro width(s, e) -%}
+  {%- set a = s if s > start else start -%}{%- set b = e if e < end else end -%}
+  {{ '%.3f' | format(((b - a) / span * 100) if b > a else 0) }}
+{%- endmacro %}
+{# Link to this page with some settings changed and the rest kept. #}
+{% macro link(v=view, r=rng, g=group, u=user) -%}
+  {%- set q = {'view': v, 'group': g, 'user': u} -%}
+  {%- if r == 'custom' %}{% set _ = q.update({'from': d_from, 'to': d_to}) %}{% else %}{% set _ = q.update({'range': r}) %}{% endif -%}
+  ?{{ q | urlencode }}
+{%- endmacro %}
+{# Per-device timeline for the same window where it has a matching preset. #}
+{% set dev_q = '?range=' ~ (rng if rng in ranges else '30d') %}
+{% set type_colors = {0: '#3B82F6', 1: '#0EA5E9', 2: '#F59E0B', 3: '#8B5CF6', 4: '#10B981', -1: '#64748B'} %}
+
+{% block content %}
+{% include "_timeline_styles.html" %}
+<style>
+.tl-label a { color: inherit; text-decoration: none; }
+.tl-label a:hover { color: var(--accent); }
+.tl-filter { padding: 5px 9px; border: 1px solid var(--border-md); border-radius: var(--radius-sm);
+             font-size: 12px; background: var(--surface); color: var(--text-1); max-width: 200px; }
+tr[data-sid] { cursor: pointer; }
+.tl-filter.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+</style>
+
+<!-- Header: view switch, filters, window -->
+<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <a class="tl-chip {% if view == 'device' %}on{% endif %}" href="{{ link(v='device') }}">By device</a>
+    <a class="tl-chip {% if view == 'user' %}on{% endif %}" href="{{ link(v='user') }}">By user</a>
+    <span style="width:8px"></span>
+    <select class="tl-filter" aria-label="Client group"
+            onchange="location='{{ link(g='') }}'.replace('group=', 'group=' + encodeURIComponent(this.value))">
+      <option value="">All client groups</option>
+      {% for g in groups %}<option value="{{ g.slug }}" {% if g.slug == group %}selected{% endif %}>{{ g.display_name }}</option>{% endfor %}
+    </select>
+    <select class="tl-filter" aria-label="User"
+            onchange="location='{{ link(u='') }}'.replace('user=', 'user=' + encodeURIComponent(this.value))">
+      <option value="">Everyone</option>
+      {% for p in people %}<option value="{{ p }}" {% if p == user %}selected{% endif %}>{{ p }}</option>{% endfor %}
+      {% if user and user not in people %}<option value="{{ user }}" selected>{{ user }}</option>{% endif %}
+    </select>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+    {% for r in ranges %}
+    <a class="tl-chip {% if r == rng %}on{% endif %}" href="{{ link(r=r) }}">{{ r }}</a>
+    {% endfor %}
+    <span style="width:8px"></span>
+    <form method="get" style="display:flex;align-items:center;gap:6px;margin:0" title="Show a custom date window">
+      <input type="hidden" name="view" value="{{ view }}">
+      <input type="hidden" name="group" value="{{ group }}">
+      <input type="hidden" name="user" value="{{ user }}">
+      <input type="date" name="from" value="{{ d_from }}" max="{{ today }}" class="tl-filter {% if rng == 'custom' %}on{% endif %}" aria-label="From date" required
+             onchange="if (this.form.to.value < this.value) this.form.to.value = this.value">
+      <span class="text-muted text-sm">to</span>
+      <input type="date" name="to" value="{{ d_to }}" max="{{ today }}" class="tl-filter {% if rng == 'custom' %}on{% endif %}" aria-label="To date" required
+             onchange="if (this.form.from.value > this.value) this.form.from.value = this.value">
+      <button type="submit" class="btn btn-ghost btn-sm">Show</button>
+    </form>
+  </div>
+</div>
+
+<!-- Summary -->
+<div class="card" style="margin-bottom:16px">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+    <div class="tl-stat"><div class="k">Sessions</div><div class="v">{{ summary.sessions }}</div></div>
+    <div class="tl-stat"><div class="k">Time connected</div><div class="v">{{ summary.connected }}</div></div>
+    <div class="tl-stat"><div class="k">Devices</div><div class="v">{{ summary.devices }}</div></div>
+    <div class="tl-stat"><div class="k">People</div><div class="v">{{ summary.people }}</div></div>
+  </div>
+</div>
+
+<!-- Timeline -->
+<div class="card" style="margin-bottom:16px">
+  <div class="card-header" style="flex-wrap:wrap;gap:10px">
+    <h2>{{ 'Devices' if view == 'device' else 'Users' }}
+      <span class="text-muted" style="font-weight:400" data-ts-range="{{ start }},{{ end }}"></span>
+    </h2>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      {% for k, label in conn_types.items() %}
+      <span class="tl-legend"><i style="background:{{ type_colors[k] }}"></i>{{ label }}</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="tl">
+    <div class="tl-row" style="border-bottom:1px solid var(--border)">
+      <div class="tl-label" style="padding:6px 14px"></div>
+      <div class="tl-axis">
+        {% for tk in ticks %}<span class="tl-tick" style="left:{{ pos(tk.t) }}%">{{ tk.label }}</span>{% endfor %}
+      </div>
+    </div>
+
+    {% macro gridlines() -%}
+      {% for tk in ticks %}<span class="tl-grid" style="left:{{ pos(tk.t) }}%"></span>{% endfor %}
+      {% if now <= end %}<span class="tl-now" style="left:calc({{ pos(now) }}% - 1px)"></span>{% endif %}
+    {%- endmacro %}
+
+    {% for lane in lanes %}
+    <div class="tl-row">
+      <div class="tl-label" title="{{ lane.name }}{% if lane.sub %} · {{ lane.sub }}{% endif %} · {{ lane.count }} session{{ 's' if lane.count != 1 }}, {{ lane.total }}">
+        {%- if lane.rid %}<a href="/devices/{{ lane.rid }}/timeline{{ dev_q }}">{{ lane.name }}</a>
+        {%- else %}<a href="{{ link(v='device', u=lane.key) }}">{{ lane.name }}</a>{% endif %}
+        <small>{% if lane.sub %}{{ lane.sub }} · {% endif %}{{ lane.count }} session{{ 's' if lane.count != 1 }} · {{ lane.total }}</small>
+      </div>
+      <div class="tl-track">
+        {{ gridlines() }}
+        {% for b in lane.bars %}
+        <span class="tl-bar {% if b.active %}active{% endif %}" data-sid="{{ b.id }}"
+              style="left:{{ pos(b.s) }}%;width:{{ width(b.s, b.e) }}%;background-color:{{ type_colors[b.type] }}"
+              data-tip="{{ b.type_label }}{% if b.active %} (active){% endif %} · {{ b.duration }}"
+              data-tip2="{{ b.tip2 }}" data-s="{{ b.s }}" data-e="{{ b.e }}"></span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+
+    {% if not lanes %}
+    <div class="tl-row">
+      <div class="tl-label text-muted">No sessions</div>
+      <div class="tl-track">{{ gridlines() }}</div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Session list -->
+<div class="card">
+  <div class="card-header"><h2>Sessions</h2></div>
+  {% if sessions %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th style="width:170px">Started</th><th>Device</th><th>Connected by</th><th>Type</th><th>Duration</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for s in sessions %}
+        <tr data-sid="{{ s.id }}">
+          <td class="text-muted text-sm mono" style="white-space:nowrap" data-ts="{{ s.s }}"></td>
+          <td style="white-space:nowrap">
+            <a href="/devices/{{ s.rid }}/timeline{{ dev_q }}" style="font-weight:500;color:var(--text-1);text-decoration:none">{{ s.device }}</a>
+            {% if s.group_name %}<span style="font-size:11px;display:block;color:var(--text-3)">{{ s.group_name }}</span>{% endif %}
+          </td>
+          <td style="white-space:nowrap">
+            {% if s.person %}<span style="font-weight:500">{{ s.person }}</span>{% else %}<span class="text-muted text-sm">—</span>{% endif %}
+            {% if s.rd_who or s.peer_id %}<span style="font-size:11px;display:block;color:var(--text-3)">{{ s.rd_who }}{% if s.rd_who and s.peer_id %} · {% endif %}{% if s.peer_id %}<code>{{ s.peer_id | format_rid }}</code>{% endif %}</span>{% endif %}
+          </td>
+          <td class="text-sm" style="white-space:nowrap;color:var(--text-2)">{{ s.type_label }}</td>
+          <td class="text-sm" style="white-space:nowrap;color:var(--text-2)">{{ s.duration }}</td>
+          <td>{% if s.active %}<span class="badge badge-active">active</span>{% else %}<span class="badge badge-offline">ended</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body"><p class="text-muted text-sm" style="margin:0">No sessions in this window.</p></div>
+  {% endif %}
+</div>
+
+<p class="text-muted text-sm" style="margin-top:12px">
+  People are the dashboard user who clicked Connect or Terminal just before the session started; otherwise the name
+  the connecting RustDesk client reported (usually its OS username). Click a device name for its own timeline, a
+  person (in By user) to see the devices they connected to, or a bar to find it in the list. Times are Pacific.
+</p>
+
+<div id="tl-tip"></div>
+
+<script>
+(function () {
+  const fmt = (t, withDate) => new Date(t * 1000).toLocaleString('sv-SE', { timeZone: 'America/Los_Angeles' })
+    .slice(withDate ? 0 : 11, 16);
+  const sameDay = (a, b) => fmt(a, true).slice(0, 10) === fmt(b, true).slice(0, 10);
+
+  document.querySelectorAll('[data-ts]').forEach(el => { el.textContent = fmt(+el.dataset.ts, true); });
+  const r = document.querySelector('[data-ts-range]');
+  if (r) { const [s, e] = r.dataset.tsRange.split(',').map(Number); r.textContent = '· ' + fmt(s, true) + ' → ' + fmt(e, true); }
+
+  const esc = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const tip = document.getElementById('tl-tip');
+  document.querySelectorAll('[data-tip]').forEach(el => {
+    el.addEventListener('mousemove', ev => {
+      const s = +el.dataset.s, e = +el.dataset.e;
+      const when = fmt(s, true) + ' – ' + (sameDay(s, e) ? fmt(e, false) : fmt(e, true));
+      const lane = el.closest('.tl-row').querySelector('.tl-label a').textContent.trim();
+      tip.innerHTML = '<strong>' + esc(lane) + '</strong><br>' + esc(el.dataset.tip)
+        + (el.dataset.tip2 ? '<br>' + esc(el.dataset.tip2) : '')
+        + '<br><span style="color:var(--text-3)">' + when + '</span>';
+      tip.style.display = 'block';
+      const x = Math.min(ev.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+      tip.style.left = x + 'px';
+      tip.style.top = (ev.clientY + 14) + 'px';
+    });
+    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  });
+
+  // Click a bar to highlight its row in the session list (and vice versa).
+  function highlight(sid) {
+    document.querySelectorAll('.hl, .ev-hl').forEach(n => n.classList.remove('hl', 'ev-hl'));
+    document.querySelectorAll('.tl-bar[data-sid="' + sid + '"]').forEach(n => n.classList.add('hl'));
+    const rows = document.querySelectorAll('tr[data-sid="' + sid + '"]');
+    rows.forEach(n => n.classList.add('ev-hl'));
+    return rows;
+  }
+  document.querySelectorAll('.tl-bar').forEach(b => b.addEventListener('click', () => {
+    const rows = highlight(b.dataset.sid);
+    if (rows[0]) rows[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }));
+  document.querySelectorAll('tr[data-sid]').forEach(tr => tr.addEventListener('click', e => {
+    if (e.target.closest('a')) return;
+    highlight(tr.dataset.sid);
+    const bar = document.querySelector('.tl-bar[data-sid="' + tr.dataset.sid + '"]');
+    if (bar) bar.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }));
+})();
+</script>
+{% endblock %}

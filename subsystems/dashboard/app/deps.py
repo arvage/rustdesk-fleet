@@ -349,6 +349,28 @@ def run_migrations() -> None:
             conn.execute(f"ALTER TABLE device_sessions ADD COLUMN {col} {ddl}")
     conn.commit()
 
+    # Dashboard users clicking Connect / Terminal on a device. RustDesk only
+    # reports the controller's RustDesk id and OS username, so a session that
+    # starts on the device just after a click is credited to that dashboard
+    # user (see routes/sessions.py _LIST_SQL).
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS connect_clicks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            rustdesk_id TEXT NOT NULL,
+            user_email  TEXT NOT NULL,
+            clicked_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_connect_clicks_rid ON connect_clicks(rustdesk_id, clicked_at);
+
+        -- A technician's own computers: sessions from these RustDesk ids are
+        -- credited to the dashboard user even without a Connect click.
+        CREATE TABLE IF NOT EXISTS rustdesk_peer_users (
+            peer_id    TEXT PRIMARY KEY,
+            user_email TEXT NOT NULL
+        );
+    """)
+    conn.commit()
+
     # File transfers reported by the client's /api/audit/file (file-transfer
     # sessions and clipboard file copy/paste), linked to their session when the
     # connection id matches one. direction: 0 = sent from the device to the
