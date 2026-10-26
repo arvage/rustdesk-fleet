@@ -108,8 +108,8 @@ p { margin: 0; }
 .mark b { font-family: var(--display); font-stretch: 120%; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.01em; }
 .mark svg { flex: none; }
 .nav { display: flex; gap: 22px; margin-left: auto; align-items: center; }
-.nav a { color: var(--muted); text-decoration: none; font-weight: 600; font-size: 0.95rem; }
-.nav a:hover { color: var(--ink); }
+.nav a:not(.btn) { color: var(--muted); text-decoration: none; font-weight: 600; font-size: 0.95rem; }
+.nav a:not(.btn):hover { color: var(--ink); }
 .btn {
   display: inline-flex; align-items: center; gap: 8px;
   font-family: var(--body); font-weight: 700; font-size: 0.98rem;
