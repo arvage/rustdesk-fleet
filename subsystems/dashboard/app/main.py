@@ -46,10 +46,43 @@ class _QuietClientReports(logging.Filter):
 
 logging.getLogger("uvicorn.access").addFilter(_QuietClientReports())
 
+
+_ENV_FILE = "/etc/rustdesk-fleet/dashboard.env"
+_OLD_PLACEHOLDER_SECRET = "change-me-in-production"
+_DEFAULT_SESSION_MAX_AGE = 12 * 3600
+
+
+def _session_secret() -> str:
+    """SESSION_SECRET signs every session cookie, so refuse to start with a
+    missing, short or well-known one rather than run with a forgeable key."""
+    secret = os.environ.get("SESSION_SECRET", "").strip()
+    if not secret or len(secret) < 32 or secret == _OLD_PLACEHOLDER_SECRET:
+        raise RuntimeError(
+            "SESSION_SECRET is missing, shorter than 32 characters, or the old placeholder. "
+            f"Set it in {_ENV_FILE}, e.g. SESSION_SECRET=$(python3 -c "
+            "'import secrets; print(secrets.token_hex(32))'), then restart the dashboard."
+        )
+    return secret
+
+
+def _session_max_age() -> int:
+    raw = os.environ.get("SESSION_MAX_AGE", "").strip()
+    if not raw:
+        return _DEFAULT_SESSION_MAX_AGE
+    try:
+        value = int(raw)
+    except ValueError:
+        raise RuntimeError(f"SESSION_MAX_AGE must be a number of seconds, got {raw!r} (in {_ENV_FILE}).")
+    if value <= 0:
+        raise RuntimeError(f"SESSION_MAX_AGE must be positive, got {value} (in {_ENV_FILE}).")
+    return value
+
+
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.environ.get("SESSION_SECRET", "change-me-in-production"),
+    secret_key=_session_secret(),
     session_cookie="rdf_session",
+    max_age=_session_max_age(),
     https_only=True,
     same_site="lax",
 )
