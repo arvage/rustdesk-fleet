@@ -59,3 +59,19 @@ TENANCY_TABLES_SQL = """
 
 def ensure_tenancy_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(TENANCY_TABLES_SQL)
+
+
+def normalize_host(raw: str) -> str:
+    """'HTTPS://RDS.Example.com:8443/x' -> 'rds.example.com'. Lowercase, no
+    scheme, path, port or trailing dot; IPv6 literals lose their brackets."""
+    h = (raw or "").strip().lower()
+    if "://" in h:
+        h = h.split("://", 1)[1]
+    h = h.split("/", 1)[0].split("?", 1)[0]
+    if "@" in h:
+        h = h.rsplit("@", 1)[1]
+    if h.startswith("["):
+        h = h[1:].split("]", 1)[0]
+    elif h.count(":") == 1:
+        h = h.split(":", 1)[0]
+    return h.rstrip(".")

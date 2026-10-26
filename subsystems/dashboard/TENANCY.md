@@ -41,11 +41,11 @@ There are no exceptions: child tables such as `webauthn_credentials` and
 | `connect_clicks` | tenant | direct | — |
 | `rustdesk_peer_users` | tenant | direct | `(tenant_id, peer_id)` |
 | `dynamic_groups` | tenant | direct | — |
-| `notification_settings` | tenant | direct; one row per tenant | `tenant_id` (primary key; replaces `id = 1`) |
+| `notification_settings` | tenant | direct; one row per tenant | `tenant_id` (unique; replaces `id = 1`) |
 | `notification_events` | tenant | direct | `(tenant_id, event_type)` |
 | `notification_log` | tenant | direct | — |
 | `email_templates` | tenant | direct | `(tenant_id, key)` |
-| `email_design` | tenant | direct; one row per tenant | `tenant_id` (primary key; replaces `id = 1`) |
+| `email_design` | tenant | direct; one row per tenant | `tenant_id` (unique; replaces `id = 1`) |
 | `provisioning_events` (audit log) | tenant, **nullable** | direct; `NULL` = a provider event | — |
 
 Composite foreign keys such as `(tenant_id, group_id) REFERENCES

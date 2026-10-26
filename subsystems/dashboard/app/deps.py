@@ -8,8 +8,8 @@ DB_PATH = paths.FLEET_DB
 HBBS_DB_PATH = paths.HBBS_DB
 
 
-def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+def get_db(path=None) -> sqlite3.Connection:
+    conn = sqlite3.connect(path or DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
@@ -195,8 +195,10 @@ def log_event(conn, event: str, detail: str = "", user_email: str = "") -> None:
     conn.commit()
 
 
-def run_migrations() -> None:
-    conn = get_db()
+def run_migrations(db_path=None) -> None:
+    """Bring the fleet database (or the one at db_path) up to date. Every
+    step is idempotent; safe on every startup."""
+    conn = get_db(db_path)
 
     users_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
     if "password_hash" not in users_cols:
