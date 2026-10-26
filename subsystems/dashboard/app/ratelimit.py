@@ -8,7 +8,7 @@
 The store is in memory. That's fine with the single uvicorn worker this
 runs under, but it resets on restart, and it must move to shared storage
 (e.g. a SQLite table) if more workers are ever added. nginx adds a coarse
-per-IP request limit in front of this (see install.sh).
+per-IP limit on sign-in POSTs in front of this (see install.sh).
 """
 import math
 import threading

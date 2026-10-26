@@ -378,13 +378,13 @@ NGX
 }
 
 # Dashboard locations, shared by both vhosts. The sign-in endpoints get a
-# per-IP request limit (zone defined at the top of the vhost file); the
-# device API and everything else are not limited. The app applies its own
-# per-email and per-IP lockouts on top of this.
+# per-IP limit on POSTs (zone and map defined at the top of the vhost file);
+# GETs, the device API and everything else are not limited. The app applies
+# its own per-email and per-IP lockouts on top of this.
 dash_locations() {
   cat <<'NGX'
     location = /login {
-        limit_req        zone=rdf_auth burst=5 nodelay;
+        limit_req        zone=rdf_auth burst=20 nodelay;
         limit_req_status 429;
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host              $host;
@@ -396,7 +396,7 @@ dash_locations() {
     # No trailing slash: a proxied prefix ending in / makes nginx 301
     # /login/webauthn -> /login/webauthn/, and the app redirects back (loop).
     location ^~ /login/webauthn {
-        limit_req        zone=rdf_auth burst=5 nodelay;
+        limit_req        zone=rdf_auth burst=20 nodelay;
         limit_req_status 429;
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host              $host;
@@ -406,7 +406,7 @@ dash_locations() {
         proxy_read_timeout 60s;
     }
     location = /setup {
-        limit_req        zone=rdf_auth burst=5 nodelay;
+        limit_req        zone=rdf_auth burst=20 nodelay;
         limit_req_status 429;
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host              $host;
@@ -426,7 +426,14 @@ dash_locations() {
 NGX
 }
 
-AUTH_LIMIT_ZONE='limit_req_zone $binary_remote_addr zone=rdf_auth:10m rate=10r/m;'
+# Only POSTs get a key, so only POSTs count: an empty key isn't limited.
+# Sized for a whole office signing in from one NAT IP at shift start (one
+# passkey sign-in is about 5 requests).
+AUTH_LIMIT_ZONE='map $request_method $rdf_auth_key {
+    POST    $binary_remote_addr;
+    default "";
+}
+limit_req_zone $rdf_auth_key zone=rdf_auth:10m rate=30r/m;'
 
 write_http_vhost() {   # used as the base; certbot rewrites it for LE
   sudo tee "$VHOST" >/dev/null <<EOF

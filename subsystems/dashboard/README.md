@@ -43,8 +43,8 @@ If the `users` table is empty, all routes redirect to `/setup`. The setup page c
   passkey sign-in and `/setup`. Locked requests get a 429 before any bcrypt
   work, and each lockout is logged as `login_locked`. The counters are in
   memory: they reset on restart and need shared storage if more than one
-  uvicorn worker is ever used. nginx adds a per-IP request limit on the same
-  paths (DEPLOYMENT.md, Section 4).
+  uvicorn worker is ever used. nginx adds a per-IP limit on POSTs to the
+  same paths (DEPLOYMENT.md, Section 4); page loads aren't counted.
 - **Sign out** is a POST. `GET /logout` only redirects to `/`.
 - **Device API** (`/api/heartbeat` etc.) is unauthenticated by design but
   only accepts reports whose id and uuid match the hbbs peer table. Unknown

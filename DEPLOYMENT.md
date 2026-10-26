@@ -168,8 +168,14 @@ sudo certbot --nginx -d rds.example.com   # issues the cert, can also write the 
 Resulting vhost (`/etc/nginx/sites-available/rds.example.com`):
 
 ```nginx
-# Per-IP limit for the sign-in endpoints (must be outside any server block).
-limit_req_zone $binary_remote_addr zone=rdf_auth:10m rate=10r/m;
+# Per-IP limit on sign-in POSTs (must be outside any server block). Only
+# POSTs get a key, and requests with an empty key aren't limited, so page
+# loads (GET) never count.
+map $request_method $rdf_auth_key {
+    POST    $binary_remote_addr;
+    default "";
+}
+limit_req_zone $rdf_auth_key zone=rdf_auth:10m rate=30r/m;
 
 server {
     listen 80;
@@ -186,13 +192,14 @@ server {
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
 
-    # Sign-in endpoints: 10 requests/min per IP, burst 5, then 429. The app
+    # Sign-in endpoints: 30 POSTs/min per IP, burst 20, then 429 (sized for
+    # an office signing in from one NAT IP at shift start). The app
     # also locks an email after 5 failures and an IP after 20 (15 min each).
     # Repeat this block for `location ^~ /login/webauthn` (no trailing
     # slash, or nginx and the app redirect each other in a loop) and
     # `location = /setup`. Don't limit the device API (/api/heartbeat etc.).
     location = /login {
-        limit_req        zone=rdf_auth burst=5 nodelay;
+        limit_req        zone=rdf_auth burst=20 nodelay;
         limit_req_status 429;
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host              $host;
@@ -276,8 +283,8 @@ token, rate limits):
   `sudo awk -F= '/^SESSION_SECRET=/{print length($2)}' /etc/rustdesk-fleet/dashboard.env`
 - No `SETUP_TOKEN` is needed on a box that already has users.
 - The nginx rate limit is not applied by a `git pull`. Add the
-  `limit_req_zone` line and the three sign-in `location` blocks shown in
-  Section 4 to your vhost, then `sudo nginx -t && sudo systemctl reload nginx`.
+  `map` and `limit_req_zone` lines and the three sign-in `location` blocks
+  shown in Section 4 to your vhost, then `sudo nginx -t && sudo systemctl reload nginx`.
 
 ## 5. First-run setup
 
