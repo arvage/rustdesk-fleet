@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -25,6 +25,7 @@ from app.routes.reports import router as reports_router
 from app.routes.email_templates import router as email_templates_router
 from app.routes.timeline import router as timeline_router
 from app.deps import run_migrations
+from app.tenancy import TenantMiddleware, UnknownTenant
 
 app = FastAPI(docs_url=None, redoc_url=None)
 
@@ -87,6 +88,10 @@ app.add_middleware(
     same_site="lax",
 )
 
+# Added last, so it runs first: every request is matched to a tenant by its
+# Host before anything else (unknown hosts get a 404 without a session).
+app.add_middleware(TenantMiddleware)
+
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -104,6 +109,11 @@ async def auth_redirect_handler(request: Request, _exc: _AuthRedirect):
 @app.exception_handler(_SetupRedirect)
 async def setup_redirect_handler(request: Request, _exc: _SetupRedirect):
     return RedirectResponse("/setup", status_code=303)
+
+
+@app.exception_handler(UnknownTenant)
+async def unknown_tenant_handler(request: Request, _exc: UnknownTenant):
+    return HTMLResponse("Not found", status_code=404)
 
 
 @app.exception_handler(PermissionError)

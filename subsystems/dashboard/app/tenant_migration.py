@@ -431,6 +431,14 @@ def _seed_tenant_one(conn, hbbs_db_path: str) -> None:
         )
 
 
+def seed_legacy_tenant(conn: sqlite3.Connection, hbbs_db_path: str) -> None:
+    """Create tenant #1 with its relay and domain from server_config, if
+    missing. Touches only the tenancy tables. Commits."""
+    ensure_tenancy_tables(conn)
+    _seed_tenant_one(conn, hbbs_db_path)
+    conn.commit()
+
+
 def migrate(conn: sqlite3.Connection, hbbs_db_path: str) -> bool:
     """Run the tenancy migration on an open connection. Returns True if it
     changed anything. Raises MigrationError (after rolling back) if the result

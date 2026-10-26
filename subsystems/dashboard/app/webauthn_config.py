@@ -1,24 +1,18 @@
-from urllib.parse import urlparse
-
 from fastapi import Request
+
+from app.tenancy import get_tenant
 
 RP_NAME = "RustDesk Fleet"
 
 
 def get_rp_id(request: Request) -> str:
-    """Bare hostname WebAuthn scopes credentials to. Derived fresh from the
-    incoming request on every call — never cached, never hardcoded — so a
-    credential registered against one host is never silently valid on another."""
-    host = request.headers.get("host") or request.url.hostname or ""
-    hostname = host.split(":")[0]
-    if hostname:
-        return hostname
-
-    from setup_server import get_status
-    status = get_status()
-    if status and status.get("host"):
-        return urlparse(status["host"]).hostname or status["host"]
-    raise RuntimeError("Could not determine WebAuthn RP ID: no Host header and no server_config.host")
+    """Bare hostname WebAuthn scopes credentials to: the tenant domain this
+    request was matched on (TenantMiddleware), so a passkey registered on one
+    tenant's domain is never valid on another's. Never cached or hardcoded."""
+    hostname = get_tenant(request).hostname
+    if not hostname:
+        raise RuntimeError("Could not determine the WebAuthn RP ID: the request has no tenant domain")
+    return hostname
 
 
 def get_origin(request: Request) -> str:

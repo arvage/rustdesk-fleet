@@ -31,12 +31,14 @@ sys.path[:0] = [str(DASH_DIR), str(SINGLE_TENANT_DIR)]
 import bcrypt  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import auth, ratelimit  # noqa: E402
+from app import auth, ratelimit, tenancy  # noqa: E402
 from app.deps import get_db, run_migrations  # noqa: E402
 from app.main import app  # noqa: E402
 from app.routes import client_api  # noqa: E402
 
 HBBS_DB = DATA_DIR / "data" / "db_v2.sqlite3"
+# Tenant #1's host: the single-tenant server_config.host before the migration.
+HOST = "rds.example.com"
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +49,12 @@ def fresh_state():
     db.unlink(missing_ok=True)
     conn = sqlite3.connect(db)
     conn.executescript(SCHEMA.read_text())
+    conn.execute(
+        "INSERT INTO server_config (id, host, pubkey, data_dir, compose_path, status) "
+        "VALUES (1, ?, 'PUBKEY1', ?, ?, 'active')",
+        (HOST, str(DATA_DIR / "data"), str(DATA_DIR / "docker-compose.yml")),
+    )
+    conn.commit()
     conn.close()
     run_migrations()
 
@@ -58,6 +66,7 @@ def fresh_state():
     conn.close()
 
     ratelimit.reset()
+    tenancy.invalidate_cache()
     auth._setup_done = False
     client_api._peer_cache = {}
     client_api._peer_cache_at = 0.0
@@ -65,9 +74,9 @@ def fresh_state():
     yield
 
 
-def new_client() -> TestClient:
+def new_client(host: str = HOST) -> TestClient:
     # The session cookie is https_only, so talk to the app over https.
-    return TestClient(app, base_url="https://testserver")
+    return TestClient(app, base_url=f"https://{host}")
 
 
 @pytest.fixture

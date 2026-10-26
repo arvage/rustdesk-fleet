@@ -42,6 +42,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app import paths
 from app.deps import get_db, log_event
+from app.tenancy import request_tenant
 
 HBBS_DB_PATH = paths.HBBS_DB
 _MAX_BODY = 64 * 1024
@@ -93,8 +94,11 @@ def _peer_uuids(force: bool = False) -> dict[str, bytes]:
         return cache
 
 
-def _verify(payload: dict) -> str | None:
-    """Return the RustDesk id if the report matches a registered peer, else None."""
+def _verify(request: Request, payload: dict) -> str | None:
+    """Return the RustDesk id if the report matches a registered peer, else None.
+    A request that matched no tenant (unknown host) never verifies."""
+    if request_tenant(request) is None:
+        return None
     rid = str(payload.get("id") or "").strip()
     uuid_b64 = payload.get("uuid") or ""
     if not rid or not uuid_b64:
@@ -220,7 +224,7 @@ def sweep_stale_sessions() -> int:
 @router.post("/api/sysinfo")
 async def client_sysinfo(request: Request):
     data = await _read_json(request)
-    rid = _verify(data) if data else None
+    rid = _verify(request, data) if data else None
     if rid is None:
         # Any reply other than SYSINFO_UPDATED / ID_NOT_FOUND makes the client
         # back off for 120 s (ID_NOT_FOUND would make it retry every 3 s).
@@ -255,7 +259,7 @@ async def client_sysinfo(request: Request):
 @router.post("/api/audit/conn")
 async def client_audit_conn(request: Request):
     data = await _read_json(request)
-    rid = _verify(data) if data else None
+    rid = _verify(request, data) if data else None
     if rid is None or data.get("conn_id") is None:
         # 4xx: the client treats it as final and doesn't retry.
         return PlainTextResponse("REJECTED", status_code=400)
@@ -296,7 +300,7 @@ async def client_audit_conn(request: Request):
 @router.post("/api/audit/file")
 async def client_audit_file(request: Request):
     data = await _read_json(request)
-    rid = _verify(data) if data else None
+    rid = _verify(request, data) if data else None
     try:
         direction = int(data.get("type")) if rid else None
     except (TypeError, ValueError):
@@ -370,7 +374,7 @@ async def client_sysinfo_ver(request: Request):
 @router.post("/api/heartbeat")
 async def client_heartbeat(request: Request):
     data = await _read_json(request)
-    rid = _verify(data) if data else None
+    rid = _verify(request, data) if data else None
     if rid is None:
         return JSONResponse({})
 

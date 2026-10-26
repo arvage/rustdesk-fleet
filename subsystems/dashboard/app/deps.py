@@ -572,9 +572,9 @@ def run_migrations(db_path=None) -> None:
     """)
     conn.commit()
 
-    # Tenancy: tenants, their relays and their web domains (TENANCY.md).
-    from app.tenant_schema import ensure_tenancy_tables
-    ensure_tenancy_tables(conn)
-    conn.commit()
+    # Tenancy: tenants, their relays and their web domains (TENANCY.md). The
+    # current deployment is tenant #1.
+    from app.tenant_migration import seed_legacy_tenant
+    seed_legacy_tenant(conn, str(HBBS_DB_PATH))
 
     conn.close()
