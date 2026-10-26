@@ -243,9 +243,16 @@ async def login_post(
     return RedirectResponse("/", status_code=303)
 
 
-@router.get("/logout")
+@router.post("/logout")
 async def logout(request: Request):
     request.session.clear()
     # Signed out, "/" is the public landing page (falls back to /login if
     # site/index.html is missing).
+    return RedirectResponse("/", status_code=303)
+
+
+@router.get("/logout")
+async def logout_get():
+    # Signing out is a POST (a link or prefetch shouldn't end a session).
+    # Old bookmarks land on / instead of a 405, still signed in.
     return RedirectResponse("/", status_code=303)

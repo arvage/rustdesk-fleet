@@ -136,11 +136,12 @@ def _rotate(retention: int) -> int:
 def _encrypt(archive: Path, passphrase: str) -> Path:
     """gpg symmetric AES-256 → <archive>.gpg; removes the plaintext on success."""
     enc = archive.with_suffix(archive.suffix + ".gpg")
+    # Passphrase on stdin, not argv, so it never shows up in `ps` or /proc.
     subprocess.run(
         ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
-         "--passphrase", passphrase, "--cipher-algo", "AES256",
+         "--passphrase-fd", "0", "--cipher-algo", "AES256",
          "--symmetric", "--output", str(enc), str(archive)],
-        check=True, capture_output=True,
+        input=passphrase.encode(), check=True, capture_output=True,
     )
     archive.unlink(missing_ok=True)
     return enc
@@ -277,8 +278,8 @@ def run(
 def _decrypt(enc: Path, passphrase: str, out: Path) -> None:
     subprocess.run(
         ["gpg", "--batch", "--yes", "--pinentry-mode", "loopback",
-         "--passphrase", passphrase, "--decrypt", "--output", str(out), str(enc)],
-        check=True, capture_output=True,
+         "--passphrase-fd", "0", "--decrypt", "--output", str(out), str(enc)],
+        input=passphrase.encode(), check=True, capture_output=True,
     )
 
 

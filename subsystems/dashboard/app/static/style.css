@@ -176,6 +176,10 @@
 .nav-item.active { background: #1E293B; color: var(--sidebar-active); }
 .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; opacity: .7; }
 .nav-item.active svg, .nav-item:hover svg { opacity: 1; }
+button.nav-item {   /* Sign out is a form button styled as a nav link */
+  width: 100%; background: none; border: 0; cursor: pointer;
+  font-family: inherit; text-align: left;
+}
 
 .sidebar-footer {
   padding: 12px 10px;

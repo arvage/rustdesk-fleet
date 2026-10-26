@@ -21,7 +21,7 @@
     window.rdfApplyTheme = apply;
   })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=4">
+  <link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
 <div class="shell">
@@ -123,10 +123,12 @@
         <div style="font-size:10px;color:#475569;margin-top:2px;text-transform:uppercase;letter-spacing:.05em">{{ current_user.role_name or current_user.role }}</div>
       </div>
       {% endif %}
-      <a href="/logout" class="nav-item" style="color:#EF4444">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        Sign out
-      </a>
+      <form method="post" action="/logout" style="margin:0">
+        <button type="submit" class="nav-item" style="color:#EF4444">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Sign out
+        </button>
+      </form>
     </div>
   </aside>
 

@@ -62,16 +62,24 @@ _MANAGED_OPTIONS = {
 # ── hbbs peer lookup (cached briefly; heartbeats arrive every few seconds) ───
 
 _PEER_CACHE_TTL_S = 30
+# An unknown id forces an early re-read, but no more often than this, so a
+# stream of reports with made-up ids can't make every request hit hbbs's DB.
+_FORCED_REFRESH_MIN_S = 5
 _peer_cache: dict[str, bytes] = {}
-_peer_cache_at = 0.0
+_peer_cache_at = 0.0        # when the cache was last loaded successfully
+_peer_read_at = 0.0         # when a read was last attempted
 _peer_lock = threading.Lock()
 
 
-def _peer_uuids() -> dict[str, bytes]:
-    global _peer_cache, _peer_cache_at
+def _peer_uuids(force: bool = False) -> dict[str, bytes]:
+    global _peer_cache, _peer_cache_at, _peer_read_at
     with _peer_lock:
-        if time.monotonic() - _peer_cache_at < _PEER_CACHE_TTL_S:
+        now = time.monotonic()
+        fresh = now - _peer_cache_at < _PEER_CACHE_TTL_S
+        may_force = force and now - _peer_read_at >= _FORCED_REFRESH_MIN_S
+        if fresh and not may_force:
             return _peer_cache
+        _peer_read_at = now
         cache: dict[str, bytes] = {}
         if HBBS_DB_PATH.exists():
             try:
@@ -97,11 +105,9 @@ def _verify(payload: dict) -> str | None:
         return None
     peers = _peer_uuids()
     if rid not in peers:
-        # A brand-new device may register moments before reporting; refresh once.
-        global _peer_cache_at
-        with _peer_lock:
-            _peer_cache_at = 0.0
-        peers = _peer_uuids()
+        # A brand-new device may register moments before reporting; re-read
+        # (at most once every _FORCED_REFRESH_MIN_S).
+        peers = _peer_uuids(force=True)
     expected = peers.get(rid)
     if not expected or expected != sent_uuid:
         return None
