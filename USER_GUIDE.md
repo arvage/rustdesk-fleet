@@ -200,6 +200,9 @@ Instead of emailing a binary, share a **download link** from a group page:
 - **Revoke** a link at any time.
 - The public page (`/d/<token>`) always serves the group's newest installer
   and guides the client through installing it. It's unlisted (no indexing).
+- The page also links two PDF guides for the client: how to install, and
+  what to do during a support session. They live in `client-docs/`; see its
+  README to rebuild them with your contact details.
 
 ---
 

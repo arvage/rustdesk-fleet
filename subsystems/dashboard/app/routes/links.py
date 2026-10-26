@@ -15,7 +15,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.auth import require_auth
@@ -52,6 +52,19 @@ _PUBLIC_HEADERS = {
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
 }
+
+# Client PDF guides (repo-root client-docs/, built by build_client_docs.py),
+# linked from the download page. Only these files are served.
+GUIDES_DIR = Path(__file__).resolve().parents[4] / "client-docs"
+CLIENT_GUIDES: dict[str, str] = {
+    "install-remote-support.pdf": "How to install",
+    "getting-help.pdf": "Getting help during a session",
+}
+
+
+def available_guides() -> list[dict]:
+    return [{"filename": f, "label": label} for f, label in CLIENT_GUIDES.items()
+            if (GUIDES_DIR / f).is_file()]
 
 router = APIRouter()
 
@@ -314,6 +327,7 @@ async def public_download_page(request: Request, token: str):
             "installers": installers,
             "token": token,
             "expires_at": link["expires_at"],
+            "guides": available_guides(),
         },
     )
     resp.headers.update(_PUBLIC_HEADERS)
@@ -368,6 +382,20 @@ async def public_download_file(request: Request, token: str, platform: str):
         path=str(OUTPUT_DIR / installer["filename"]),
         filename=installer["filename"],
         media_type="application/octet-stream",
+    )
+    resp.headers.update(_PUBLIC_HEADERS)
+    return resp
+
+
+@router.get("/guides/{filename}")
+async def public_client_guide(filename: str):
+    if filename not in CLIENT_GUIDES or not (GUIDES_DIR / filename).is_file():
+        raise HTTPException(status_code=404)
+    resp = FileResponse(
+        path=str(GUIDES_DIR / filename),
+        filename=filename,
+        media_type="application/pdf",
+        content_disposition_type="inline",
     )
     resp.headers.update(_PUBLIC_HEADERS)
     return resp

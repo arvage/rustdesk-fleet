@@ -75,6 +75,7 @@ Public, no login:
 |---|---|
 | `GET /d/{token}` | Client-facing download page for a shared link (noindex, no-referrer) |
 | `GET /d/{token}/{platform}` | The installer itself; counts toward the link's download limit |
+| `GET /guides/{filename}` | Client PDF guides from `client-docs/` (install, getting help), linked from the download page; only the listed files are served |
 | `POST /api/sysinfo`, `/api/heartbeat`, `/api/sysinfo_ver`, `/api/audit/conn`, `/api/audit/file` | RustDesk client reporting (audit/conn = per-connection open/authorized/close reports; audit/file = file transfers and clipboard file pastes). Accepted only when id + uuid match the hbbs peer table; the audit endpoints answer 400 otherwise. Also served on port 21114 (see `DEPLOYMENT.md` §7) |
 
 ## Features
