@@ -30,9 +30,10 @@ import threading
 import time
 import urllib.request
 from datetime import datetime, timezone
-from pathlib import Path
 
-CACHE_PATH = Path("/opt/rustdesk-fleet/os-lifecycle.json")
+from app import paths
+
+CACHE_PATH = paths.OS_LIFECYCLE_CACHE
 SOURCE = "endoflife.date"
 _URLS = {
     "windows": "https://endoflife.date/api/windows.json",

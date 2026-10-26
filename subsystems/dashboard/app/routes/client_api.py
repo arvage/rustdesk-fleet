@@ -36,14 +36,14 @@ import json
 import sqlite3
 import threading
 import time
-from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from app import paths
 from app.deps import get_db, log_event
 
-HBBS_DB_PATH = Path("/opt/rustdesk-fleet/data/db_v2.sqlite3")
+HBBS_DB_PATH = paths.HBBS_DB
 _MAX_BODY = 64 * 1024
 
 # Keys the client may include that we never want to store (preset

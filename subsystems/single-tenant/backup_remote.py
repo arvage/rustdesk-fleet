@@ -22,7 +22,7 @@ import subprocess
 import sqlite3
 from pathlib import Path
 
-FLEET_DIR = Path(os.environ.get("FLEET_DIR", "/opt/rustdesk-fleet"))
+FLEET_DIR = Path(os.environ.get("FLEET_DATA_DIR") or os.environ.get("FLEET_DIR") or "/opt/rustdesk-fleet")
 FLEET_DB = FLEET_DIR / "fleet.sqlite3"
 
 # Endpoint presets for the S3-compatible providers that use a fixed host.

@@ -1,10 +1,11 @@
 import json
 import re
 import sqlite3
-from pathlib import Path
 
-DB_PATH = Path("/opt/rustdesk-fleet/fleet.sqlite3")
-HBBS_DB_PATH = Path("/opt/rustdesk-fleet/data/db_v2.sqlite3")
+from app import paths
+
+DB_PATH = paths.FLEET_DB
+HBBS_DB_PATH = paths.HBBS_DB
 
 
 def get_db() -> sqlite3.Connection:

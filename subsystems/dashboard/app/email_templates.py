@@ -23,10 +23,11 @@ import io
 import re
 import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
 
-DB_PATH = Path("/opt/rustdesk-fleet/fleet.sqlite3")
-LOGO_PATH = Path("/opt/rustdesk-fleet/branding/email-logo.png")
+from app import paths
+
+DB_PATH = paths.FLEET_DB
+LOGO_PATH = paths.EMAIL_LOGO
 LOGO_CID = "rdf-email-logo"
 MAX_LOGO_BYTES = 2 * 1024 * 1024
 TEXT_FIELDS = ("subject", "heading", "intro", "outro", "button_text")

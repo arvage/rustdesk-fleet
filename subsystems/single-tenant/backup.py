@@ -47,7 +47,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-FLEET_DIR = Path(os.environ.get("FLEET_DIR", "/opt/rustdesk-fleet"))
+FLEET_DIR = Path(os.environ.get("FLEET_DATA_DIR") or os.environ.get("FLEET_DIR") or "/opt/rustdesk-fleet")
 DATA_DIR = FLEET_DIR / "data"
 FLEET_DB = FLEET_DIR / "fleet.sqlite3"
 HBBS_DB = DATA_DIR / "db_v2.sqlite3"

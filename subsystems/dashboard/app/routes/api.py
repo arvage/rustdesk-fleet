@@ -6,16 +6,16 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from app import paths
 from app.auth import require_auth
 from app.deps import get_db, get_devices, get_hbbs_peers, log_event
 from app.notifications import fire_notification
 
-HBBS_DB_PATH = Path("/opt/rustdesk-fleet/data/db_v2.sqlite3")
+HBBS_DB_PATH = paths.HBBS_DB
 HBBS_PORTS = {"21115", "21116", "21117", "21118", "21119"}
 
 # How long to keep a device marked online after its IP was last seen in an
@@ -341,7 +341,7 @@ async def api_device_sessions(rid: str, _: dict = Depends(require_auth)):
 # Everything here reads /proc, statvfs or `docker ps` — nothing blocks for long
 # (psutil isn't installed on the box, so we stick to the stdlib).
 
-_DATA_DIR = Path("/opt/rustdesk-fleet")
+_DATA_DIR = paths.DATA_DIR
 
 _cpu_prev: tuple[int, int] | None = None   # (busy, total) jiffies from last sample
 _cpu_lock = threading.Lock()

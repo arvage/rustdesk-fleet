@@ -26,9 +26,10 @@ from datetime import datetime, timezone
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from pathlib import Path
 
-DB_PATH = Path("/opt/rustdesk-fleet/fleet.sqlite3")
+from app import paths
+
+DB_PATH = paths.FLEET_DB
 
 # ── Event registry ────────────────────────────────────────────────────────────
 

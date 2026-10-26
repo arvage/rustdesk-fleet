@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Form, Request
 SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]$')
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
+from app import paths
 from app.auth import require_auth
 from app.deps import (
     get_db, get_device_info, get_hbbs_peers, label_sort_key, log_event, merge_device_info,
@@ -16,7 +17,7 @@ from app.permissions import require_perm, user_can
 from app.routes.links import DEFAULT_EXPIRY, EXPIRY_OPTIONS, latest_installers, link_state
 from app.templates_config import templates
 
-OUTPUT_DIR = Path("/opt/rustdesk-fleet/installers")
+OUTPUT_DIR = paths.INSTALLERS_DIR
 
 router = APIRouter()
 

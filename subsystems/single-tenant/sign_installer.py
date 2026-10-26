@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
-FLEET_DIR = Path("/opt/rustdesk-fleet")
+FLEET_DIR = Path(os.environ.get("FLEET_DATA_DIR") or "/opt/rustdesk-fleet")
 FLEET_DB = FLEET_DIR / "fleet.sqlite3"
 JSIGN_JAR = FLEET_DIR / "tools" / "jsign-7.1.jar"
 JAVA = "java"

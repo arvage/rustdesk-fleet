@@ -19,6 +19,7 @@ Run directly for CLI usage:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sqlite3
 import subprocess
@@ -28,7 +29,7 @@ from pathlib import Path
 
 import requests
 
-FLEET_ROOT = Path("/opt/rustdesk-fleet")
+FLEET_ROOT = Path(os.environ.get("FLEET_DATA_DIR") or "/opt/rustdesk-fleet")
 DB_PATH = FLEET_ROOT / "fleet.sqlite3"
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 COMPOSE_SRC = Path(__file__).parent / "docker-compose.yml"

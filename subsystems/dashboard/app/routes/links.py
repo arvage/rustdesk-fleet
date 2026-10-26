@@ -18,6 +18,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
+from app import paths
 from app.auth import require_auth
 from app.deps import get_db, log_event
 from app.notifications import fire_notification, send_download_link_email
@@ -26,7 +27,7 @@ from app.templates_config import _localtime, templates
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-OUTPUT_DIR = Path("/opt/rustdesk-fleet/installers")
+OUTPUT_DIR = paths.INSTALLERS_DIR
 
 # Expiry choices offered in the UI → hours (None = never expires)
 EXPIRY_OPTIONS: dict[str, int | None] = {

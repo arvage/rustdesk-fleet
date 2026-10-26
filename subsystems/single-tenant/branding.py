@@ -14,10 +14,11 @@ itself (window, taskbar, tray) keeps its own icon and name.
 from __future__ import annotations
 
 import io
+import os
 import re
 from pathlib import Path
 
-BRANDING_DIR = Path("/opt/rustdesk-fleet/branding")
+BRANDING_DIR = Path(os.environ.get("FLEET_DATA_DIR") or "/opt/rustdesk-fleet") / "branding"
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 MIN_ICON_PX = 32
 ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]

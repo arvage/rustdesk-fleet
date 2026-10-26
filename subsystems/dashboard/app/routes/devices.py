@@ -1,17 +1,17 @@
 import sqlite3
 from datetime import datetime, timezone, date, timedelta
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app import paths
 from app.auth import require_auth
 from app.deps import get_db, get_devices, get_hbbs_peers, log_event
 from app.permissions import require_perm
 from app.notifications import fire_notification
 from app.templates_config import templates
 
-HBBS_DB_PATH = Path("/opt/rustdesk-fleet/data/db_v2.sqlite3")
+HBBS_DB_PATH = paths.HBBS_DB
 
 router = APIRouter()
 

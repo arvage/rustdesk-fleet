@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -34,7 +35,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-FLEET_ROOT   = Path("/opt/rustdesk-fleet")
+FLEET_ROOT   = Path(os.environ.get("FLEET_DATA_DIR") or "/opt/rustdesk-fleet")
 DB_PATH      = FLEET_ROOT / "fleet.sqlite3"
 SCHEMA_PATH  = Path(__file__).parent / "schema.sql"
 ASSETS_DIR   = FLEET_ROOT / "installer-assets"
