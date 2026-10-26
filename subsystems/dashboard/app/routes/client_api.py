@@ -2,7 +2,8 @@
 Receiver for the RustDesk client's built-in "API server" reporting.
 
 The community RustDesk client (src/hbbs_http/sync.rs) POSTs to its API
-server — `api-server` if configured, otherwise http://<rendezvous-host>:21114:
+server — `api-server` if configured, otherwise http://<rendezvous-host>:21114
+(see TENANCY.md, "How the RustDesk client finds its API server"):
 
   /api/sysinfo    hostname, os, username, cpu, memory, client version
                   (on start, every 120 s until accepted, and when the
@@ -19,8 +20,10 @@ server — `api-server` if configured, otherwise http://<rendezvous-host>:21114:
                   peer's ip/name, file count and the largest ≤10 files)
 
 These endpoints are unauthenticated by design (the client sends no
-credentials), so every report is checked against the hbbs peer table: the
-id must be registered and the uuid must match the one hbbs has on file.
+credentials), so every report is checked against the hbbs peer table of the
+tenant the request's Host belongs to (app/tenancy.py): the id must be
+registered with that tenant's relay and the uuid must match the one its hbbs
+has on file. A device of another tenant is rejected like an unknown one.
 
 The heartbeat response can also push config ("strategy") or kill sessions
 ("disconnect"). We never send "disconnect", and the only config we ever push
@@ -40,11 +43,9 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from app import paths
 from app.deps import get_db, log_event
-from app.tenancy import request_tenant
+from app.tenancy import Tenant, request_tenant
 
-HBBS_DB_PATH = paths.HBBS_DB
 _MAX_BODY = 64 * 1024
 
 # Keys the client may include that we never want to store (preset
@@ -61,43 +62,60 @@ _MANAGED_OPTIONS = {
 }
 
 # ── hbbs peer lookup (cached briefly; heartbeats arrive every few seconds) ───
+# One cache per tenant relay (keyed by its hbbs database), so each tenant's
+# devices are checked against its own peer table only.
 
 _PEER_CACHE_TTL_S = 30
 # An unknown id forces an early re-read, but no more often than this, so a
 # stream of reports with made-up ids can't make every request hit hbbs's DB.
 _FORCED_REFRESH_MIN_S = 5
-_peer_cache: dict[str, bytes] = {}
-_peer_cache_at = 0.0        # when the cache was last loaded successfully
-_peer_read_at = 0.0         # when a read was last attempted
-_peer_lock = threading.Lock()
 
 
-def _peer_uuids(force: bool = False) -> dict[str, bytes]:
-    global _peer_cache, _peer_cache_at, _peer_read_at
-    with _peer_lock:
+class _PeerCache:
+    def __init__(self) -> None:
+        self.peers: dict[str, bytes] = {}
+        self.loaded_at = 0.0    # when the cache was last loaded successfully
+        self.read_at = 0.0      # when a read was last attempted
+        self.lock = threading.Lock()
+
+
+_peer_caches: dict[str, _PeerCache] = {}
+_peer_caches_lock = threading.Lock()
+
+
+def _peer_uuids(tenant: Tenant, force: bool = False) -> dict[str, bytes]:
+    """{rustdesk id: uuid} from the tenant's own hbbs peer table."""
+    hbbs = tenant.hbbs_db
+    if hbbs is None:
+        return {}
+    with _peer_caches_lock:
+        pc = _peer_caches.setdefault(str(hbbs), _PeerCache())
+    with pc.lock:
         now = time.monotonic()
-        fresh = now - _peer_cache_at < _PEER_CACHE_TTL_S
-        may_force = force and now - _peer_read_at >= _FORCED_REFRESH_MIN_S
+        fresh = now - pc.loaded_at < _PEER_CACHE_TTL_S
+        may_force = force and now - pc.read_at >= _FORCED_REFRESH_MIN_S
         if fresh and not may_force:
-            return _peer_cache
-        _peer_read_at = now
+            return pc.peers
+        pc.read_at = now
         cache: dict[str, bytes] = {}
-        if HBBS_DB_PATH.exists():
+        if hbbs.exists():
             try:
-                conn = sqlite3.connect(f"file:{HBBS_DB_PATH}?mode=ro", uri=True, timeout=2)
+                conn = sqlite3.connect(f"file:{hbbs}?mode=ro", uri=True, timeout=2)
                 for rid, uuid in conn.execute("SELECT id, uuid FROM peer"):
                     cache[rid] = bytes(uuid) if uuid is not None else b""
                 conn.close()
             except Exception:
-                return _peer_cache  # keep serving the last good copy
-        _peer_cache, _peer_cache_at = cache, time.monotonic()
+                return pc.peers  # keep serving the last good copy
+        pc.peers, pc.loaded_at = cache, time.monotonic()
         return cache
 
 
 def _verify(request: Request, payload: dict) -> str | None:
-    """Return the RustDesk id if the report matches a registered peer, else None.
-    A request that matched no tenant (unknown host) never verifies."""
-    if request_tenant(request) is None:
+    """Return the RustDesk id if the report matches a peer registered with
+    the request's tenant's relay, else None. A request that matched no
+    tenant (unknown host) never verifies."""
+    tenant = request_tenant(request)
+    if tenant is None:
         return None
     rid = str(payload.get("id") or "").strip()
     uuid_b64 = payload.get("uuid") or ""
@@ -107,11 +125,11 @@ def _verify(request: Request, payload: dict) -> str | None:
         sent_uuid = base64.b64decode(uuid_b64, validate=False)
     except Exception:
         return None
-    peers = _peer_uuids()
+    peers = _peer_uuids(tenant)
     if rid not in peers:
         # A brand-new device may register moments before reporting; re-read
         # (at most once every _FORCED_REFRESH_MIN_S).
-        peers = _peer_uuids(force=True)
+        peers = _peer_uuids(tenant, force=True)
     expected = peers.get(rid)
     if not expected or expected != sent_uuid:
         return None

@@ -123,3 +123,92 @@ never strands devices. For tenant #1 both happen to be the same name today.
 (`<slug>.<our domain>`, phase 1b) or `custom` (a tenant's CNAME, phase 1c);
 `verified_at` and `tls_status` are there for phase 1c's verification and
 certificates.
+
+## How the RustDesk client finds its API server
+
+Read from the RustDesk client source (`rustdesk/rustdesk` master at
+`59f2953`, 2026-10-26: `src/common.rs` `get_api_server()` /
+`get_api_server_()` / `get_audit_server()`, `src/hbbs_http/sync.rs`
+`heartbeat_url()`, `src/server/connection.rs`; port helpers in
+`hbb_common/src/socket_client.rs`). Phase 1b will set `api-server`
+explicitly in new tenants' installers based on this.
+
+The client computes one API base URL from two options, `api-server` and
+`custom-rendezvous-server` (the ID server), and builds every reporting URL
+from it:
+
+| Report | URL |
+|---|---|
+| heartbeat | `<api>/api/heartbeat` |
+| sysinfo | `<api>/api/sysinfo` (the heartbeat URL with `heartbeat` → `sysinfo`) |
+| sysinfo_ver | `<api>/api/sysinfo_ver` (only when the API is a `*.rustdesk.com` host) |
+| connection audit | `<api>/api/audit/conn` |
+| file audit | `<api>/api/audit/file` |
+
+How `<api>` is chosen, in order:
+
+1. **Windows only:** a licence encoded in the installer's file name
+   (`get_license_from_exe_name()`) wins over everything: its `api` field if
+   set, and its `host` as the ID server. Our installers aren't named that
+   way, so this never applies to them.
+2. **`api-server` is set:** it is used as is, minus one trailing `/`. One
+   exception: if it starts with `https` and ends in `:21114`, the `:21114` is
+   dropped (HTTPS on 21114 is assumed to be a mistake) unless the build
+   option `allow-https-21114` is `Y`.
+3. **`api-server` is empty:** it is derived from the ID server
+   (`custom-rendezvous-server`, else the build's built-in server):
+   - with an explicit port, `host:PORT` becomes `http://host:(PORT-2)`
+     (`increase_port(host, -2)`): `rds.example.com:21116` →
+     `http://rds.example.com:21114`;
+   - without a port, `http://host:21114` (`RENDEZVOUS_PORT` 21116 − 2); an
+     IPv6 literal is bracketed.
+
+   A derived URL is always plain `http`.
+4. **Neither is set:** `https://admin.rustdesk.com`. Because that is a
+   `rustdesk.com` host, `heartbeat_url()` returns empty and the client
+   doesn't report at all. The same happens when the build option
+   `register-device` is off (`Config::no_register_device()`).
+
+Reports are HTTP POSTs to that URL, so the `Host` header the dashboard sees is
+the URL's `host[:port]`: the relay host for a derived URL (or the IP, if the
+ID server was entered as an IP), whatever `api-server` names otherwise. Newer
+clients retry a failed or 5xx request over a raw TCP proxy through the ID
+server (`with_tcp_proxy_fallback`) when the target is the configured API
+host; the community `hbbs` doesn't serve that, so for us it just fails.
+
+What this means here:
+
+- Tenant #1's **older installers** set no `api-server`, so those devices post
+  to `http://<relay host>:21114`: the legacy port-21114 nginx vhost.
+- Tenant #1's **current installers** set `api-server = "https://<host>"`
+  (`installer.nsi.tmpl`, the macOS and Linux templates) and report over 443
+  with that `Host`.
+- **Phase 1b:** set `api-server` to `https://<the tenant's relay host>` in
+  every new tenant's installers, never to a custom domain, for the same
+  reason the ID server is the relay host: a tenant changing domains must not
+  strand devices. There will be no per-tenant port-21114 listener.
+
+## How a device request finds its tenant
+
+`tenancy.tenant_for_request()`:
+
+1. The `Host` (lowercased, port stripped) is looked up in `tenant_domains`.
+2. Device API paths only (`/api/heartbeat`, `/api/sysinfo`,
+   `/api/sysinfo_ver`, `/api/audit/conn`, `/api/audit/file`): a host that is
+   a tenant's relay host (`relays.host`) selects that tenant, since installers
+   point devices there.
+3. Device API paths only: if nginx tagged the request `X-Fleet-Listener:
+   legacy-api` (set on the port-21114 vhost, stripped on every vhost), an
+   unknown host means tenant #1.
+4. Anything else is an unknown host: a 404 page, or for the device API the
+   same reply as an unknown device (`{}`, `REJECTED`, 400), because a 404
+   means nothing to the client.
+
+The report is then verified against **that tenant's** hbbs peer table
+(`relays.hbbs_db_path`): the id must be registered with that tenant's relay
+and the uuid must match. A device of tenant A reporting on tenant B's host is
+rejected exactly like an unknown id. Each relay has its own peer cache.
+
+Suspended and cancelled tenants: their devices' reports are still accepted
+and recorded (it costs nothing and keeps the history intact), but the
+heartbeat reply never pushes config to them.

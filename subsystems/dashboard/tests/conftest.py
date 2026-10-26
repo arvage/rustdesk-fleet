@@ -69,9 +69,7 @@ def fresh_state():
     tenancy.invalidate_cache()
     permissions.invalidate_cache()
     auth._setup_done.clear()
-    client_api._peer_cache = {}
-    client_api._peer_cache_at = 0.0
-    client_api._peer_read_at = 0.0
+    client_api._peer_caches.clear()
     yield
 
 

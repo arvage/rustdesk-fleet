@@ -357,6 +357,9 @@ client_port_block() {
 
 # Legacy client reporting (older installers post to http://<host>:21114).
 # New installers report over 443. Remove once no client uses 21114.
+# Devices here may send any Host (often an IP), so this listener tags its
+# requests and the dashboard maps an unknown host on it to tenant #1. The
+# value overrides any X-Fleet-Listener a client sends.
 server {
     listen 21114;
     listen [::]:21114;
@@ -370,6 +373,7 @@ server {
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  legacy-api;
         proxy_read_timeout 15s;
     }
     location / { return 404; }
@@ -380,7 +384,9 @@ NGX
 # Dashboard locations, shared by both vhosts. The sign-in endpoints get a
 # per-IP limit on POSTs (zone and map defined at the top of the vhost file);
 # GETs, the device API and everything else are not limited. The app applies
-# its own per-email and per-IP lockouts on top of this.
+# its own per-email and per-IP lockouts on top of this. Every location drops
+# a client-sent X-Fleet-Listener (an empty value isn't passed upstream): only
+# the port-21114 block may set it.
 dash_locations() {
   cat <<'NGX'
     location = /login {
@@ -391,6 +397,7 @@ dash_locations() {
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  "";
         proxy_read_timeout 60s;
     }
     # No trailing slash: a proxied prefix ending in / makes nginx 301
@@ -403,6 +410,7 @@ dash_locations() {
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  "";
         proxy_read_timeout 60s;
     }
     location = /setup {
@@ -413,6 +421,7 @@ dash_locations() {
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  "";
         proxy_read_timeout 60s;
     }
     location / {
@@ -421,6 +430,7 @@ dash_locations() {
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  "";
         proxy_read_timeout 60s;
     }
 NGX

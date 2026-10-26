@@ -198,6 +198,9 @@ server {
     # Repeat this block for `location ^~ /login/webauthn` (no trailing
     # slash, or nginx and the app redirect each other in a loop) and
     # `location = /setup`. Don't limit the device API (/api/heartbeat etc.).
+    # Every location that proxies to the dashboard must clear
+    # X-Fleet-Listener (an empty value isn't passed on): only the port-21114
+    # block below may set it.
     location = /login {
         limit_req        zone=rdf_signin burst=20 nodelay;
         limit_req_status 429;
@@ -206,6 +209,7 @@ server {
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  "";   # drop any client-sent copy
         proxy_read_timeout 60s;
     }
 
@@ -215,6 +219,7 @@ server {
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  "";   # drop any client-sent copy
         proxy_read_timeout 60s;
     }
 }
@@ -223,6 +228,9 @@ server {
 # that use the default http://<rendezvous-host>:21114. Only the client
 # reporting endpoints are exposed — the dashboard itself is not reachable on this port.
 # Remove this block once every client reports over HTTPS (see Section 7).
+# It belongs to tenant #1: devices here may send any Host (often an IP), so it
+# tags requests with X-Fleet-Listener and the dashboard maps an unknown host
+# on this listener to tenant #1 (subsystems/dashboard/TENANCY.md).
 server {
     listen 21114;
     listen [::]:21114;
@@ -238,6 +246,7 @@ server {
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  legacy-api;   # overrides any client-sent value
         proxy_read_timeout 15s;
     }
 

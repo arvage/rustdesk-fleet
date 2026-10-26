@@ -187,10 +187,42 @@ def legacy_tenant() -> Tenant | None:
     return tenant
 
 
+def resolve_relay_host(raw_host: str) -> Tenant | None:
+    """The tenant whose relay host is this (device API only). Installers point
+    devices at the relay host, never at a web domain (TENANCY.md), so a
+    device whose api-server is its relay host lands on the right tenant even
+    when that name is not one of the tenant's web domains."""
+    hostname = normalize_host(raw_host)
+    if not hostname:
+        return None
+    key = "\0relay:" + hostname
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and now - hit[0] < _CACHE_TTL_S:
+            return hit[1]
+    from app.deps import get_db
+    conn = get_db()
+    try:
+        match = next((r["tenant_id"] for r in conn.execute("SELECT tenant_id, host FROM relays")
+                      if normalize_host(r["host"]) == hostname), None)
+        tenant = _load(conn, match, hostname) if match is not None else None
+    finally:
+        conn.close()
+    with _cache_lock:
+        _cache[key] = (now, tenant)
+    return tenant
+
+
 def tenant_for_request(host: str, path: str, listener: str) -> Tenant | None:
+    """Host -> tenant. Device API requests may also match a relay host, and
+    on the legacy port-21114 listener an unknown host means tenant #1.
+    Nothing else ever falls back to tenant #1."""
     tenant = resolve_host(host)
-    if tenant is None and path in DEVICE_API_PATHS and listener == LEGACY_LISTENER:
-        tenant = legacy_tenant()
+    if tenant is None and path in DEVICE_API_PATHS:
+        tenant = resolve_relay_host(host)
+        if tenant is None and listener == LEGACY_LISTENER:
+            tenant = legacy_tenant()
     return tenant
 
 

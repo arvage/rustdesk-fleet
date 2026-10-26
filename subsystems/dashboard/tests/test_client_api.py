@@ -54,6 +54,7 @@ def test_unknown_ids_reread_hbbs_at_most_every_5_seconds(client, monkeypatch):
     assert len(reads) == 1
 
     # Once 5 seconds have passed, an unknown id may force another read.
-    monkeypatch.setattr(client_api, "_peer_read_at", client_api._peer_read_at - 6)
+    [cache] = client_api._peer_caches.values()
+    cache.read_at -= 6
     heartbeat(client, "555009999", UUID)
     assert len(reads) == 2
