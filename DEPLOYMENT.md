@@ -114,9 +114,17 @@ Test reachability from outside the box: `nc -zv rds.example.com 21115`.
 sudo mkdir -p /etc/rustdesk-fleet
 sudo tee /etc/rustdesk-fleet/dashboard.env >/dev/null <<'EOF'
 SESSION_SECRET=<generate with: python3 -c "import secrets; print(secrets.token_hex(32))">
+SETUP_TOKEN=<generate with: python3 -c "import secrets; print(secrets.token_urlsafe(24))">
 EOF
 sudo chmod 600 /etc/rustdesk-fleet/dashboard.env
 ```
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `SESSION_SECRET` | yes | Signs session cookies. The dashboard refuses to start if it is missing, shorter than 32 characters, or the old `change-me-in-production` placeholder. |
+| `SETUP_TOKEN` | until the first admin exists | Unlocks `/setup` (Section 5). Ignored once a user exists; the line can then be deleted. |
+| `SESSION_MAX_AGE` | no | Session lifetime in seconds. Default 43200 (12 hours). |
+| `FLEET_DATA_DIR` | no | Data directory. Default `/opt/rustdesk-fleet`; the tests point it at a temp dir. |
 
 Install the systemd unit:
 
@@ -160,6 +168,9 @@ sudo certbot --nginx -d rds.example.com   # issues the cert, can also write the 
 Resulting vhost (`/etc/nginx/sites-available/rds.example.com`):
 
 ```nginx
+# Per-IP limit for the sign-in endpoints (must be outside any server block).
+limit_req_zone $binary_remote_addr zone=rdf_auth:10m rate=10r/m;
+
 server {
     listen 80;
     server_name rds.example.com;
@@ -174,6 +185,21 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/rds.example.com/privkey.pem;
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    # Sign-in endpoints: 10 requests/min per IP, burst 5, then 429. The app
+    # also locks an email after 5 failures and an IP after 20 (15 min each).
+    # Repeat this block for `location ^~ /login/webauthn/` and
+    # `location = /setup`. Don't limit the device API (/api/heartbeat etc.).
+    location = /login {
+        limit_req        zone=rdf_auth burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
 
     location / {
         proxy_pass         http://127.0.0.1:8000;
@@ -236,11 +262,32 @@ Database changes apply themselves on startup (`run_migrations()` only adds
 tables/columns), and nothing in `/opt/rustdesk-fleet` is touched. Template
 and CSS edits take effect without a restart, but Python changes need one.
 
+**Upgrading to the sign-in hardening release** (session versions, setup
+token, rate limits):
+
+- Everyone is signed out once. Sessions now carry a `session_version`
+  that older cookies don't have.
+- Sessions expire after 12 hours (`SESSION_MAX_AGE`), not 14 days.
+- Sign out is a POST from the sidebar button. Visiting `/logout` directly
+  now just goes to `/` without signing out.
+- The dashboard won't start if `SESSION_SECRET` is shorter than 32
+  characters. Check before restarting:
+  `sudo awk -F= '/^SESSION_SECRET=/{print length($2)}' /etc/rustdesk-fleet/dashboard.env`
+- No `SETUP_TOKEN` is needed on a box that already has users.
+- The nginx rate limit is not applied by a `git pull`. Add the
+  `limit_req_zone` line and the three sign-in `location` blocks shown in
+  Section 4 to your vhost, then `sudo nginx -t && sudo systemctl reload nginx`.
+
 ## 5. First-run setup
 
-Visit `https://rds.example.com/` — with an empty `users` table every
-route redirects to `/setup`, a one-time page to create the first admin
-account.
+Open the setup URL that `install.sh` prints at the end:
+`https://rds.example.com/setup?token=<SETUP_TOKEN>`. With an empty `users`
+table every route redirects to `/setup`, a one-time page to create the
+first admin account. It only accepts the form with the `SETUP_TOKEN` from
+`/etc/rustdesk-fleet/dashboard.env`, so nobody who finds the server first
+can claim it. Without a token configured, `/setup` explains how to add one
+and accepts nothing. Lost the URL? Read the token from the env file:
+`sudo grep SETUP_TOKEN /etc/rustdesk-fleet/dashboard.env`.
 
 **There is no default username/password.** `/setup` prompts for the
 email and password to use for that first admin account — whatever you

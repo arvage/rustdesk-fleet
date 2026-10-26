@@ -17,12 +17,43 @@ Live at `https://rds.example.com`.
 `rustdesk-dashboard.service` — managed by systemd, `WorkingDirectory` is the repo checkout, `PYTHONPATH` set to `subsystems/single-tenant/` so `setup_server.py` and `generate_installer.py` are importable.
 
 Env vars loaded from `/etc/rustdesk-fleet/dashboard.env`:
-- `SESSION_SECRET` — random hex string, required in production
+- `SESSION_SECRET` — random hex string, at least 32 characters; the app won't start without it
+- `SETUP_TOKEN` — unlocks `/setup` while no users exist (written by `install.sh`)
+- `SESSION_MAX_AGE` — session lifetime in seconds, default 12 hours
+- `FLEET_DATA_DIR` — data directory, default `/opt/rustdesk-fleet` (see `app/paths.py`)
 - `DASHBOARD_PASSWORD` — legacy, no longer consulted (auth now uses the `users` table)
 
 ## First-run setup
 
-If the `users` table is empty, all routes redirect to `/setup`. The setup page creates the first admin account (email + bcrypt-hashed password). After that, `/setup` is permanently locked out.
+If the `users` table is empty, all routes redirect to `/setup`. The setup page creates the first admin account (email + bcrypt-hashed password) and only accepts the form with the right `SETUP_TOKEN` (`/setup?token=…` pre-fills it). With no token configured it accepts nothing. After the first admin exists, `/setup` is permanently locked out and the token is ignored.
+
+## Security
+
+- **Sessions.** The cookie only holds the user id and a `session_version`.
+  `require_auth()` loads the user from the database on every request, so a
+  deleted user is signed out and a role change applies on the next request.
+  Bumping `users.session_version` ends all of a user's sessions: it happens
+  on a role change, a password reset or change, a sign-in method change,
+  **Sign out everywhere** (My Account) and **Sign out** (Users page). A
+  self-service password or sign-in method change keeps the current session.
+  Sessions expire after `SESSION_MAX_AGE` (12 h).
+- **Sign-in limits** (`app/ratelimit.py`). 5 failures for one email in
+  15 minutes lock it for 15 minutes (unknown emails too, so lockouts don't
+  reveal accounts); 20 failures from one IP lock the IP. Covers password and
+  passkey sign-in and `/setup`. Locked requests get a 429 before any bcrypt
+  work, and each lockout is logged as `login_locked`. The counters are in
+  memory: they reset on restart and need shared storage if more than one
+  uvicorn worker is ever used. nginx adds a per-IP request limit on the same
+  paths (DEPLOYMENT.md, Section 4).
+- **Sign out** is a POST. `GET /logout` only redirects to `/`.
+- **Device API** (`/api/heartbeat` etc.) is unauthenticated by design but
+  only accepts reports whose id and uuid match the hbbs peer table. Unknown
+  ids re-read that table at most every 5 seconds.
+- **Backups** pass the gpg passphrase on stdin, never on the command line.
+- **Not yet:** CSRF tokens (`SameSite=Lax` is the current protection).
+
+Tests: `python3 -m pip install -r requirements-dev.txt`, then
+`python3 -m pytest subsystems/dashboard/tests` from the repo root.
 
 ## Routes
 
@@ -67,7 +98,8 @@ Staff pages (all require login):
 | `POST /api/devices/{id}/connect` | Records a Connect/Terminal click (`connect_clicks`); sent with `navigator.sendBeacon` from `base.html` on any `rustdesk://` link |
 | `GET /sessions` | Redirects to `/audit?cat=sessions` (kept for old links) |
 | `GET /api/devices`, `GET /api/devices/status`, `GET /api/devices/{id}/sessions`, `GET /api/server/health` | JSON for the live tables, per-device session history, and server-health tiles |
-| `GET /setup`, `GET/POST /login`, `/login/webauthn/...`, `GET /logout` | First-run setup, password and passkey sign-in |
+| `GET/POST /setup`, `GET/POST /login`, `/login/webauthn/...`, `POST /logout` | First-run setup (needs `SETUP_TOKEN`), password and passkey sign-in, sign out (`GET /logout` only redirects to `/`) |
+| `POST /account/sign-out-everywhere`, `POST /users/{id}/sign-out` | End all of your own sessions / another user's (`manage_users`) |
 
 Public, no login:
 
