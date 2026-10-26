@@ -19,6 +19,9 @@ backup timer) and is idempotent. Full and manual steps:
 [`DEPLOYMENT.md`](DEPLOYMENT.md). Using the dashboard day to day:
 [`USER_GUIDE.md`](USER_GUIDE.md).
 
+Public product page, served by the dashboard at `/` to signed-out visitors:
+[`site/index.html`](site/index.html) — see [`site/README.md`](site/README.md).
+
 ## Current architecture: single-tenant
 
 One `hbbs`/`hbbr` pair for the entire fleet, one shared keypair, one

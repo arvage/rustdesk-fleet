@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="RustDesk Fleet: a self-hosted RustDesk relay and management dashboard for MSPs and IT teams. One install script.">
+<title>RustDesk Fleet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..900&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: operator's console. Wide expanded headline left, a live-looking device panel right;
+   below, a relay diagram and plain-spoken spec sheet. One bold move: the expanded display type. */
+:root {
+  --bg: #F1F3F7;
+  --surface: #FFFFFF;
+  --ink: #0F1A2B;
+  --muted: #586579;
+  --line: #D6DCE6;
+  --accent: #2742E0;
+  --accent-ink: #FFFFFF;
+  --accent-soft: #E3E8FF;
+  --ok: #1D8452;
+  --ok-soft: #DDF3E7;
+  --busy: #A8680F;
+  --busy-soft: #FBEBD2;
+  --off: #8A95A6;
+  --term-bg: #0F1A2B;
+  --term-fg: #D9E1EE;
+  --term-dim: #7F8DA3;
+  --term-hi: #9DB0FF;
+
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --step--1: 0.875rem;
+  --step-0: 1.0625rem;
+  --step-1: 1.25rem;
+  --step-2: 1.6rem;
+  --step-3: clamp(1.9rem, 1.3rem + 2.4vw, 2.75rem);
+  --step-4: clamp(2.5rem, 1.4rem + 4.6vw, 4.6rem);
+  --max: 1180px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0A101B; --surface: #111A29; --ink: #E6EBF3; --muted: #8E9BB0; --line: #233046;
+    --accent: #7D92FF; --accent-ink: #0A101B; --accent-soft: #1B2547;
+    --ok: #4CC48B; --ok-soft: #12301F; --busy: #E4AA52; --busy-soft: #3A2A10; --off: #66738A;
+    --term-bg: #060A11; --term-fg: #D9E1EE; --term-dim: #6F7D94; --term-hi: #9DB0FF;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0A101B; --surface: #111A29; --ink: #E6EBF3; --muted: #8E9BB0; --line: #233046;
+  --accent: #7D92FF; --accent-ink: #0A101B; --accent-soft: #1B2547;
+  --ok: #4CC48B; --ok-soft: #12301F; --busy: #E4AA52; --busy-soft: #3A2A10; --off: #66738A;
+  --term-bg: #060A11; --term-fg: #D9E1EE; --term-dim: #6F7D94; --term-hi: #9DB0FF;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { color-scheme: light; scroll-behavior: smooth; }
+body { margin: 0; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+section[id] { scroll-margin-top: 64px; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: var(--step-0);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px);
+  z-index: 10; background: var(--bg);
+}
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+.wrap {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.05; }
+h2 { font-size: var(--step-3); font-weight: 800; font-stretch: 118%; letter-spacing: -0.01em; }
+h3 { font-size: var(--step-1); font-weight: 700; font-stretch: 105%; line-height: 1.2; }
+p { margin: 0; }
+.eyebrow {
+  font-family: var(--mono); font-size: 0.78rem; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted);
+}
+.lede { color: var(--muted); font-size: var(--step-1); max-width: 34em; line-height: 1.5; }
+
+/* Header */
+.top {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.top .wrap { display: flex; align-items: center; gap: 24px; padding-block: 14px; }
+.mark { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
+.mark b { font-family: var(--display); font-stretch: 120%; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.01em; }
+.mark svg { flex: none; }
+.nav { display: flex; gap: 22px; margin-left: auto; align-items: center; }
+.nav a { color: var(--muted); text-decoration: none; font-weight: 600; font-size: 0.95rem; }
+.nav a:hover { color: var(--ink); }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--body); font-weight: 700; font-size: 0.98rem;
+  padding: 10px 18px; border-radius: 8px; border: 1px solid transparent;
+  text-decoration: none; cursor: pointer; transition: transform .15s ease, background .15s ease;
+}
+.btn-primary { background: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { transform: translateY(-1px); }
+.btn-ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+.btn-ghost:hover { border-color: var(--muted); }
+@media (max-width: 760px) { .nav a:not(.btn) { display: none; } }
+
+/* Hero */
+.hero .wrap {
+  display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr);
+  gap: 56px; align-items: center; padding-block: 72px 64px;
+}
+.hero h1 {
+  font-size: var(--step-4); font-weight: 850; font-stretch: 125%;
+  letter-spacing: -0.025em; line-height: 0.98;
+}
+.hero h1 em { font-style: normal; color: var(--accent); }
+.hero-copy { display: grid; gap: 24px; min-width: 0; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.hero-note { font-family: var(--mono); font-size: var(--step--1); color: var(--muted); }
+@media (max-width: 900px) { .hero .wrap { grid-template-columns: minmax(0, 1fr); gap: 40px; padding-block: 48px; } }
+
+/* Device panel mock */
+.panel {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 1px 0 var(--line), 0 24px 48px -28px color-mix(in srgb, var(--ink) 35%, transparent);
+  overflow: hidden; min-width: 0;
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 18px; border-bottom: 1px solid var(--line);
+}
+.panel-head strong { font-family: var(--display); font-stretch: 110%; font-size: 1rem; }
+.panel-head span { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); }
+.panel-scroll { overflow-x: auto; }
+table.devices { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 440px; }
+.devices th {
+  text-align: left; font-family: var(--mono); font-weight: 500; font-size: 0.72rem;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+  padding: 10px 18px; border-bottom: 1px solid var(--line);
+}
+.devices td { padding: 11px 18px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.devices tr:last-child td { border-bottom: 0; }
+.devices .id { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.85rem; }
+.devices .name { font-weight: 600; }
+.devices .grp { color: var(--muted); }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 700;
+  padding: 2px 9px; border-radius: 999px;
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.on { color: var(--ok); background: var(--ok-soft); }
+.pill.busy { color: var(--busy); background: var(--busy-soft); }
+.pill.off { color: var(--off); background: color-mix(in srgb, var(--off) 14%, transparent); }
+.panel-foot {
+  padding: 10px 18px; font-family: var(--mono); font-size: 0.74rem; color: var(--muted);
+  border-top: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 55%, var(--surface));
+}
+
+/* Fact strip */
+.facts { border-block: 1px solid var(--line); background: var(--surface); }
+.facts .wrap {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; padding-block: 28px;
+}
+.fact { display: grid; gap: 4px; min-width: 0; }
+.fact b { font-family: var(--display); font-stretch: 115%; font-weight: 800; font-size: var(--step-1); }
+.fact span { color: var(--muted); font-size: 0.95rem; }
+@media (max-width: 820px) { .facts .wrap { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+section.block .wrap { padding-block: 88px; display: grid; gap: 44px; }
+.section-head { display: grid; gap: 14px; max-width: 46rem; }
+
+/* Features */
+.features {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--line); border-left: 1px solid var(--line);
+}
+.feature {
+  padding: 26px 24px 30px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  display: grid; gap: 10px; align-content: start; min-width: 0;
+}
+.feature .tag { font-family: var(--mono); font-size: 0.74rem; color: var(--accent); letter-spacing: 0.06em; }
+.feature p { color: var(--muted); }
+@media (max-width: 900px) { .features { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .features { grid-template-columns: minmax(0, 1fr); } }
+
+/* Steps */
+.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; counter-reset: step; }
+.step { display: grid; gap: 10px; align-content: start; padding-top: 18px; border-top: 2px solid var(--ink); min-width: 0; }
+.step .n { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
+.step p { color: var(--muted); }
+.step code { font-family: var(--mono); font-size: 0.86em; background: var(--accent-soft); color: var(--ink); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+@media (max-width: 900px) { .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .steps { grid-template-columns: minmax(0, 1fr); } }
+
+/* Architecture */
+.arch { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 48px; align-items: start; }
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 520px; height: auto; }
+.diagram .box { fill: var(--bg); stroke: var(--line); stroke-width: 1.5; }
+.diagram .box.core { fill: var(--accent-soft); stroke: var(--accent); }
+.diagram .t { fill: var(--ink); font-family: var(--display); font-weight: 700; font-size: 15px; }
+.diagram .s { fill: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+.diagram .wire { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.diagram .flow { stroke: var(--accent); stroke-width: 2.5; fill: none; stroke-dasharray: 6 10; animation: flow 1.4s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -32; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .diagram .flow { animation: none; } .btn { transition: none; } }
+.arch-notes { display: grid; gap: 22px; }
+.arch-notes > div { display: grid; gap: 6px; }
+.arch-notes p { color: var(--muted); }
+@media (max-width: 900px) { .arch { grid-template-columns: minmax(0, 1fr); } }
+
+/* Compare */
+.compare-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+table.compare { width: 100%; border-collapse: collapse; min-width: 620px; }
+.compare th, .compare td { text-align: left; padding: 16px 20px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.compare tr:last-child td { border-bottom: 0; }
+.compare thead th { font-family: var(--mono); font-weight: 500; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.compare thead th.us { color: var(--accent); }
+.compare td:first-child { font-weight: 700; width: 24%; }
+.compare td.us { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+.compare td:last-child { color: var(--muted); }
+
+/* Install CTA */
+.install { background: var(--term-bg); color: var(--term-fg); }
+.install .wrap { padding-block: 88px; display: grid; gap: 28px; }
+.install h2 { color: var(--term-fg); }
+.install .eyebrow { color: var(--term-dim); }
+.install .lede { color: var(--term-dim); }
+.term {
+  border: 1px solid color-mix(in srgb, var(--term-fg) 16%, transparent); border-radius: 12px;
+  overflow: hidden; max-width: 860px; width: 100%;
+}
+.term-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 12%, transparent);
+  font-family: var(--mono); font-size: 0.78rem; color: var(--term-dim);
+}
+.copy {
+  font-family: var(--mono); font-size: 0.78rem; color: var(--term-fg);
+  background: transparent; border: 1px solid color-mix(in srgb, var(--term-fg) 28%, transparent);
+  border-radius: 6px; padding: 4px 10px; cursor: pointer;
+}
+.copy:hover { border-color: var(--term-hi); color: var(--term-hi); }
+pre.cmd {
+  margin: 0; padding: 20px; overflow-x: auto; font-family: var(--mono); font-size: 0.92rem; line-height: 1.75;
+}
+pre.cmd .p { color: var(--term-dim); user-select: none; }
+pre.cmd .f { color: var(--term-hi); }
+pre.cmd .o { color: var(--term-dim); }
+pre.cmd .k { color: #7EE2A8; }
+.install-links { display: flex; flex-wrap: wrap; gap: 10px 28px; font-family: var(--mono); font-size: 0.86rem; color: var(--term-dim); }
+.install-links a { color: inherit; text-decoration: none; }
+.install-links a:hover b { text-decoration: underline; }
+.install-links b { color: var(--term-fg); font-weight: 500; }
+
+footer .wrap {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px;
+  padding-block: 28px; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--line);
+}
+footer .mono { font-family: var(--mono); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="#top" aria-label="RustDesk Fleet home">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <rect x="1" y="1" width="24" height="24" rx="6" fill="var(--accent)"></rect>
+        <circle cx="8" cy="13" r="2.6" fill="var(--accent-ink)"></circle>
+        <circle cx="18" cy="8" r="2.2" fill="var(--accent-ink)"></circle>
+        <circle cx="18" cy="18" r="2.2" fill="var(--accent-ink)"></circle>
+        <path d="M10.4 12 L16 8.8 M10.4 14 L16 17.2" stroke="var(--accent-ink)" stroke-width="1.6"></path>
+      </svg>
+      <b>RustDesk Fleet</b>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#architecture">Architecture</a>
+      <a href="https://github.com/arvage/rustdesk-fleet">GitHub</a>
+      <a class="btn btn-ghost" href="/login">Sign in</a>
+      <a class="btn btn-primary" href="#install">Install</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="wrap">
+      <div class="hero-copy">
+        <span class="eyebrow">Self-hosted remote support for MSPs &amp; IT teams</span>
+        <h1>Your own remote support server. <em>One install script.</em></h1>
+        <p class="lede">RustDesk Fleet runs the RustDesk relay and a full management dashboard on a single Ubuntu box you control. Brand the client per customer, sign the installers, and audit every session, without per-technician licences.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#install">Get the install script</a>
+          <a class="btn btn-ghost" href="#features">See what's in the dashboard</a>
+        </div>
+        <p class="hero-note">hbbs + hbbr · FastAPI dashboard · Let's Encrypt TLS · nightly backups</p>
+      </div>
+
+      <div class="panel" aria-label="Example of the Devices page">
+        <div class="panel-head">
+          <strong>Devices</strong>
+          <span>Example data · all groups</span>
+        </div>
+        <div class="panel-scroll">
+          <table class="devices">
+            <thead>
+              <tr><th>ID</th><th>Computer</th><th>Group</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="id">418 220 907</td><td class="name">FRONTDESK-01</td><td class="grp">Harbor Dental</td><td><span class="pill busy">In session</span></td></tr>
+              <tr><td class="id">502 117 364</td><td class="name">ACCT-LAPTOP-3</td><td class="grp">Lindqvist CPA</td><td><span class="pill on">Online</span></td></tr>
+              <tr><td class="id">377 940 015</td><td class="name">SHOP-POS</td><td class="grp">Corner Hardware</td><td><span class="pill on">Online</span></td></tr>
+              <tr><td class="id">611 083 552</td><td class="name">RECEPTION-PC</td><td class="grp">Harbor Dental</td><td><span class="pill off">Offline</span></td></tr>
+              <tr><td class="id">294 561 830</td><td class="name">IT-BENCH-02</td><td class="grp">Internal</td><td><span class="pill on">Online</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="panel-foot">Windows 11 · macOS 15 · Ubuntu 24.04 — reported by each client</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="facts">
+    <div class="wrap">
+      <div class="fact"><b>1 script</b><span>Relay, dashboard, TLS and backup timer, idempotent on re-run</span></div>
+      <div class="fact"><b>Signed .exe</b><span>Authenticode via Azure Trusted Signing, built on Linux</span></div>
+      <div class="fact"><b>12 reports</b><span>Charts per group and date range, every table as CSV</span></div>
+      <div class="fact"><b>Your keypair</b><span>Server key and fleet DB never leave your box</span></div>
+    </div>
+  </div>
+
+  <section class="block" id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">The dashboard</span>
+        <h2>Everything a helpdesk needs around the relay</h2>
+        <p class="lede">Stock RustDesk server gives you a relay. Fleet adds the part your team works in all day.</p>
+      </div>
+      <div class="features">
+        <div class="feature">
+          <span class="tag">/devices</span>
+          <h3>Live device inventory</h3>
+          <p>Computer name, OS and client version reported by each machine, with online, in-session and offline status. New registrations land in a panel until you assign them.</p>
+        </div>
+        <div class="feature">
+          <span class="tag">/groups</span>
+          <h3>Client groups with their own branding</h3>
+          <p>Give each customer an installer with its own app name and icon, managed client settings, and an unattended password.</p>
+        </div>
+        <div class="feature">
+          <span class="tag">/groups/…/links</span>
+          <h3>Download links you can revoke</h3>
+          <p>Email a customer a link to their branded installer. Revoke it when the rollout is done.</p>
+        </div>
+        <div class="feature">
+          <span class="tag">audit</span>
+          <h3>Session and file-transfer audit</h3>
+          <p>Who connected, from where, and how. A connection timeline per device, plus a fleet-wide view by device or by technician.</p>
+        </div>
+        <div class="feature">
+          <span class="tag">/dynamic-groups</span>
+          <h3>Rule-based dynamic groups</h3>
+          <p>Build groups from rules such as OS, client version or status, with a live match preview and CSV export.</p>
+        </div>
+        <div class="feature">
+          <span class="tag">/admin/roles</span>
+          <h3>Roles from a capability matrix</h3>
+          <p>Define permission levels per capability and limit technicians to the client groups they support. Passkeys and MFA reminders included.</p>
+        </div>
+        <div class="feature">
+          <span class="tag">server health</span>
+          <h3>Health checks and alerts</h3>
+          <p>CPU, memory, disk, uptime and container state, with threshold alerts by email using templates you can edit and brand.</p>
+        </div>
+        <div class="feature">
+          <span class="tag">updates</span>
+          <h3>Updates from the dashboard</h3>
+          <p>Move hbbs/hbbr to the latest release and rebuild every group's installers on a new client version in one step.</p>
+        </div>
+        <div class="feature">
+          <span class="tag">/admin/backup</span>
+          <h3>Off-site backups with restore</h3>
+          <p>Keypair and databases to S3, Wasabi, Backblaze B2, DigitalOcean Spaces or MinIO. Test, run and restore from the UI.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="how" style="background: var(--surface); border-block: 1px solid var(--line);">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">From blank server to first session</span>
+        <h2>Four steps, about an hour</h2>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <span class="n">Step 1</span>
+          <h3>Point a hostname at a fresh Ubuntu box</h3>
+          <p>Any small VPS works. Open ports 21115–21119 for the relay and 443 for the dashboard.</p>
+        </div>
+        <div class="step">
+          <span class="n">Step 2</span>
+          <h3>Run the installer</h3>
+          <p><code>./install.sh --host --email</code> sets up the relay, dashboard, certificate and backup timer.</p>
+        </div>
+        <div class="step">
+          <span class="n">Step 3</span>
+          <h3>Create a client group</h3>
+          <p>Add the customer's name and icon, then build their signed Windows installer.</p>
+        </div>
+        <div class="step">
+          <span class="n">Step 4</span>
+          <h3>Send the download link</h3>
+          <p>Devices appear in the inventory as they install. Connect from your own RustDesk client.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="architecture">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Architecture</span>
+        <h2>One relay, one key, separation by group</h2>
+      </div>
+      <div class="arch">
+        <div class="diagram">
+          <svg viewBox="0 0 640 300" role="img" aria-label="Technicians and customer devices connect through one hbbs and hbbr relay pair; the dashboard sits beside it and shares the fleet database.">
+            <path class="wire" d="M150 80 H245"></path>
+            <path class="wire" d="M395 80 H490"></path>
+            <path class="wire" d="M395 80 H440 V220 H490"></path>
+            <path class="wire" d="M320 125 V185"></path>
+            <path class="flow" d="M150 80 H245"></path>
+            <path class="flow" d="M395 80 H490"></path>
+
+            <rect class="box" x="16" y="45" width="134" height="70" rx="10"></rect>
+            <text class="t" x="32" y="76">Technician</text>
+            <text class="s" x="32" y="97">RustDesk client</text>
+
+            <rect class="box core" x="245" y="35" width="150" height="90" rx="10"></rect>
+            <text class="t" x="262" y="68">Relay</text>
+            <text class="s" x="262" y="89">hbbs · hbbr</text>
+            <text class="s" x="262" y="107">:21115–21119</text>
+
+            <rect class="box" x="490" y="45" width="134" height="70" rx="10"></rect>
+            <text class="t" x="506" y="76">Harbor Dental</text>
+            <text class="s" x="506" y="97">group · 14 PCs</text>
+
+            <rect class="box" x="490" y="185" width="134" height="70" rx="10"></rect>
+            <text class="t" x="506" y="216">Lindqvist CPA</text>
+            <text class="s" x="506" y="237">group · 6 PCs</text>
+
+            <rect class="box" x="245" y="185" width="150" height="90" rx="10"></rect>
+            <text class="t" x="262" y="218">Dashboard</text>
+            <text class="s" x="262" y="239">FastAPI · :443</text>
+            <text class="s" x="262" y="257">fleet.sqlite3</text>
+          </svg>
+        </div>
+        <div class="arch-notes">
+          <div>
+            <h3>Why a single relay</h3>
+            <p>The RustDesk desktop client holds one server and key at a time. With a relay per customer, technicians would re-enter the ID server and key every time they switched clients. One shared relay lets a tech move between customers without touching settings.</p>
+          </div>
+          <div>
+            <h3>How customers stay apart</h3>
+            <p>Each device belongs to a client group in the fleet database. Roles and group access decide which technicians see which devices, and every session is logged against the group.</p>
+          </div>
+          <div>
+            <h3>The trade-off, stated plainly</h3>
+            <p>All devices trust the same server key. A leaked installer is scoped by group in the dashboard, not by cryptography. Keep the keypair on the server, and rotate it if it is ever exposed.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="compare" style="padding-top:0">
+    <div class="wrap" style="padding-top:0">
+      <div class="section-head">
+        <span class="eyebrow">Compared with hosted remote support</span>
+        <h2>What changes when you run it yourself</h2>
+      </div>
+      <div class="compare-scroll">
+        <table class="compare">
+          <thead>
+            <tr><th></th><th class="us">RustDesk Fleet</th><th>Typical hosted service</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Where sessions relay</td><td class="us">Your server, your hostname</td><td>The vendor's cloud</td></tr>
+            <tr><td>Pricing</td><td class="us">The cost of one VPS</td><td>Per technician or per concurrent session</td></tr>
+            <tr><td>Customer branding</td><td class="us">App name and icon per client group</td><td>Often one brand per account, or a higher tier</td></tr>
+            <tr><td>Audit data</td><td class="us">In your SQLite database, exportable as CSV</td><td>In the vendor's portal, on their retention terms</td></tr>
+            <tr><td>Who maintains it</td><td class="us">You, with updates from the dashboard</td><td>The vendor</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="install" id="install">
+    <div class="wrap">
+      <span class="eyebrow">Install</span>
+      <h2>Run it on a fresh Ubuntu server</h2>
+      <p class="lede">The script is safe to run again: it skips what is already in place and fixes what has drifted.</p>
+      <div class="term">
+        <div class="term-bar">
+          <span>bash · Ubuntu 24.04</span>
+          <button class="copy" id="copy-cmd" type="button">Copy</button>
+        </div>
+<pre class="cmd" id="cmd"><span class="p">$ </span>git clone https://github.com/arvage/rustdesk-fleet.git
+<span class="p">$ </span>cd rustdesk-fleet
+<span class="p">$ </span>./install.sh <span class="f">--host</span> rds.example.com <span class="f">--email</span> you@example.com
+<span class="o">  relay ........ hbbs + hbbr up on 21115–21119</span>
+<span class="o">  dashboard .... rustdesk-dashboard.service active</span>
+<span class="o">  tls .......... certificate issued for rds.example.com</span>
+<span class="o">  backups ...... nightly timer enabled</span>
+<span class="k">  Done.</span> <span class="o">Open https://rds.example.com/setup to create the first admin.</span></pre>
+      </div>
+      <div class="install-links">
+        <a href="https://github.com/arvage/rustdesk-fleet/blob/main/DEPLOYMENT.md"><b>DEPLOYMENT.md</b> full and manual steps</a>
+        <a href="https://github.com/arvage/rustdesk-fleet/blob/main/USER_GUIDE.md"><b>USER_GUIDE.md</b> day-to-day use</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>RustDesk Fleet · built on the open-source RustDesk server</span>
+    <span class="mono">Python 3.12 · FastAPI · SQLite · nginx</span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var btn = document.getElementById('copy-cmd');
+    var text = [
+      'git clone https://github.com/arvage/rustdesk-fleet.git',
+      'cd rustdesk-fleet',
+      './install.sh --host rds.example.com --email you@example.com'
+    ].join('\n');
+    function selectCmd() {
+      var r = document.createRange();
+      r.selectNodeContents(document.getElementById('cmd'));
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      btn.textContent = 'Selected, press Ctrl+C';
+    }
+    btn.addEventListener('click', function () {
+      try {
+        navigator.clipboard.writeText(text).then(function () {
+          btn.textContent = 'Copied';
+          setTimeout(function () { btn.textContent = 'Copy'; }, 1800);
+        }, selectCmd);
+      } catch (e) { selectCmd(); }
+    });
+  })();
+</script>
+</body>
+</html>

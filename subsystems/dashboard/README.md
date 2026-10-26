@@ -30,7 +30,7 @@ Staff pages (all require login):
 
 | Route | Description |
 |---|---|
-| `GET /` | Server Status: a **Server Health** section (live CPU/memory/disk/uptime, hbbs/hbbr containers, devices online — polled from `/api/server/health`, with alert-threshold markers), a **Server Info** section (status, host, ports, server/client versions with update banners, public key), and a **Backups** section (last-run status, Back up now, download latest) |
+| `GET /` | Signed out: the public landing page (`site/index.html` at the repo root). Signed in: Server Status: a **Server Health** section (live CPU/memory/disk/uptime, hbbs/hbbr containers, devices online — polled from `/api/server/health`, with alert-threshold markers), a **Server Info** section (status, host, ports, server/client versions with update banners, public key), and a **Backups** section (last-run status, Back up now, download latest) |
 | `POST /server/update` | Update hbbs/hbbr to the latest release (`update_server`) |
 | `POST /installers/update-version` | Move installers to the latest RustDesk client release, optionally rebuilding every group's installers in the background (`update_server`) |
 | `POST /server/backup`, `GET /server/backup/download/latest` | Run a backup now / download the newest archive (`manage_backups`) |

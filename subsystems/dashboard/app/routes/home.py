@@ -1,10 +1,11 @@
 import threading
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from app.auth import require_auth
+from app.auth import _users_exist, require_auth
 from app.deps import get_db, log_event
 from app.notifications import fire_notification
 from app.permissions import require_perm
@@ -124,10 +125,18 @@ def _set_flash(request: Request, type_: str, msg: str) -> None:
     request.session["flash"] = {"type": type_, "msg": msg}
 
 
+# Public product page shown at "/" to visitors who aren't signed in
+# (repo-root site/index.html, a static file with no server-side data).
+LANDING_PAGE = Path(__file__).resolve().parents[4] / "site" / "index.html"
+
+
 # Plain `def` (not async): the GitHub lookups below are blocking, so let
 # FastAPI run this in its threadpool instead of stalling the event loop.
 @router.get("/", response_class=HTMLResponse)
-def home(request: Request, current_user: dict = Depends(require_auth)):
+def home(request: Request):
+    if _users_exist() and not request.session.get("user_id") and LANDING_PAGE.is_file():
+        return FileResponse(LANDING_PAGE, media_type="text/html")
+    current_user = require_auth(request)
     from setup_server import get_status, get_server_version, get_latest_server_version
     from generate_installer import get_latest_client_version, get_pinned_version, version_tuple
     status = get_status()
