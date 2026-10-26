@@ -13,7 +13,8 @@ from webauthn import (
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url, options_to_json
 from webauthn.helpers.structs import PublicKeyCredentialDescriptor
 
-from app.auth import bump_session_version, require_auth, sign_in
+from app import ratelimit
+from app.auth import bump_session_version, locked_seconds, note_login_failure, require_auth, sign_in
 from app.deps import get_db, log_event
 from app.templates_config import templates
 from app.webauthn_config import RP_NAME, get_origin, get_rp_id
@@ -179,6 +180,11 @@ async def account_set_auth_method(
 
 # ── Login-time assertion (pre-auth, gated by pending_2fa_user_id) ──────────
 
+def _pending_email(conn, user_id: int) -> str:
+    row = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    return row["email"] if row else ""
+
+
 @router.get("/login/webauthn", response_class=HTMLResponse)
 async def login_webauthn_get(request: Request):
     if not request.session.get("pending_2fa_user_id"):
@@ -193,6 +199,11 @@ async def login_webauthn_begin(request: Request):
         return JSONResponse({"error": "No pending sign-in."}, status_code=400)
 
     conn = get_db()
+    email = _pending_email(conn, user_id)
+    wait = locked_seconds(request, email)
+    if wait:
+        conn.close()
+        return JSONResponse({"error": ratelimit.locked_message(wait)}, status_code=429)
     allow = _credential_descriptors(conn, user_id)
     conn.close()
     if not allow:
@@ -212,6 +223,13 @@ async def login_webauthn_complete(request: Request):
     if not user_id or not challenge or purpose != "login":
         return JSONResponse({"error": "Sign-in session expired — start over."}, status_code=400)
 
+    conn = get_db()
+    email = _pending_email(conn, user_id)
+    conn.close()
+    wait = locked_seconds(request, email)
+    if wait:
+        return JSONResponse({"error": ratelimit.locked_message(wait)}, status_code=429)
+
     body = await request.json()
     posted_cred_id = body.get("id")
 
@@ -223,6 +241,7 @@ async def login_webauthn_complete(request: Request):
     ).fetchone()
     if not cred_row:
         conn.close()
+        note_login_failure(request, email)
         return JSONResponse({"error": "Passkey not recognized for this account."}, status_code=400)
 
     try:
@@ -236,6 +255,7 @@ async def login_webauthn_complete(request: Request):
         )
     except Exception as e:
         conn.close()
+        note_login_failure(request, email)
         return JSONResponse({"error": f"Could not verify passkey: {e}"}, status_code=400)
 
     user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()

@@ -5,7 +5,8 @@ import bcrypt
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app.deps import get_db
+from app import ratelimit
+from app.deps import get_db, log_event
 from app.templates_config import templates
 
 router = APIRouter()
@@ -33,10 +34,24 @@ class _SetupRedirect(Exception):
     pass
 
 
+def note_login_failure(request: Request, email: str) -> None:
+    """Count a failed sign-in for this email and IP; log any lockout it starts."""
+    ip = ratelimit.client_ip(request)
+    if ratelimit.record_failure(email, ip):
+        conn = get_db()
+        log_event(conn, "login_locked", f"email={email.lower().strip()} ip={ip}", "")
+        conn.close()
+
+
+def locked_seconds(request: Request, email: str) -> int:
+    return ratelimit.locked_seconds(email, ratelimit.client_ip(request))
+
+
 def sign_in(request: Request, user) -> None:
     """Start a session for a users row (password or passkey login). The
     session only carries the id and session_version; everything else is
     read from the database on each request."""
+    ratelimit.clear_email(user["email"])
     request.session.clear()
     request.session["user_id"] = user["id"]
     request.session["session_version"] = user["session_version"]
@@ -130,7 +145,11 @@ async def setup_post(
         return RedirectResponse("/", status_code=303)
     if not _setup_token():
         return _setup_page(request, None, status_code=503)
+    wait = locked_seconds(request, email)
+    if wait:
+        return _setup_page(request, ratelimit.locked_message(wait), status_code=429)
     if not _setup_token_ok(setup_token):
+        note_login_failure(request, email)
         return _setup_page(request, "The setup token is missing or wrong.", status_code=403)
 
     errors = []
@@ -178,6 +197,15 @@ async def login_post(
     email: str = Form(...),
     password: str = Form(""),
 ):
+    wait = locked_seconds(request, email)
+    if wait:
+        # Checked before bcrypt, so a locked email or IP costs no hashing.
+        return templates.TemplateResponse(
+            request, "login.html",
+            {"error": ratelimit.locked_message(wait), "just_setup": False},
+            status_code=429,
+        )
+
     conn = get_db()
     user = conn.execute(
         "SELECT * FROM users WHERE email = ?", (email.lower().strip(),)
@@ -196,6 +224,7 @@ async def login_post(
         match = bcrypt.checkpw(password.encode(), stored_hash)
 
         if not user or not user["password_hash"] or not match:
+            note_login_failure(request, email)
             return templates.TemplateResponse(
                 request, "login.html",
                 {"error": "Invalid email or password.", "just_setup": False},

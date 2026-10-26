@@ -377,19 +377,63 @@ server {
 NGX
 }
 
+# Dashboard locations, shared by both vhosts. The sign-in endpoints get a
+# per-IP request limit (zone defined at the top of the vhost file); the
+# device API and everything else are not limited. The app applies its own
+# per-email and per-IP lockouts on top of this.
+dash_locations() {
+  cat <<'NGX'
+    location = /login {
+        limit_req        zone=rdf_auth burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+    location ^~ /login/webauthn/ {
+        limit_req        zone=rdf_auth burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+    location = /setup {
+        limit_req        zone=rdf_auth burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+    location / {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+NGX
+}
+
+AUTH_LIMIT_ZONE='limit_req_zone $binary_remote_addr zone=rdf_auth:10m rate=10r/m;'
+
 write_http_vhost() {   # used as the base; certbot rewrites it for LE
   sudo tee "$VHOST" >/dev/null <<EOF
+$AUTH_LIMIT_ZONE
+
 server {
     listen 80;
     server_name $HOST;
-    location / {
-        proxy_pass         http://127.0.0.1:8000;
-        proxy_set_header   Host              \$host;
-        proxy_set_header   X-Real-IP         \$remote_addr;
-        proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 60s;
-    }
+$(dash_locations)
 }
 $(client_port_block)
 EOF
@@ -398,6 +442,8 @@ EOF
 write_tls_vhost() {    # self-signed: full 80->443 + 443 vhost
   local crt="$1" key="$2"
   sudo tee "$VHOST" >/dev/null <<EOF
+$AUTH_LIMIT_ZONE
+
 server {
     listen 80;
     server_name $HOST;
@@ -410,14 +456,7 @@ server {
     ssl_certificate_key $key;
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
-    location / {
-        proxy_pass         http://127.0.0.1:8000;
-        proxy_set_header   Host              \$host;
-        proxy_set_header   X-Real-IP         \$remote_addr;
-        proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 60s;
-    }
+$(dash_locations)
 }
 $(client_port_block)
 EOF
