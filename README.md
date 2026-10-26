@@ -3,6 +3,9 @@
 Self-hosted RustDesk infrastructure — a drop-in alternative to
 ScreenConnect for an MSP or IT team supporting its own and client devices.
 
+**Where this is going:** a hosted, multi-tenant product sold to MSPs, with
+billing and integrations. See [`VISION.md`](VISION.md).
+
 The dashboard runs directly from a checkout of this repo on the server
 (conventionally at `~/rustdesk-fleet`, branch `main`).
 
