@@ -1,3 +1,6 @@
+import os
+import secrets
+
 import bcrypt
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -81,11 +84,36 @@ def require_auth(request: Request) -> dict:
 
 # ── First-run setup ───────────────────────────────────────────────────────────
 
+def _setup_token() -> str:
+    """SETUP_TOKEN from dashboard.env (install.sh writes one). Only consulted
+    while no users exist; ignored once the first admin is created."""
+    return os.environ.get("SETUP_TOKEN", "").strip()
+
+
+def _setup_token_ok(given: str) -> bool:
+    expected = _setup_token()
+    return bool(expected) and secrets.compare_digest(given.strip().encode(), expected.encode())
+
+
+def _setup_page(request: Request, error: str | None, token: str = "", status_code: int = 200):
+    return templates.TemplateResponse(
+        request, "setup.html",
+        {"error": error, "token": token, "token_configured": bool(_setup_token())},
+        status_code=status_code,
+    )
+
+
 @router.get("/setup", response_class=HTMLResponse)
 async def setup_get(request: Request):
     if _users_exist():
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse(request, "setup.html", {"error": None})
+    if not _setup_token():
+        return _setup_page(request, None, status_code=503)
+    token = request.query_params.get("token", "")
+    if token and not _setup_token_ok(token):
+        return _setup_page(request, "That setup token isn't valid. Check the URL install.sh printed.",
+                           status_code=403)
+    return _setup_page(request, None, token=token)
 
 
 @router.post("/setup")
@@ -95,10 +123,15 @@ async def setup_post(
     display_name: str = Form(...),
     password: str = Form(...),
     password2: str = Form(...),
+    setup_token: str = Form(""),
 ):
     global _setup_done
     if _users_exist():
         return RedirectResponse("/", status_code=303)
+    if not _setup_token():
+        return _setup_page(request, None, status_code=503)
+    if not _setup_token_ok(setup_token):
+        return _setup_page(request, "The setup token is missing or wrong.", status_code=403)
 
     errors = []
     email = email.lower().strip()
@@ -111,9 +144,7 @@ async def setup_post(
         errors.append("Passwords do not match.")
 
     if errors:
-        return templates.TemplateResponse(
-            request, "setup.html", {"error": " — ".join(errors)}, status_code=400
-        )
+        return _setup_page(request, " — ".join(errors), token=setup_token, status_code=400)
 
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
     conn = get_db()

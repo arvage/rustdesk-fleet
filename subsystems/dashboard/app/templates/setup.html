@@ -32,10 +32,26 @@
         <span class="brand-sub">Management Console</span>
       </div>
     </div>
+    {% if not token_configured %}
+    <h2>Setup token required</h2>
+    <p>First-run setup is locked until a setup token is configured, so nobody else can claim this server.</p>
+    <ol class="text-sm" style="line-height:1.6;padding-left:18px;margin:0 0 8px">
+      <li>Add a line like <code>SETUP_TOKEN=&lt;random value&gt;</code> to <code>/etc/rustdesk-fleet/dashboard.env</code>.
+        Generate one with <code>python3 -c "import secrets; print(secrets.token_urlsafe(24))"</code>.</li>
+      <li>Restart the dashboard: <code>sudo systemctl restart rustdesk-dashboard</code>.</li>
+      <li>Open <code>/setup?token=&lt;that value&gt;</code>.</li>
+    </ol>
+    <p class="text-sm text-muted">Re-running <code>install.sh</code> does this for you and prints the URL.</p>
+    {% else %}
     <h2>Create your admin account</h2>
     <p>This is a one-time setup. You'll use these credentials to sign in.</p>
     {% if error %}<div class="flash error" style="margin-bottom:16px">{{ error }}</div>{% endif %}
     <form method="post" action="/setup">
+      <div class="login-field">
+        <label for="setup_token">Setup token</label>
+        <input type="text" id="setup_token" name="setup_token" required value="{{ token }}"
+               placeholder="From the URL install.sh printed" autocomplete="off" spellcheck="false">
+      </div>
       <div class="login-field">
         <label for="display_name">Your name</label>
         <input type="text" id="display_name" name="display_name" autofocus required
@@ -58,6 +74,7 @@
       </div>
       <button type="submit" class="btn btn-primary" style="margin-top:8px">Create account</button>
     </form>
+    {% endif %}
   </div>
 </div>
 </body>

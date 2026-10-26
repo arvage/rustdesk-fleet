@@ -267,6 +267,28 @@ else
   info "$ETC_DIR/dashboard.env already exists — leaving it."
 fi
 
+# A setup token locks /setup until the first admin exists. Add one only while
+# there are no users yet and the env file has none; never touch other lines.
+fleet_user_count() {
+  sudo python3 - "$FLEET_ROOT/fleet.sqlite3" <<'PY'
+import sqlite3, sys
+from pathlib import Path
+db = Path(sys.argv[1])
+if not db.exists():
+    print(0); sys.exit()
+conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+has = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
+print(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] if has else 0)
+PY
+}
+SETUP_TOKEN_ADDED=0
+if ! sudo grep -q '^SETUP_TOKEN=' "$ETC_DIR/dashboard.env" && [[ "$(fleet_user_count)" == "0" ]]; then
+  TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+  echo "SETUP_TOKEN=$TOKEN" | sudo tee -a "$ETC_DIR/dashboard.env" >/dev/null
+  SETUP_TOKEN_ADDED=1
+  info "Added a SETUP_TOKEN to $ETC_DIR/dashboard.env for first-run setup."
+fi
+
 # ── 7. Dashboard systemd service ─────────────────────────────────────────────
 UVICORN="$(command -v uvicorn || echo /usr/local/bin/uvicorn)"
 sudo tee /etc/systemd/system/rustdesk-dashboard.service >/dev/null <<EOF
@@ -293,6 +315,8 @@ WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now rustdesk-dashboard.service
+# enable --now doesn't restart a running service; it must re-read the new token.
+[[ $SETUP_TOKEN_ADDED -eq 1 ]] && sudo systemctl restart rustdesk-dashboard.service
 
 # ── 8. Nightly backup timer (runs as root so it can read the keypair) ────────
 log "Installing the nightly backup timer"
@@ -455,13 +479,25 @@ fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 SCHEME="https"; [[ "$TLS_MODE" == "none" ]] && SCHEME="http"
+if [[ "$(fleet_user_count)" == "0" ]]; then
+  SETUP_TOKEN_VALUE="$(sudo sed -n 's/^SETUP_TOKEN=//p' "$ETC_DIR/dashboard.env" | head -n1)"
+  FIRST_RUN="  First run:  create the first admin account at
+              $SCHEME://$HOST/setup?token=$SETUP_TOKEN_VALUE"
+else
+  FIRST_RUN="  Sign in:    $SCHEME://$HOST/login"
+  if sudo grep -q '^SETUP_TOKEN=' "$ETC_DIR/dashboard.env"; then
+    FIRST_RUN="$FIRST_RUN
+              (An admin exists, so SETUP_TOKEN in $ETC_DIR/dashboard.env is
+              no longer used. You can delete that line.)"
+  fi
+fi
 log "Done."
 cat <<EOF
 
 RustDesk Fleet is deployed.
 
   Dashboard:  $SCHEME://$HOST/
-  First run:  open it and create the first admin account (the /setup page).
+$FIRST_RUN
 
 Services:
   sudo systemctl status rustdesk-dashboard
