@@ -34,16 +34,19 @@ class _SetupRedirect(Exception):
     pass
 
 
-def note_login_failure(request: Request, email: str) -> None:
-    """Count a failed sign-in for this email and IP; log any lockout it starts."""
+def note_login_failure(request: Request, email: str, count_email: bool = True) -> None:
+    """Count a failed sign-in for this email and IP; log any lockout it starts.
+    With count_email=False only the IP is counted (the email is still logged)."""
     ip = ratelimit.client_ip(request)
-    if ratelimit.record_failure(email, ip):
+    if ratelimit.record_failure(email if count_email else "", ip):
         conn = get_db()
         log_event(conn, "login_locked", f"email={email.lower().strip()} ip={ip}", "")
         conn.close()
 
 
 def locked_seconds(request: Request, email: str) -> int:
+    """Seconds until this email and IP may try again. Pass email="" to check
+    only the IP lock."""
     return ratelimit.locked_seconds(email, ratelimit.client_ip(request))
 
 
@@ -197,14 +200,16 @@ async def login_post(
     email: str = Form(...),
     password: str = Form(""),
 ):
-    wait = locked_seconds(request, email)
-    if wait:
-        # Checked before bcrypt, so a locked email or IP costs no hashing.
+    def locked_page(wait: int):
         return templates.TemplateResponse(
             request, "login.html",
             {"error": ratelimit.locked_message(wait), "just_setup": False},
             status_code=429,
         )
+
+    wait = locked_seconds(request, "")  # IP lock: applies to every sign-in
+    if wait:
+        return locked_page(wait)
 
     conn = get_db()
     user = conn.execute(
@@ -218,6 +223,11 @@ async def login_post(
     # no password_hash worth checking, and the account's security no longer
     # depends on it.
     if auth_method != "passkey":
+        # The email lock gates only the password check (passkey-only accounts
+        # have none). Checked before bcrypt, so a locked email costs no hashing.
+        wait = locked_seconds(request, email)
+        if wait:
+            return locked_page(wait)
         # Constant-time failure path: always run bcrypt even on miss.
         _dummy_hash = b"$2b$12$KIX/wKpGiQHGaL5p6vNyWOeqKKXJvq7oH9M3B5bGxDm7XQZR.vMQi"
         stored_hash = user["password_hash"].encode() if (user and user["password_hash"]) else _dummy_hash

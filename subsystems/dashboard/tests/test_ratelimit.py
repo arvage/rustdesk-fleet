@@ -39,38 +39,67 @@ def test_ip_is_locked_after_20_failures(client, admin):
     assert other_ip.status_code == 303
 
 
-def test_passkey_endpoints_respect_the_lock(client, admin):
+def set_auth_method(user, method, with_passkey=True):
     from app.deps import get_db
     conn = get_db()
-    conn.execute("UPDATE users SET auth_method = 'passkey' WHERE id = ?", (admin["id"],))
+    conn.execute("UPDATE users SET auth_method = ? WHERE id = ?", (method, user["id"]))
+    if with_passkey:
+        conn.execute("INSERT INTO webauthn_credentials (user_id, credential_id, public_key) "
+                     "VALUES (?, 'cmVhbC1jcmVk', x'00')", (user["id"],))
     conn.commit()
     conn.close()
-    # A passkey-only account skips the password check and goes straight to
-    # the passkey step (its failures are counted there). Lock the email
-    # while that step is pending.
-    r = client.post("/login", data={"email": admin["email"], "password": ""}, follow_redirects=False)
-    assert r.headers["location"] == "/login/webauthn"
+
+
+def lock_email(email):
     from app import ratelimit
     for _ in range(ratelimit.MAX_EMAIL_FAILURES):
-        ratelimit.record_failure(admin["email"], "")
+        ratelimit.record_failure(email, "")
+
+
+def lock_ip(ip="testclient"):
+    # TestClient requests come from "testclient" when no X-Real-IP is sent.
+    from app import ratelimit
+    for _ in range(ratelimit.MAX_IP_FAILURES):
+        ratelimit.record_failure("", ip)
+
+
+def test_email_lock_does_not_block_passkey_sign_in(client, admin):
+    set_auth_method(admin, "passkey")
+    lock_email(admin["email"])
+    r = client.post("/login", data={"email": admin["email"], "password": ""}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login/webauthn"
+    r = client.post("/login/webauthn/begin")
+    assert r.status_code == 200
+    assert "challenge" in r.json()
+
+
+def test_email_lock_still_blocks_password_step_of_both(client, admin):
+    set_auth_method(admin, "both")
+    lock_email(admin["email"])
+    assert login(client, admin).status_code == 429
+
+
+def test_ip_lock_blocks_passkey_sign_in(client, admin):
+    set_auth_method(admin, "passkey")
+    r = client.post("/login", data={"email": admin["email"], "password": ""}, follow_redirects=False)
+    assert r.headers["location"] == "/login/webauthn"
+    lock_ip()
     r = client.post("/login/webauthn/begin")
     assert r.status_code == 429
     assert "Too many attempts" in r.json()["error"]
-    r = client.post("/login/webauthn/complete", json={"id": "x"})
+    assert client.post("/login/webauthn/complete", json={"id": "x"}).status_code == 429
+    r = client.post("/login", data={"email": admin["email"], "password": ""}, follow_redirects=False)
     assert r.status_code == 429
 
 
-def test_failed_passkey_attempts_count(client, admin):
-    from app.deps import get_db
-    conn = get_db()
-    conn.execute("UPDATE users SET auth_method = 'passkey' WHERE id = ?", (admin["id"],))
-    conn.execute("INSERT INTO webauthn_credentials (user_id, credential_id, public_key) VALUES (?, 'cmVhbC1jcmVk', x'00')",
-                 (admin["id"],))
-    conn.commit()
-    conn.close()
+def test_failed_passkey_attempts_count_only_against_the_ip(client, admin):
+    from app import ratelimit
+    set_auth_method(admin, "passkey")
     client.post("/login", data={"email": admin["email"], "password": ""})
     codes = []
-    for _ in range(6):
+    for _ in range(ratelimit.MAX_IP_FAILURES + 1):
         client.post("/login/webauthn/begin")                     # issues a challenge
         codes.append(client.post("/login/webauthn/complete", json={"id": "wrong-cred"}).status_code)
-    assert codes == [400] * 5 + [429]
+    # Not locked after 5 (no email count); the IP locks after 20.
+    assert codes == [400] * ratelimit.MAX_IP_FAILURES + [429]
+    assert ratelimit.locked_seconds(admin["email"], "") == 0

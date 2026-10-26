@@ -39,8 +39,10 @@ If the `users` table is empty, all routes redirect to `/setup`. The setup page c
   Sessions expire after `SESSION_MAX_AGE` (12 h).
 - **Sign-in limits** (`app/ratelimit.py`). 5 failures for one email in
   15 minutes lock it for 15 minutes (unknown emails too, so lockouts don't
-  reveal accounts); 20 failures from one IP lock the IP. Covers password and
-  passkey sign-in and `/setup`. Locked requests get a 429 before any bcrypt
+  reveal accounts); 20 failures from one IP lock the IP. The email lock
+  gates only password checks (`/login`, `/setup`); the passkey step checks
+  and counts only the IP, so typing someone's address can't lock a
+  passkey-only user out. Locked requests get a 429 before any bcrypt
   work, and each lockout is logged as `login_locked`. The counters are in
   memory: they reset on restart and need shared storage if more than one
   uvicorn worker is ever used. nginx adds a per-IP limit on POSTs to the

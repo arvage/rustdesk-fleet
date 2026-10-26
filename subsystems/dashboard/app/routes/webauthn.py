@@ -180,6 +180,13 @@ async def account_set_auth_method(
 
 # ── Login-time assertion (pre-auth, gated by pending_2fa_user_id) ──────────
 
+# The passkey step checks and counts only the IP lock. The per-email lock
+# exists to stop password guessing, so it gates the password check in /login
+# and /setup; a failed passkey assertion isn't a password guess, and letting
+# it lock the email would let anyone lock a passkey-only user out by typing
+# their address. A "both" user whose email is locked still can't get past
+# the password step.
+
 def _pending_email(conn, user_id: int) -> str:
     row = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
     return row["email"] if row else ""
@@ -198,12 +205,11 @@ async def login_webauthn_begin(request: Request):
     if not user_id:
         return JSONResponse({"error": "No pending sign-in."}, status_code=400)
 
-    conn = get_db()
-    email = _pending_email(conn, user_id)
-    wait = locked_seconds(request, email)
+    wait = locked_seconds(request, "")
     if wait:
-        conn.close()
         return JSONResponse({"error": ratelimit.locked_message(wait)}, status_code=429)
+
+    conn = get_db()
     allow = _credential_descriptors(conn, user_id)
     conn.close()
     if not allow:
@@ -220,16 +226,15 @@ async def login_webauthn_complete(request: Request):
     user_id = request.session.get("pending_2fa_user_id")
     challenge = request.session.pop("webauthn_challenge", None)
     purpose = request.session.pop("webauthn_challenge_purpose", None)
-    email = ""
-    if user_id:
-        conn = get_db()
-        email = _pending_email(conn, user_id)
-        conn.close()
-    wait = locked_seconds(request, email)
+    wait = locked_seconds(request, "")
     if wait:
         return JSONResponse({"error": ratelimit.locked_message(wait)}, status_code=429)
     if not user_id or not challenge or purpose != "login":
         return JSONResponse({"error": "Sign-in session expired — start over."}, status_code=400)
+
+    conn = get_db()
+    email = _pending_email(conn, user_id)  # only for the lockout log line
+    conn.close()
 
     body = await request.json()
     posted_cred_id = body.get("id")
@@ -242,7 +247,7 @@ async def login_webauthn_complete(request: Request):
     ).fetchone()
     if not cred_row:
         conn.close()
-        note_login_failure(request, email)
+        note_login_failure(request, email, count_email=False)
         return JSONResponse({"error": "Passkey not recognized for this account."}, status_code=400)
 
     try:
@@ -256,7 +261,7 @@ async def login_webauthn_complete(request: Request):
         )
     except Exception as e:
         conn.close()
-        note_login_failure(request, email)
+        note_login_failure(request, email, count_email=False)
         return JSONResponse({"error": f"Could not verify passkey: {e}"}, status_code=400)
 
     user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
