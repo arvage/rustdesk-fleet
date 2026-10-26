@@ -343,7 +343,11 @@ def _finish_restore(request: Request, tenant: Tenant, res: dict, label: str, cur
         _set_flash(request, "error", f"Restore failed: {res['error']} (a safety snapshot was taken: {res.get('safety')})")
         return RedirectResponse("/admin/backup", status_code=303)
 
-    ok, relay_msg = _restart_relay(tenant)
+    # A restore can touch every relay's keypair and peer DB: restart them all.
+    from app.tenancy import active_tenants
+    results = [(t, *_restart_relay(t)) for t in active_tenants() if t.relay]
+    failed = [f"{t.slug}: {m}" for t, ok_, m in results if not ok_]
+    ok, relay_msg = not failed, "; ".join(failed)
     log_event_conn = get_db()
     log_event(log_event_conn, "backup_restored", f"{label} -> {', '.join(res['applied'])}", current_user["email"],
               tenant_id=None)

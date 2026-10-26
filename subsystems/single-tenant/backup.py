@@ -3,10 +3,16 @@
 backup.py — snapshot the irreplaceable RustDesk Fleet state.
 
 What it protects (everything small and non-reproducible):
-  * the hbbs/hbbr server keypair         (data/id_ed25519[.pub])
-  * the hbbs peer registry               (data/db_v2.sqlite3)
-  * the dashboard database               (fleet.sqlite3)
-  * docker-compose.yml, rustdesk_version.txt
+  * every tenant relay's keypair         (id_ed25519[.pub] in its data dir)
+  * every tenant relay's peer registry   (its db_v2.sqlite3)
+  * the dashboard (control) database     (fleet.sqlite3)
+  * each relay's docker-compose.yml, rustdesk_version.txt
+
+Backups are provider-level: one archive covers the control database and every
+relay listed in its `relays` table. Tenant #1's relay (the one whose data dir
+is <fleet dir>/data) keeps the original layout, rustdesk-fleet/data/ and
+rustdesk-fleet/docker-compose.yml, so archives from before tenancy restore
+the same way; any other relay goes under rustdesk-fleet/relays/<tenant id>/.
 
 Installer binaries and upstream assets are deliberately excluded — they're
 large and can be rebuilt/redownloaded.
@@ -55,6 +61,36 @@ BACKUP_DIR = FLEET_DIR / "backups"
 STATUS_FILE = BACKUP_DIR / "last_backup.json"
 
 _PREFIX = "rustdesk-fleet-"
+
+
+def _relays(db: Path = FLEET_DB) -> list[dict]:
+    """Every relay to back up: {tenant_id, data_dir, hbbs_db, compose, arc},
+    where arc is its folder inside the archive ("" = the original layout).
+    Falls back to the single original relay if the database has no relays."""
+    rows: list[dict] = []
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10)
+        conn.row_factory = sqlite3.Row
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='relays'").fetchone():
+            rows = [dict(r) for r in conn.execute(
+                "SELECT tenant_id, data_dir, hbbs_db_path, compose_path FROM relays ORDER BY tenant_id")]
+        conn.close()
+    except Exception:
+        rows = []
+    out = []
+    for r in rows:
+        data_dir = Path(r["data_dir"])
+        legacy = data_dir.resolve() == DATA_DIR.resolve()
+        out.append({
+            "tenant_id": r["tenant_id"], "data_dir": data_dir,
+            "hbbs_db": Path(r["hbbs_db_path"] or data_dir / "db_v2.sqlite3"),
+            "compose": Path(r["compose_path"]) if r["compose_path"] else None,
+            "arc": "" if legacy else f"relays/{int(r['tenant_id'])}",
+        })
+    if not any(r["arc"] == "" for r in out):
+        out.insert(0, {"tenant_id": 1, "data_dir": DATA_DIR, "hbbs_db": HBBS_DB,
+                       "compose": FLEET_DIR / "docker-compose.yml", "arc": ""})
+    return out
 
 
 def _now() -> str:
@@ -195,28 +231,33 @@ def run(
             stage = Path(tmp) / "rustdesk-fleet"
             (stage / "data").mkdir(parents=True)
 
-            # Live DBs → consistent snapshots.
+            # Live control DB → consistent snapshot.
             if FLEET_DB.exists():
                 _sqlite_snapshot(FLEET_DB, stage / "fleet.sqlite3")
-            if HBBS_DB.exists():
-                _sqlite_snapshot(HBBS_DB, stage / "data" / "db_v2.sqlite3")
 
-            # Keypair + anything else under data/ that isn't the DB/WAL/SHM.
-            if DATA_DIR.exists():
-                for item in DATA_DIR.iterdir():
-                    if item.name.startswith("db_v2.sqlite3"):
-                        continue  # snapshotted above; skip raw file + -wal/-shm
-                    _copy_into(item, stage / "data" / item.name, skipped)
+            for relay in _relays():
+                base = stage / relay["arc"] if relay["arc"] else stage
+                (base / "data").mkdir(parents=True, exist_ok=True)
+                hbbs_db, data_dir = relay["hbbs_db"], relay["data_dir"]
+                if hbbs_db.exists():
+                    _sqlite_snapshot(hbbs_db, base / "data" / "db_v2.sqlite3")
+                # Keypair + anything else in the data dir that isn't the DB/WAL/SHM.
+                if data_dir.exists():
+                    for item in data_dir.iterdir():
+                        if item.name.startswith(hbbs_db.name):
+                            continue  # snapshotted above; skip raw file + -wal/-shm
+                        _copy_into(item, base / "data" / item.name, skipped)
+                if relay["compose"] and relay["compose"].exists():
+                    _copy_into(relay["compose"], base / "docker-compose.yml", skipped)
+                # The keypair is the one thing that can't be regenerated — never
+                # ship a "successful" backup that silently lost one.
+                if (data_dir / "id_ed25519").exists() and not (base / "data" / "id_ed25519").exists():
+                    raise RuntimeError(
+                        f"keypair id_ed25519 of tenant {relay['tenant_id']}'s relay could not be read — backup aborted")
 
-            for name in ("docker-compose.yml", "rustdesk_version.txt"):
-                src = FLEET_DIR / name
-                if src.exists():
-                    _copy_into(src, stage / name, skipped)
-
-            # The keypair is the one thing that can't be regenerated — never ship
-            # a "successful" backup that silently lost it.
-            if (DATA_DIR / "id_ed25519").exists() and not (stage / "data" / "id_ed25519").exists():
-                raise RuntimeError("keypair id_ed25519 could not be read — backup aborted")
+            src = FLEET_DIR / "rustdesk_version.txt"
+            if src.exists():
+                _copy_into(src, stage / "rustdesk_version.txt", skipped)
 
             with tarfile.open(archive, "w:gz") as tar:
                 tar.add(stage, arcname="rustdesk-fleet")
@@ -296,11 +337,12 @@ def _replace_file(src: Path, dst: Path) -> None:
 
 
 def restore(archive: str | Path, passphrase: str | None = None) -> dict:
-    """Restore the keypair + databases from an archive.
+    """Restore the keypairs + databases from an archive.
 
-    Takes a safety backup first, then replaces the keypair and hbbs peer DB on
-    disk (the caller should restart hbbs/hbbr afterwards so it reopens them) and
-    restores the dashboard DB in place via SQLite. Returns a status dict.
+    Takes a safety backup first, then replaces each relay's keypair and hbbs
+    peer DB on disk (the caller should restart the relays afterwards so they
+    reopen them) and restores the dashboard DB in place via SQLite. Returns a
+    status dict.
     """
     archive = Path(archive)
     if not archive.exists():
@@ -343,35 +385,29 @@ def restore(archive: str | Path, passphrase: str | None = None) -> dict:
                 return {"ok": False, "error": "Archive does not contain a rustdesk-fleet/ root.",
                         "applied": [], "safety": safety.get("file")}
 
-            has_key = (root / "data" / "id_ed25519").exists()
+            has_key = (root / "data" / "id_ed25519").exists() or any((root / "relays").glob("*/data/id_ed25519"))
             has_fleet = (root / "fleet.sqlite3").exists()
             if not (has_key or has_fleet):
                 return {"ok": False, "error": "Archive has neither the keypair nor the dashboard DB.",
                         "applied": [], "safety": safety.get("file")}
 
-            # Keypair + any other data/ files (not the hbbs DB, handled below).
-            src_data = root / "data"
-            if src_data.is_dir():
-                DATA_DIR.mkdir(parents=True, exist_ok=True)
-                for item in src_data.rglob("*"):
-                    if item.is_dir() or item.name.startswith("db_v2.sqlite3"):
-                        continue
-                    rel = item.relative_to(src_data)
-                    _replace_file(item, DATA_DIR / rel)
-                    applied.append(f"data/{rel}")
+            # Where each relay's files go back: the relays as the archive's own
+            # database describes them (the state being restored).
+            targets = {r["arc"]: r for r in _relays(root / "fleet.sqlite3" if has_fleet else FLEET_DB)}
+            arcs = [""] + sorted(f"relays/{d.name}" for d in (root / "relays").glob("*") if d.is_dir())
+            for arc in arcs:
+                src_base = root / arc if arc else root
+                relay = targets.get(arc)
+                if relay is None or not (src_base / "data").is_dir():
+                    continue
+                _restore_relay(src_base, relay, applied)
 
-            # hbbs peer DB: drop the live file + WAL/SHM, write the restored copy.
-            src_hbbs = src_data / "db_v2.sqlite3"
-            if src_hbbs.exists():
-                for suffix in ("", "-wal", "-shm"):
-                    p = Path(str(HBBS_DB) + suffix)
-                    try:
-                        if p.exists():
-                            p.unlink()
-                    except Exception:
-                        pass
-                shutil.copy2(src_hbbs, HBBS_DB)
-                applied.append("data/db_v2.sqlite3")
+            # Original single-relay archives have docker-compose.yml at the root.
+            src_compose = root / "docker-compose.yml"
+            legacy = targets.get("")
+            if src_compose.exists() and legacy and legacy["compose"]:
+                _replace_file(src_compose, legacy["compose"])
+                applied.append("docker-compose.yml")
 
             # Dashboard DB: restore in place via SQLite so open connections stay valid.
             src_fleet = root / "fleet.sqlite3"
@@ -386,11 +422,10 @@ def restore(archive: str | Path, passphrase: str | None = None) -> dict:
                     dst_conn.close()
                 applied.append("fleet.sqlite3")
 
-            for name in ("docker-compose.yml", "rustdesk_version.txt"):
-                src = root / name
-                if src.exists():
-                    _replace_file(src, FLEET_DIR / name)
-                    applied.append(name)
+            src = root / "rustdesk_version.txt"
+            if src.exists():
+                _replace_file(src, FLEET_DIR / "rustdesk_version.txt")
+                applied.append("rustdesk_version.txt")
 
         _log_event("backup_restored", f"from {archive.name}: {', '.join(applied)}")
         return {"ok": True, "error": None, "applied": applied, "safety": safety.get("file")}
@@ -400,6 +435,36 @@ def restore(archive: str | Path, passphrase: str | None = None) -> dict:
         return {"ok": False, "error": str(e)[:400], "applied": applied, "safety": safety.get("file")}
     finally:
         shutil.rmtree(stage_dir, ignore_errors=True)
+
+
+def _restore_relay(src_base: Path, relay: dict, applied: list[str]) -> None:
+    """Put one relay's keypair, other data files and hbbs peer DB back."""
+    src_data = src_base / "data"
+    data_dir, hbbs_db = relay["data_dir"], relay["hbbs_db"]
+    label = f"{relay['arc']}/" if relay["arc"] else ""
+    data_dir.mkdir(parents=True, exist_ok=True)
+    # Keypair + any other data files (not the hbbs DB, handled below).
+    for item in src_data.rglob("*"):
+        if item.is_dir() or item.name.startswith("db_v2.sqlite3"):
+            continue
+        rel = item.relative_to(src_data)
+        _replace_file(item, data_dir / rel)
+        applied.append(f"{label}data/{rel}")
+    # hbbs peer DB: drop the live file + WAL/SHM, write the restored copy.
+    src_hbbs = src_data / "db_v2.sqlite3"
+    if src_hbbs.exists():
+        for suffix in ("", "-wal", "-shm"):
+            p = Path(str(hbbs_db) + suffix)
+            try:
+                if p.exists():
+                    p.unlink()
+            except Exception:
+                pass
+        shutil.copy2(src_hbbs, hbbs_db)
+        applied.append(f"{label}data/db_v2.sqlite3")
+    if relay["arc"] and (src_base / "docker-compose.yml").exists() and relay["compose"]:
+        _replace_file(src_base / "docker-compose.yml", relay["compose"])
+        applied.append(f"{label}docker-compose.yml")
 
 
 def list_archives() -> list[dict]:

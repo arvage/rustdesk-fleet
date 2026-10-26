@@ -10,7 +10,9 @@ from pathlib import Path
 DATA_DIR = Path(os.environ.get("FLEET_DATA_DIR") or "/opt/rustdesk-fleet")
 
 FLEET_DB = DATA_DIR / "fleet.sqlite3"
+# Tenant #1's hbbs peer DB, where the single-tenant relay always kept it.
+# Only the tenancy migration reads this (to fill relays.hbbs_db_path); at
+# runtime every tenant's comes from its relays row.
 HBBS_DB = DATA_DIR / "data" / "db_v2.sqlite3"
-INSTALLERS_DIR = DATA_DIR / "installers"
-EMAIL_LOGO = DATA_DIR / "branding" / "email-logo.png"
 OS_LIFECYCLE_CACHE = DATA_DIR / "os-lifecycle.json"
+# Per-tenant files (installers, branding, email logo): app.tenancy.tenant_files_dir().
