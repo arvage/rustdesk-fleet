@@ -30,22 +30,52 @@ class _SetupRedirect(Exception):
     pass
 
 
+def sign_in(request: Request, user) -> None:
+    """Start a session for a users row (password or passkey login). The
+    session only carries the id and session_version; everything else is
+    read from the database on each request."""
+    request.session.clear()
+    request.session["user_id"] = user["id"]
+    request.session["session_version"] = user["session_version"]
+
+
+def bump_session_version(conn, user_id: int) -> int:
+    """End every session this user has open. Returns the new version, which
+    the caller can pass to sign_in() to keep the current session alive.
+    Doesn't commit."""
+    conn.execute("UPDATE users SET session_version = session_version + 1 WHERE id = ?", (user_id,))
+    row = conn.execute("SELECT session_version FROM users WHERE id = ?", (user_id,)).fetchone()
+    return row["session_version"] if row else 0
+
+
 def require_auth(request: Request) -> dict:
-    """FastAPI dependency — returns {id, role, name} or raises a redirect exception."""
+    """FastAPI dependency — returns the signed-in user or raises a redirect exception.
+
+    Checks the users table on every request, so deleting a user, changing
+    their role or bumping their session_version takes effect immediately.
+    """
     if not _users_exist():
         raise _SetupRedirect()
     user_id = request.session.get("user_id")
     if not user_id:
         raise _AuthRedirect()
+    conn = get_db()
+    user = conn.execute(
+        "SELECT id, email, display_name, role, session_version FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    conn.close()
+    if user is None or request.session.get("session_version") != user["session_version"]:
+        request.session.clear()
+        raise _AuthRedirect()
     from app.permissions import get_role_permissions, all_roles
-    role = request.session.get("user_role", "tech")
+    role = user["role"]
     return {
-        "id": user_id,
+        "id": user["id"],
         "role": role,
         "role_name": (all_roles().get(role) or {}).get("name", role),
         "permissions": get_role_permissions(role),
-        "name": request.session.get("user_name", ""),
-        "email": request.session.get("user_email", ""),
+        "name": user["display_name"] or user["email"],
+        "email": user["email"],
     }
 
 
@@ -149,10 +179,7 @@ async def login_post(
         request.session["pending_2fa_user_id"] = user["id"]
         return RedirectResponse("/login/webauthn", status_code=303)
 
-    request.session["user_id"] = user["id"]
-    request.session["user_role"] = user["role"]
-    request.session["user_name"] = user["display_name"] or user["email"]
-    request.session["user_email"] = user["email"]
+    sign_in(request, user)
     return RedirectResponse("/", status_code=303)
 
 

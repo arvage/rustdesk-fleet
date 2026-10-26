@@ -13,7 +13,7 @@ from webauthn import (
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url, options_to_json
 from webauthn.helpers.structs import PublicKeyCredentialDescriptor
 
-from app.auth import require_auth
+from app.auth import bump_session_version, require_auth, sign_in
 from app.deps import get_db, log_event
 from app.templates_config import templates
 from app.webauthn_config import RP_NAME, get_origin, get_rp_id
@@ -165,8 +165,13 @@ async def account_set_auth_method(
             return RedirectResponse("/account", status_code=303)
 
     conn.execute("UPDATE users SET auth_method = ? WHERE id = ?", (auth_method, current_user["id"]))
+    if auth_method != old:
+        # End the user's other sessions; keep this one signed in.
+        bump_session_version(conn, current_user["id"])
     log_event(conn, "auth_method_changed", f"{old} -> {auth_method}", current_user["email"])
     conn.commit()
+    if auth_method != old:
+        sign_in(request, conn.execute("SELECT * FROM users WHERE id = ?", (current_user["id"],)).fetchone())
     conn.close()
     _set_flash(request, "success", "Sign-in method updated.")
     return RedirectResponse("/account", status_code=303)
@@ -242,9 +247,5 @@ async def login_webauthn_complete(request: Request):
     conn.commit()
     conn.close()
 
-    request.session.pop("pending_2fa_user_id", None)
-    request.session["user_id"] = user["id"]
-    request.session["user_role"] = user["role"]
-    request.session["user_name"] = user["display_name"] or user["email"]
-    request.session["user_email"] = user["email"]
+    sign_in(request, user)
     return JSONResponse({"ok": True})

@@ -6,7 +6,7 @@ import bcrypt
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app.auth import require_auth
+from app.auth import bump_session_version, require_auth, sign_in
 from app.deps import get_db, log_event
 from app.notifications import fire_notification, send_credentials_email, send_mfa_reminder_email
 from app.permissions import require_perm, all_roles
@@ -220,8 +220,10 @@ async def user_set_role(
         return RedirectResponse("/users", status_code=303)
 
     conn = get_db()
-    target = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    target = conn.execute("SELECT email, role FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+    if target and target["role"] != role:
+        bump_session_version(conn, user_id)
     log_event(conn, "user_role_changed", f"{target['email'] if target else user_id} -> {role}", current_user["email"])
     conn.commit()
     conn.close()
@@ -273,6 +275,7 @@ async def user_reset_password(
         _set_flash(request, "error", "User not found.")
         return RedirectResponse("/users", status_code=303)
     conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pw_hash, user_id))
+    bump_session_version(conn, user_id)
     log_event(conn, "user_password_reset", user["email"], current_user["email"])
     conn.commit()
     conn.close()
@@ -313,9 +316,6 @@ async def user_edit(
     log_event(conn, "user_updated", email, current_user["email"])
     conn.commit()
     conn.close()
-
-    if user_id == current_user["id"]:
-        request.session["user_name"] = display_name or email
 
     _set_flash(request, "success", "User updated.")
     return RedirectResponse("/users", status_code=303)
@@ -365,7 +365,7 @@ async def user_revoke_passkey(
 ):
     _require_admin(current_user)
     conn = get_db()
-    target = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    target = conn.execute("SELECT email, auth_method FROM users WHERE id = ?", (user_id,)).fetchone()
     cred = conn.execute(
         "SELECT nickname FROM webauthn_credentials WHERE id = ? AND user_id = ?", (cred_id, user_id)
     ).fetchone()
@@ -381,6 +381,8 @@ async def user_revoke_passkey(
     if remaining == 0:
         # Never leave an account requiring a passkey with none registered.
         conn.execute("UPDATE users SET auth_method = 'password' WHERE id = ?", (user_id,))
+        if target["auth_method"] != "password":
+            bump_session_version(conn, user_id)
     log_event(
         conn, "passkey_revoked_by_admin",
         f"{target['email']} cred={cred['nickname'] or cred_id}",
@@ -400,7 +402,7 @@ async def user_reset_passkeys(
 ):
     _require_admin(current_user)
     conn = get_db()
-    target = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    target = conn.execute("SELECT email, auth_method FROM users WHERE id = ?", (user_id,)).fetchone()
     if not target:
         conn.close()
         _set_flash(request, "error", "User not found.")
@@ -408,10 +410,33 @@ async def user_reset_passkeys(
 
     conn.execute("DELETE FROM webauthn_credentials WHERE user_id = ?", (user_id,))
     conn.execute("UPDATE users SET auth_method = 'password' WHERE id = ?", (user_id,))
+    if target["auth_method"] != "password":
+        bump_session_version(conn, user_id)
     log_event(conn, "auth_method_force_reset", target["email"], current_user["email"])
     conn.commit()
     conn.close()
     _set_flash(request, "success", "Passkeys reset — this account now signs in with a password.")
+    return RedirectResponse("/users", status_code=303)
+
+
+@router.post("/users/{user_id}/sign-out")
+async def user_sign_out(
+    request: Request,
+    user_id: int,
+    current_user: dict = Depends(require_auth),
+):
+    _require_admin(current_user)
+    conn = get_db()
+    target = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not target:
+        conn.close()
+        _set_flash(request, "error", "User not found.")
+        return RedirectResponse("/users", status_code=303)
+    bump_session_version(conn, user_id)
+    log_event(conn, "user_signed_out", target["email"], current_user["email"])
+    conn.commit()
+    conn.close()
+    _set_flash(request, "success", f"{target['email']} has been signed out on every device.")
     return RedirectResponse("/users", status_code=303)
 
 
@@ -515,7 +540,6 @@ async def account_update_profile(
     user = conn.execute("SELECT email, display_name FROM users WHERE id = ?", (current_user["id"],)).fetchone()
     conn.close()
 
-    request.session["user_name"] = display_name or email
     return templates.TemplateResponse(
         request, "account.html",
         {
@@ -561,8 +585,11 @@ async def account_change_password(
     pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode()
     conn = get_db()
     conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pw_hash, current_user["id"]))
+    bump_session_version(conn, current_user["id"])
     log_event(conn, "password_changed", current_user["email"], current_user["email"])
     conn.commit()
+    # Other sessions end; this one carries on with the new version.
+    sign_in(request, conn.execute("SELECT * FROM users WHERE id = ?", (current_user["id"],)).fetchone())
     conn.close()
 
     return templates.TemplateResponse(
@@ -573,3 +600,14 @@ async def account_change_password(
             **_account_extras(current_user["id"]),
         },
     )
+
+
+@router.post("/account/sign-out-everywhere")
+async def account_sign_out_everywhere(request: Request, current_user: dict = Depends(require_auth)):
+    conn = get_db()
+    bump_session_version(conn, current_user["id"])
+    log_event(conn, "signed_out_everywhere", current_user["email"], current_user["email"])
+    conn.commit()
+    conn.close()
+    request.session.clear()
+    return RedirectResponse("/login", status_code=303)

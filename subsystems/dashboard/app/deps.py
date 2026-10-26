@@ -266,6 +266,13 @@ def run_migrations() -> None:
         finally:
             conn.execute("PRAGMA foreign_keys=ON")
 
+    # Bumped to end all of a user's sessions (see auth.bump_session_version).
+    # Added after the rebuild above so a fresh database gets it too.
+    users_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "session_version" not in users_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1")
+        conn.commit()
+
     # WebAuthn/passkey credentials (idempotent CREATE IF NOT EXISTS)
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS webauthn_credentials (

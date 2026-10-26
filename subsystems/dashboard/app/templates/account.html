@@ -113,6 +113,22 @@
     </div>
   </div>
 
+  <div class="section">
+    <div class="section-head"><h2>Sessions</h2></div>
+    <div class="card">
+      <div class="card-body">
+        <p class="text-sm text-muted" style="margin-bottom:12px">
+          Signs you out on every browser and device, including this one. Use it if you signed in on a shared
+          computer or think someone else has access to your account.
+        </p>
+        <form method="post" action="/account/sign-out-everywhere" style="margin:0"
+              onsubmit="return confirm('Sign out on every device, including this one?')">
+          <button type="submit" class="btn btn-ghost btn-sm">Sign out everywhere</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
