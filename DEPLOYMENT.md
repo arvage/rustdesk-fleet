@@ -188,7 +188,8 @@ server {
 
     # Sign-in endpoints: 10 requests/min per IP, burst 5, then 429. The app
     # also locks an email after 5 failures and an IP after 20 (15 min each).
-    # Repeat this block for `location ^~ /login/webauthn/` and
+    # Repeat this block for `location ^~ /login/webauthn` (no trailing
+    # slash, or nginx and the app redirect each other in a loop) and
     # `location = /setup`. Don't limit the device API (/api/heartbeat etc.).
     location = /login {
         limit_req        zone=rdf_auth burst=5 nodelay;

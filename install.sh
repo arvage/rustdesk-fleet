@@ -393,7 +393,9 @@ dash_locations() {
         proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_read_timeout 60s;
     }
-    location ^~ /login/webauthn/ {
+    # No trailing slash: a proxied prefix ending in / makes nginx 301
+    # /login/webauthn -> /login/webauthn/, and the app redirects back (loop).
+    location ^~ /login/webauthn {
         limit_req        zone=rdf_auth burst=5 nodelay;
         limit_req_status 429;
         proxy_pass         http://127.0.0.1:8000;
