@@ -8,7 +8,7 @@ Live at `https://rds.example.com`.
 
 - **Runtime**: Python 3.12 / FastAPI 0.138 / uvicorn
 - **Auth**: per-user bcrypt-hashed passwords stored in `users` table; session cookie (HTTPS-only, `SameSite=Lax`); session secret from env
-- **DB**: `/opt/rustdesk-fleet/fleet.sqlite3` — same SQLite file as `setup_server.py`
+- **DB**: `/opt/rustdesk-fleet/fleet.sqlite3` — same SQLite file as `setup_server.py`; one control database for every tenant (see *Tenancy* below)
 - **Static assets**: `app/static/style.css` — custom CSS, no framework (Inter font, indigo accent). Colors are CSS variables with a light set on `:root` and a dark set on `:root[data-theme="dark"]` (see *Themes* below), plus the `--viz-*`/`--status-*` data-viz palette used by the reports
 - **Reverse proxy**: nginx (`/etc/nginx/sites-available/rds.example.com`) proxies `:443` → `127.0.0.1:8000`, plus a `:21114` block that exposes only the client-reporting endpoints (see `DEPLOYMENT.md`)
 
@@ -23,9 +23,43 @@ Env vars loaded from `/etc/rustdesk-fleet/dashboard.env`:
 - `FLEET_DATA_DIR` — data directory, default `/opt/rustdesk-fleet` (see `app/paths.py`)
 - `DASHBOARD_PASSWORD` — legacy, no longer consulted (auth now uses the `users` table)
 
+## Tenancy
+
+The dashboard serves many tenants (MSPs) from one process and one control
+database. Full design, table classification and the RustDesk client's API
+rules: [`TENANCY.md`](TENANCY.md).
+
+- **The tenant comes from the request's `Host`.** `TenantMiddleware`
+  (`app/tenancy.py`) looks the host up in `tenant_domains` (cached 30 s) and
+  stores the tenant on the request; routes take it with
+  `Depends(get_tenant)` and pass it down. There is no global current tenant.
+  An unknown host gets a plain 404, a suspended or cancelled tenant a "not
+  active" page (sign-in and download links included).
+- **Every tenant-owned row has a `tenant_id`**, and every query filters on it.
+  An id from another tenant in a URL behaves exactly like a missing one.
+  Background watchers loop over the tenants and work on one at a time.
+- **One relay per tenant** (`relays`): host, ports, public key, data dir,
+  compose file and hbbs database. Installers, relay status and updates,
+  device verification and the online signal all use the tenant's own row.
+  Installers point at the relay host, never at a web domain.
+- **Device API:** the tenant is chosen by `Host` too (or the relay host, or
+  tenant #1 for the legacy port-21114 listener, which nginx tags with
+  `X-Fleet-Listener`), and each report is verified against that tenant's own
+  hbbs peer table. Suspended tenants' devices still report; they just get no
+  config pushed.
+- **Provider-level:** code signing, backups, the OS lifecycle cache, the
+  pinned RustDesk client version and host health/alerts. Until a provider
+  console exists, their controls are on tenant #1's dashboard only
+  (`tenancy.is_provider_home`); for other tenants those routes are 404.
+- **Tenant #1** is the deployment from before tenancy: same host, relay, keys,
+  devices, users and file locations. The migration that created it
+  (`app/tenant_migration.py`) runs on startup, once; check it on a copy with
+  `scripts/check_migration.py` (see DEPLOYMENT.md).
+
 ## First-run setup
 
-If the `users` table is empty, all routes redirect to `/setup`. The setup page creates the first admin account (email + bcrypt-hashed password) and only accepts the form with the right `SETUP_TOKEN` (`/setup?token=…` pre-fills it). With no token configured it accepts nothing. After the first admin exists, `/setup` is permanently locked out and the token is ignored.
+`/setup` creates the first admin of the request's tenant. If that tenant has
+no users, its routes redirect to `/setup`. The setup page creates the first admin account (email + bcrypt-hashed password) and only accepts the form with the right `SETUP_TOKEN` (`/setup?token=…` pre-fills it). With no token configured it accepts nothing. After the first admin exists, `/setup` is permanently locked out and the token is ignored.
 
 ## Security
 
@@ -49,8 +83,16 @@ If the `users` table is empty, all routes redirect to `/setup`. The setup page c
   same paths (DEPLOYMENT.md, Section 4); page loads aren't counted.
 - **Sign out** is a POST. `GET /logout` only redirects to `/`.
 - **Device API** (`/api/heartbeat` etc.) is unauthenticated by design but
-  only accepts reports whose id and uuid match the hbbs peer table. Unknown
-  ids re-read that table at most every 5 seconds.
+  only accepts reports whose id and uuid match the hbbs peer table of the
+  request's tenant's relay. Unknown ids re-read that table at most every 5
+  seconds (per relay).
+- **Tenants** are isolated in every query, sign-in and session (see
+  *Tenancy*). Sign-in looks up the email within the request's tenant only,
+  so the same address can be a separate account on each; lockouts are per
+  tenant too. A session cookie from one tenant's host is cleared on another's.
+  `tests/test_isolation.py` calls every route that takes an id with another
+  tenant's id; `tests/test_sql_scoping.py` scans the source for SQL on a
+  tenant-owned table without `tenant_id`.
 - **Backups** pass the gpg passphrase on stdin, never on the command line.
 - **Not yet:** CSRF tokens (`SameSite=Lax` is the current protection).
 
@@ -66,7 +108,7 @@ Staff pages (all require login):
 | `GET /` | Signed out: the public landing page (`site/index.html` at the repo root). Signed in: Server Status: a **Server Health** section (live CPU/memory/disk/uptime, hbbs/hbbr containers, devices online — polled from `/api/server/health`, with alert-threshold markers), a **Server Info** section (status, host, ports, server/client versions with update banners, public key), and a **Backups** section (last-run status, Back up now, download latest) |
 | `POST /server/update` | Update hbbs/hbbr to the latest release (`update_server`) |
 | `POST /installers/update-version` | Move installers to the latest RustDesk client release, optionally rebuilding every group's installers in the background (`update_server`) |
-| `POST /server/backup`, `GET /server/backup/download/latest` | Run a backup now / download the newest archive (`manage_backups`) |
+| `POST /server/backup`, `GET /server/backup/download/latest` | Run a backup now / download the newest archive (`manage_backups`; tenant #1 only) |
 | `GET /devices` | Device inventory sorted by label (unlabeled last): Computer / OS / client version (client-reported), live online · in session · offline status, group filter; **Recently registered** panel (last 7 days, no client group yet); **ⓘ details** modal per device (full reported details + recent sessions) |
 | `POST /devices/{id}/edit` · `/delete`, `POST /devices/sync` | Label/group a device (`manage_devices`); delete hides it and clears its details/sessions/file transfers — a verified heartbeat later auto-un-hides it; import peers from hbbs. Edit and delete accept a `next` local path to return to (the group page uses it) |
 | `POST /devices/{id}/assign-group` | Set a device's client group and, if a `label` field is sent, its label (Recently registered panel; `manage_devices`) |
@@ -81,13 +123,13 @@ Staff pages (all require login):
 | `GET /download/{filename}` | Staff installer download (path-traversal safe, DB-gated) |
 | `GET /users` + `POST /users/...` | User management: assign roles, group access, password reset, passkeys, MFA reminders (`manage_users`) |
 | `GET /admin` | Admin landing: tool cards + fleet stats (any admin-area capability) |
-| `GET /admin/signing` + `POST /admin/signing/save` · `/test` | Installer signing config (Azure Trusted Signing) and connection test |
+| `GET /admin/signing` + `POST /admin/signing/save` · `/test` | Installer signing config (Azure Trusted Signing) and connection test (provider-level: tenant #1 only) |
 | `GET /admin/reports`, `GET /admin/reports/{key}`, `GET /admin/reports/{key}/{section}.csv` | Reports catalogue, one report (`?group=<slug>\|__none__&days=7\|30\|90\|180\|365`), and any of its tables as CSV (any admin-area capability) |
 | `GET /admin/emails`, `GET/POST /admin/emails/{key}`, `GET/POST /admin/emails/design`, `GET /admin/emails/logo.png` | Email templates: list, per-email editor (save / reset), shared design + logo upload (`manage_notifications`) |
 | `POST /admin/emails/preview`, `POST /admin/emails/{key}/test` | Render an unsaved draft with sample data (JSON → HTML); send the saved version to the signed-in user |
 | `GET /dynamic-groups`, `GET /dynamic-groups/{id}`, `GET /dynamic-groups/{id}/export.csv` | Dynamic (rule-based) groups: list with live counts, members, CSV (any signed-in user) |
 | `GET /dynamic-groups/new`, `GET /dynamic-groups/{id}/edit`, `POST /dynamic-groups/save` · `/{id}/delete`, `POST /dynamic-groups/preview` | Rule builder, save/delete, live match preview (`manage_devices`) |
-| `GET /admin/backup` + `POST /admin/backup/save` · `/test` · `/run` · `/restore`, `GET /admin/backup/download` | Backup destination config (S3/Wasabi/B2/Spaces/MinIO), test, run, restore, per-archive download (`manage_backups`) |
+| `GET /admin/backup` + `POST /admin/backup/save` · `/test` · `/run` · `/restore`, `GET /admin/backup/download` | Backup destination config (S3/Wasabi/B2/Spaces/MinIO), test, run, restore, per-archive download (`manage_backups`; provider-level: tenant #1 only) |
 | `GET /admin/roles` + `POST /admin/roles...` | Roles & permissions: create/edit/delete permission levels via a capability matrix (`manage_roles`) |
 | `GET /admin/export/devices.csv` | Device inventory CSV (`manage_devices`) |
 | `POST /admin/restart-relay`, `POST /admin/logs/prune` | Restart hbbs/hbbr; prune old audit events (`manage_system`) |
@@ -122,8 +164,9 @@ Public, no login:
   manage_backups, manage_system, manage_users, manage_roles — are enforced
   server-side on every write route; viewing is always allowed, so a role with
   no capabilities is read-only. Built-in roles: Administrator (locked = all),
-  Technician (devices + groups), Viewer (read-only). Admins can create custom
-  roles via a checkbox matrix and assign them on the Users page. The UI hides
+  Technician (devices + groups), Viewer (read-only), copied into each tenant.
+  Admins can create custom roles via a checkbox matrix and assign them on the
+  Users page. Roles are per tenant. The UI hides
   controls a role can't use.
 - **Device inventory**: hbbs peers merged with the fleet DB; labels and
   groups; hide/restore. Each reporting client sends its computer name,
@@ -237,7 +280,10 @@ Heartbeat/sysinfo requests are excluded from the uvicorn access log
 
 | Path | What |
 |---|---|
-| `app/main.py` | App, session middleware, router registration, migrations on startup |
+| `app/main.py` | App, tenant and session middleware, router registration, migrations on startup |
+| `app/tenancy.py` | `Tenant`/`Relay`, Host → tenant (`TenantMiddleware`, `get_tenant`), per-tenant file paths, `active_tenants()` for background jobs |
+| `app/tenant_schema.py`, `app/tenant_migration.py` | The `tenants`/`relays`/`tenant_domains` tables; the one-time move of the single-tenant data to tenant #1 and the final shape of every tenant-owned table |
+| `scripts/check_migration.py` | Dry-run the migrations on a copy of `fleet.sqlite3` and report |
 | `app/deps.py` | DB access, hbbs peer reader, `get_devices()` (fleet + peers + client-reported details, label order), `run_migrations()` (idempotent `ALTER`/`CREATE IF NOT EXISTS`) |
 | `app/fleet.py` | `fleet_snapshot()`: devices plus derived facts (RAM/cores as numbers, OS support, live status, days since seen/registered/last session) — shared by dynamic groups and reports |
 | `app/dynamic_groups.py`, `app/reports.py`, `app/email_templates.py` | Rule engine, report catalogue, email catalogue + renderer (see Features) |
@@ -248,19 +294,23 @@ Heartbeat/sysinfo requests are excluded from the uvicorn access log
 
 ## Background jobs
 
-Daemon threads started at import (one uvicorn worker, so each runs once):
+Daemon threads started at import (one uvicorn worker, so each runs once).
+Each pass works through the tenants one at a time (`tenancy.active_tenants()`:
+all but cancelled ones), with that tenant's relay, rows, settings and
+recipients; suspended tenants get no emails.
 
 | Thread | Interval | Does |
 |---|---|---|
-| `hbbs-ss-poll` (`routes/api.py`) | 1 s | Samples live TCP connections to hbbs ports (an online signal) |
+| `hbbs-ss-poll` (`routes/api.py`) | 1 s | Samples live TCP connections to every relay's ports, by port, so each tenant only sees its own (an online signal) |
 | `device-offline-watch` (`routes/api.py`) | 30 s | **New devices:** any hbbs peer without a `devices` row gets one (unassigned) and fires `device_registered` — the row marks it announced. **Status changes:** online→offline fires `device_offline`, offline→online fires `device_online`. The first pass after start only records a baseline. Also closes sessions for devices that vanished mid-session |
-| `health-alert-watch` (`routes/api.py`) | 60 s | Memory/disk thresholds → `memory_high` / `disk_high` (debounced, hysteresis) |
-| `server-update-watch` (`routes/home.py`) | 1 h (first 60 s after start) | New RustDesk server/client releases → `*_update_available`, once per version. Also refreshes the Windows end-of-support data (downloads at most daily) |
+| `health-alert-watch` (`routes/api.py`) | 60 s | Host memory/disk thresholds → `memory_high` / `disk_high` (debounced, hysteresis). About our server, so tenant #1's settings and recipients only |
+| `server-update-watch` (`routes/home.py`) | 1 h (first 60 s after start) | New RustDesk server releases (against each tenant's relay) and client releases → `*_update_available`, once per version per tenant. Also refreshes the Windows end-of-support data (downloads at most daily) |
 
 ## Database tables added by the dashboard
 
 Created by `run_migrations()` in `/opt/rustdesk-fleet/fleet.sqlite3`
-alongside the single-tenant schema: `notification_settings`,
+alongside the single-tenant schema: `tenants`, `relays`, `tenant_domains`
+(provider-level, see TENANCY.md), `notification_settings`,
 `notification_events`, `notification_log`, `device_sessions`, `device_file_transfers`, `device_info`,
 `download_links`, `backup_config`, `signing_config`, `roles`,
 `webauthn_credentials`, `dynamic_groups`, `email_templates`, `email_design`,
@@ -272,7 +322,7 @@ computer (`peer_id`, `peer_name`). `DASHBOARD_USER_SQL` in
 `connect_clicks` row for that device from 3 min before to 1 min after it
 started, else the `rustdesk_peer_users` link for its `peer_id`. Links have
 no UI yet; add one with
-`INSERT INTO rustdesk_peer_users (peer_id, user_email) VALUES ('<rustdesk id>', '<user email>')`.
+`INSERT INTO rustdesk_peer_users (tenant_id, peer_id, user_email) VALUES (1, '<rustdesk id>', '<user email>')`.
 
 ## Deploying changes
 

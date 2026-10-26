@@ -275,9 +275,11 @@ systemctl is-active rustdesk-dashboard          # active
 journalctl -u rustdesk-dashboard -n 30          # "Application startup complete."
 ```
 
-Database changes apply themselves on startup (`run_migrations()` only adds
-tables/columns), and nothing in `/opt/rustdesk-fleet` is touched. Template
-and CSS edits take effect without a restart, but Python changes need one.
+Database changes apply themselves on startup (`run_migrations()` is
+idempotent; most releases only add tables or columns), and nothing else in
+`/opt/rustdesk-fleet` is touched. Template and CSS edits take effect without
+a restart, but Python changes need one. A release that rebuilds tables (the
+tenancy release below) says so and comes with a check to run on a copy first.
 
 **Upgrading to the sign-in hardening release** (session versions, setup
 token, rate limits):
@@ -298,6 +300,93 @@ token, rate limits):
   replace it with the `rdf_signin` one rather than re-keying it: nginx won't
   change an existing zone's key on reload. It keeps running the old config
   and only logs an `[emerg]` line in `/var/log/nginx/error.log`.
+
+**Upgrading to the tenancy release** (phase 1a, see
+[`subsystems/dashboard/TENANCY.md`](subsystems/dashboard/TENANCY.md)): on
+startup the dashboard makes the existing deployment **tenant #1** and
+rebuilds every tenant-owned table with a `tenant_id`, in one transaction.
+URLs, the relay, its keys, devices, users, passkeys, sessions and installers
+stay exactly as they are; nobody is signed out. `server_config` is kept,
+unused, for one release in case of a rollback. Do it in this order:
+
+1. **Back up**, with the current code still running:
+
+   ```bash
+   sudo python3 ~/rustdesk-fleet/subsystems/single-tenant/backup.py run    # full archive
+   # plus a plain copy of the dashboard DB, taken with SQLite's online backup:
+   python3 -c "import sqlite3; s = sqlite3.connect('file:/opt/rustdesk-fleet/fleet.sqlite3?mode=ro', uri=True); d = sqlite3.connect('$HOME/fleet-pre-tenancy.sqlite3'); s.backup(d); d.close()"
+   ```
+
+2. **Check the migration on a copy**, using the new code from a separate
+   worktree, so the running checkout is untouched:
+
+   ```bash
+   cd ~/rustdesk-fleet && git fetch origin
+   git worktree add ~/rdf-tenancy-check origin/main
+   cp ~/fleet-pre-tenancy.sqlite3 /tmp/fleet-check.sqlite3
+   python3 ~/rdf-tenancy-check/subsystems/dashboard/scripts/check_migration.py /tmp/fleet-check.sqlite3
+   ```
+
+   It prints row counts per table before and after (they must match, apart
+   from the new `tenants`, `relays` and `tenant_domains` rows), any row left
+   without a `tenant_id`, the foreign-key and integrity checks, tenant #1's
+   relay and domain, and whether a second run changed anything. It ends with
+   `All checks passed.` and exits 0, or lists the problems and exits 1. It
+   refuses to open the live database. Don't go further until it passes.
+
+3. **nginx first** (safe with the old code, which ignores the header). In the
+   live vhost, add `proxy_set_header X-Fleet-Listener "";` to every
+   `location` that proxies to the dashboard, and
+   `proxy_set_header X-Fleet-Listener legacy-api;` to the port-21114 block
+   (Section 4 shows both). Then:
+
+   ```bash
+   date -u                                   # note the time
+   sudo nginx -t && sudo systemctl reload nginx
+   sudo tail -n 20 /var/log/nginx/error.log  # no [emerg] after that time
+   ```
+
+   Without this, devices on the old port-21114 channel that send an IP
+   address as their Host would be rejected after the upgrade.
+
+4. **Deploy and restart:**
+
+   ```bash
+   cd ~/rustdesk-fleet && git pull --ff-only
+   sudo systemctl restart rustdesk-dashboard
+   journalctl -u rustdesk-dashboard -n 50    # "Application startup complete.", no traceback
+   ```
+
+5. **Check the live site** (still signed in from before: the session must
+   survive):
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' https://rds.example.com/login                      # 200
+   curl -s -X POST -d '{}' https://rds.example.com/api/heartbeat                                # {}
+   curl -s -X POST -d '{}' http://rds.example.com:21114/api/heartbeat                           # {} (if 21114 is open)
+   curl -sk -o /dev/null -w '%{http_code}\n' -H 'Host: unknown.example.net' https://127.0.0.1/  # 404
+   python3 -c "import sqlite3; c = sqlite3.connect('file:/opt/rustdesk-fleet/fleet.sqlite3?mode=ro', uri=True); print(c.execute(\"SELECT COUNT(*), MAX(heartbeat_at) FROM device_info WHERE tenant_id = 1 AND heartbeat_at > datetime('now', '-2 minutes')\").fetchone())"
+   ```
+
+   The last one should show devices heartbeating in the last two minutes.
+   In the browser: Devices, a group page, Logs and Server Status look as
+   before, and you are still signed in.
+
+6. Remove the check worktree: `git -C ~/rustdesk-fleet worktree remove ~/rdf-tenancy-check`.
+
+**Rollback:** stop the dashboard, put the pre-tenancy copy back, check out the
+last pre-tenancy commit, start again. The nginx header lines can stay.
+
+```bash
+sudo systemctl stop rustdesk-dashboard
+cp ~/fleet-pre-tenancy.sqlite3 /opt/rustdesk-fleet/fleet.sqlite3
+rm -f /opt/rustdesk-fleet/fleet.sqlite3-wal /opt/rustdesk-fleet/fleet.sqlite3-shm
+cd ~/rustdesk-fleet && git checkout <last commit before the tenancy release>
+sudo systemctl start rustdesk-dashboard
+```
+
+Anything recorded between the upgrade and the rollback (sessions, device
+reports, edits) is lost with the copy; the relay itself is never touched.
 
 ## 5. First-run setup
 
@@ -433,6 +522,10 @@ option to Off.
 regenerated — the hbbs/hbbr **keypair** (`data/id_ed25519*`), the hbbs peer
 registry (`data/db_v2.sqlite3`) and the dashboard database
 (`fleet.sqlite3`), plus `docker-compose.yml` and `rustdesk_version.txt`.
+Backups are run by the provider and cover every relay in the `relays`
+table: tenant #1's relay is stored as above, any other relay under
+`relays/<tenant id>/` in the same archive. The backup controls are on
+tenant #1's dashboard only.
 Installer binaries and upstream assets are excluded (large, reproducible).
 Both live SQLite databases are copied with SQLite's online-backup API, so
 each archive is internally consistent. Archives land in
@@ -687,13 +780,14 @@ sqlite3 /opt/rustdesk-fleet/fleet.sqlite3 \
 | Path | What |
 |---|---|
 | `~/rustdesk-fleet` | Repo checkout — code only, no secrets/data |
-| `/opt/rustdesk-fleet/fleet.sqlite3` | Dashboard + hbbs peer data (single-tenant schema) |
+| `/opt/rustdesk-fleet/fleet.sqlite3` | The control database: every tenant's dashboard data, with a `tenant_id` on each tenant-owned row, plus `tenants`, `relays` and `tenant_domains` (see `subsystems/dashboard/TENANCY.md`) |
 | `/opt/rustdesk-fleet/docker-compose.yml` | Deployed compose file (may drift from the repo template after an in-place server update — see Section 2) |
-| `/opt/rustdesk-fleet/data` | hbbs/hbbr keypair + runtime state (container's `/root`) |
+| `/opt/rustdesk-fleet/data` | Tenant #1's relay: hbbs/hbbr keypair, hbbs peer DB + runtime state (container's `/root`). Every relay's paths are in its `relays` row |
 | `/opt/rustdesk-fleet/installer-assets` | Upstream RustDesk client binaries used as installer input |
-| `/opt/rustdesk-fleet/installers` | Generated per-group installer output |
+| `/opt/rustdesk-fleet/installers` | Generated per-group installer output (tenant #1; other tenants: `tenants/<id>/installers`) |
 | `/opt/rustdesk-fleet/backups` | Backup archives + `last_backup.json` status (see Section 8) |
-| `/opt/rustdesk-fleet/branding` | Per-group installer icons (`<group_id>.png/.ico`) and the email logo (`email-logo.png`, set in Admin → Email templates → Design) |
+| `/opt/rustdesk-fleet/branding` | Tenant #1's per-group installer icons (`<group_id>.png/.ico`) and email logo (`email-logo.png`, set in Admin → Email templates → Design) |
+| `/opt/rustdesk-fleet/tenants/<id>/` | Any other tenant's `installers/` and `branding/` (none yet) |
 | `/opt/rustdesk-fleet/tools` | `jsign` jar for installer signing (see Section 10) |
 | `/opt/rustdesk-fleet/os-lifecycle.json` | Cached Windows end-of-support dates (from endoflife.date, refreshed daily by the dashboard; safe to delete — it's re-downloaded) |
 | `/etc/rustdesk-fleet/dashboard.env` | Dashboard secrets (`SESSION_SECRET`) — not in the repo |

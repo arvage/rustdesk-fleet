@@ -1,8 +1,7 @@
 # Product vision
 
-Recorded 2026-10-26. This is where RustDesk Fleet is headed. The code today
-is still the single-tenant system described in [`README.md`](README.md);
-nothing below is built yet unless it says so.
+Recorded 2026-10-26. This is where RustDesk Fleet is headed. Nothing below is
+built yet unless it says so; the tenant model (phase 1a) is.
 
 ## The product
 
@@ -56,6 +55,33 @@ Named so far:
 
 ## Decided so far
 
+Tenancy (phase 1a, built: see
+[`subsystems/dashboard/TENANCY.md`](subsystems/dashboard/TENANCY.md)):
+
+- **One shared control database** (`fleet.sqlite3`) with a `tenant_id` on
+  every tenant-owned table. Each tenant's hbbs database stays inside that
+  tenant's own relay stack.
+- **One relay per tenant**, with its own keypair. A relay is a row in
+  `relays` (host, ports, public key, data dir, compose file, hbbs database,
+  status), not server-wide config. This answers the relay-isolation question
+  below: a technician works inside one tenant, so one server and key per
+  tenant is workable, and one MSP's leaked key can't reach another's devices.
+- **The tenant is chosen by the request's `Host`.** Each tenant has one or
+  more domains in `tenant_domains`: a provider subdomain (phase 1b) and
+  optionally a custom domain the tenant points at us with a CNAME (phase 1c).
+  The original deployment's host is tenant #1's first (`legacy`) domain.
+- **Installers always use the relay host, never a custom domain**, so a
+  tenant changing or losing their domain never strands devices. Relay host
+  and web domains are separate in the model.
+- **Provider-level, not per tenant** (for now): code signing, backups, the
+  OS lifecycle cache. Signing and backups are run by us; backups cover every
+  relay's keypair and the control database.
+- **The current deployment is tenant #1**, with its relay, keys, devices,
+  users and URLs exactly as they were.
+- Next: creating tenants and their relay stacks, the provider console and
+  provider subdomains (phase 1b); custom domains with CNAME verification and
+  per-domain certificates (phase 1c).
+
 - **Client PDF guides** ([`client-docs/`](client-docs/README.md)) are
   generated per tenant when the tenant is created. They do not include IT
   support contact details. `generate_guides()` in `client-docs/build_client_docs.py`
@@ -64,22 +90,10 @@ Named so far:
 
 ## Questions to settle before building
 
-- **Relay isolation per tenant.** The project moved to one shared relay and
-  key because a technician's RustDesk client holds one server and key at a
-  time, and switching between *clients* was impractical
-  ([`README.md`](README.md), single-tenant security note). With tenants as
-  MSPs, a technician works inside one tenant, so a relay and key **per
-  tenant** may be workable again (see `subsystems/provisioning/`, kept as
-  reference). Sharing one relay across tenants means one MSP's leaked key
-  could reach another MSP's devices, which is much harder to accept between
-  separate paying companies than between clients of one MSP.
-- **Data separation.** Today everything lives in one SQLite file. Decide on a
-  `tenant_id` on every table, a database per tenant, or a move to a server
-  database.
 - **Tenant onboarding.** Sign-up, trial, and what is set up when a tenant is
   created (relay, keys, branding, guides).
-- **Tenant branding and domains.** Whether each tenant gets its own
-  subdomain or custom domain, logo, emails and installer branding.
+- **Tenant branding.** Logo, emails and installer branding per tenant
+  (domains are decided above).
 - **Provider admin.** A provider-level console above tenants: tenant list,
   plans, usage, billing, support access.
 - **Time tracking for tenant billing.** Whether session time alone is

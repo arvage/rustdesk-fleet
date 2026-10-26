@@ -28,6 +28,15 @@ Public product page, served by the dashboard at `/` to signed-out visitors:
 PDF guides for your clients (installing the client, getting help during a
 session): [`client-docs/`](client-docs/README.md).
 
+## Tenancy (in progress)
+
+The dashboard now has a tenant model: each MSP is a tenant with its own
+relay, keypair, users, groups and devices, chosen by the request's host, in
+one control database. The original deployment is tenant #1; creating more
+tenants comes next. See
+[`subsystems/dashboard/TENANCY.md`](subsystems/dashboard/TENANCY.md) and
+[`VISION.md`](VISION.md). Within a tenant, everything below still applies.
+
 ## Current architecture: single-tenant
 
 One `hbbs`/`hbbr` pair for the entire fleet, one shared keypair, one
@@ -78,8 +87,10 @@ isolation without buying one license per client. That ruled it out.)
 **superseded** multi-tenant phase (`tenants`, `installers`,
 `provisioning_events`). The single-tenant phase has its own schema at
 `subsystems/single-tenant/schema.sql` (`server_config`, `client_groups`,
-`devices`, `installers`, `users`). Use the single-tenant one going
-forward.
+`devices`, `installers`, `users`), which the dashboard's migrations extend
+with tenancy (`tenants`, `relays`, `tenant_domains` and a `tenant_id`
+everywhere; `server_config` is no longer read). Use the single-tenant one
+going forward.
 
 ## Verified live on the Lightsail box (`rds.example.com`)
 

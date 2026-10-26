@@ -22,10 +22,15 @@ for usability, accepted deliberately.
 ## What's here
 
 ```
-schema.sql           Single-tenant DB schema: server_config (singleton),
-                      client_groups, devices, installers, users, events
-docker-compose.yml    One hbbs/hbbr pair, network_mode: host
-setup_server.py       Bootstrap script + CLI: init server, manage groups
+schema.sql           Base DB schema: server_config (singleton, read only by
+                      the dashboard's tenancy migration), client_groups,
+                      devices, installers, users, events. The dashboard's
+                      migrations add tenancy on top (see
+                      ../dashboard/TENANCY.md)
+docker-compose.yml    One hbbs/hbbr pair, network_mode: host (tenant #1's relay)
+setup_server.py       Bootstrap script + CLI: init tenant #1's relay (its
+                      relays row), manage groups (--tenant, default 1)
+tenant_paths.py       Where each tenant's installers and branding live
 ```
 
 ## Migrating from the old per-tenant setup on the Lightsail box
