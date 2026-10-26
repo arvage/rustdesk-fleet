@@ -570,4 +570,9 @@ def run_migrations() -> None:
     """)
     conn.commit()
 
+    # Tenancy: tenants, their relays and their web domains (TENANCY.md).
+    from app.tenant_schema import ensure_tenancy_tables
+    ensure_tenancy_tables(conn)
+    conn.commit()
+
     conn.close()
