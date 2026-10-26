@@ -1,0 +1,4 @@
+# Test tools only (python3 -m pip install -r requirements-dev.txt).
+# The dashboard's runtime dependencies are installed by install.sh.
+pytest
+httpx

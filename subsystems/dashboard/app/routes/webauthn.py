@@ -220,15 +220,16 @@ async def login_webauthn_complete(request: Request):
     user_id = request.session.get("pending_2fa_user_id")
     challenge = request.session.pop("webauthn_challenge", None)
     purpose = request.session.pop("webauthn_challenge_purpose", None)
-    if not user_id or not challenge or purpose != "login":
-        return JSONResponse({"error": "Sign-in session expired — start over."}, status_code=400)
-
-    conn = get_db()
-    email = _pending_email(conn, user_id)
-    conn.close()
+    email = ""
+    if user_id:
+        conn = get_db()
+        email = _pending_email(conn, user_id)
+        conn.close()
     wait = locked_seconds(request, email)
     if wait:
         return JSONResponse({"error": ratelimit.locked_message(wait)}, status_code=429)
+    if not user_id or not challenge or purpose != "login":
+        return JSONResponse({"error": "Sign-in session expired — start over."}, status_code=400)
 
     body = await request.json()
     posted_cred_id = body.get("id")
