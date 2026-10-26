@@ -4,16 +4,18 @@ build_client_docs.py — print-ready PDF guides for the people whose computers
 you support (not for technicians).
 
     python3 build_client_docs.py
-    python3 build_client_docs.py --company "Acme IT" --phone "(555) 010-2030" \
-        --email help@acme-it.example --host rds.acme-it.example
+    python3 build_client_docs.py --app-name "Acme Remote Help" --host rds.acme.example --out /path/to/tenant
 
-Writes two PDFs next to this script:
+Writes two PDFs (next to this script unless --out is given):
   install-remote-support.pdf   how to install the client from a download link
   getting-help.pdf             finding your ID, accepting and ending a session
 
+From code, call generate_guides(out_dir, app_name=..., host=...). Tenant
+creation is meant to call it once tenants exist (see VISION.md). The
+guides carry no IT support contact details.
+
 Needs reportlab (pip install reportlab). Pictures are drawn as vector
-illustrations, so they stay sharp when printed. Anything left out of the
-options prints as a blank line the client can fill in by hand.
+illustrations, so they stay sharp when printed.
 """
 import argparse
 from pathlib import Path
@@ -503,26 +505,6 @@ def box(rows, fill=ACCENT_SOFT, width=CONTENT_W):
     return t
 
 
-def contact_box(opts, width=CONTENT_W):
-    def field(label, value):
-        v = value if value else "_" * (46 if width == CONTENT_W else 26)
-        return Paragraph(f"<b>{label}</b>&nbsp;&nbsp;&nbsp;{v}", S["cell"])
-    rows = [Paragraph("<b>Your IT support contact</b>", S["body"])]
-    if not opts.company:
-        rows.append(field("Company", ""))
-    rows += [field("Phone", opts.phone), field("Email", opts.email)]
-    return box(rows, width=width)
-
-
-def side_by_side(left, right, gap=10):
-    t = Table([[left, right]], colWidths=[(CONTENT_W + gap) / 2] * 2)
-    t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
-                           ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (0, 0), gap),
-                           ("RIGHTPADDING", (1, 0), (1, 0), 0),
-                           ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
-    return t
-
-
 def trouble_table(rows):
     data = [[Paragraph("If this happens", S["cellb"]), Paragraph("Try this", S["cellb"])]]
     data += [[Paragraph(a, S["cell"]), Paragraph(b, S["cell"])] for a, b in rows]
@@ -536,27 +518,21 @@ def trouble_table(rows):
     return t
 
 
-def build(path, doc_title, story, opts):
-    provider = opts.company or "Your IT support provider"
-    contact = " · ".join(x for x in (opts.phone, opts.email) if x)
-
+def build(path, doc_title, story, app):
     def on_page(c, doc):
         c.saveState()
         c.setFillColor(ACCENT)
         c.rect(0, PAGE_H - 8, PAGE_W, 8, stroke=0, fill=1)
-        text(c, MARGIN, PAGE_H - 30, provider.upper(), 7.5, MUTED, "Helvetica-Bold")
+        text(c, MARGIN, PAGE_H - 30, app.upper(), 7.5, MUTED, "Helvetica-Bold")
         text(c, PAGE_W - MARGIN, PAGE_H - 30, doc_title, 7.5, MUTED, align="right")
         c.setStrokeColor(LINE)
         c.line(MARGIN, 0.6 * inch, PAGE_W - MARGIN, 0.6 * inch)
-        foot = "Need help? Contact " + (provider if provider != "Your IT support provider" else "your IT support provider")
-        if contact:
-            foot += ": " + contact
-        text(c, MARGIN, 0.42 * inch, foot, 8, MUTED)
+        text(c, MARGIN, 0.42 * inch, "Need help? Contact your IT support provider.", 8, MUTED)
         text(c, PAGE_W - MARGIN, 0.42 * inch, f"Page {doc.page}", 8, MUTED, align="right")
         c.restoreState()
 
     doc = BaseDocTemplate(str(path), pagesize=letter, title=doc_title,
-                          author=opts.company or "IT support", subject="Remote Support client guide",
+                          author=app, subject=f"{app} client guide",
                           leftMargin=MARGIN, rightMargin=MARGIN, topMargin=0.85 * inch, bottomMargin=0.85 * inch)
     frame = Frame(MARGIN, 0.85 * inch, CONTENT_W, PAGE_H - 1.7 * inch, id="f", leftPadding=0,
                   rightPadding=0, topPadding=0, bottomPadding=0)
@@ -566,24 +542,19 @@ def build(path, doc_title, story, opts):
 
 # ── The two guides ───────────────────────────────────────────────────────────
 
-def install_guide(opts):
-    app = opts.app_name
-    host = opts.host or "your-support-server"
+def install_guide(path, app, host):
     st = [
         Paragraph(f"Installing {app}", S["title"]),
         Paragraph(f"{app} is a small program that lets your IT support team see your screen and fix "
                   "problems for you, without a visit. Installing it takes about two minutes.", S["lede"]),
         Spacer(1, 14),
-        side_by_side(
-            box([
-                Paragraph("<b>Before you start</b>", S["body"]),
-                Paragraph("• Your IT support provider emails you a download link. "
-                          "Only install from a link they sent you.", S["cell"]),
-                Paragraph("• You may be asked for the password you use to sign in to this computer.", S["cell"]),
-                Paragraph("• You only need to do this once per computer.", S["cell"]),
-            ], width=(CONTENT_W - 10) / 2),
-            contact_box(opts, width=(CONTENT_W - 10) / 2),
-        ),
+        box([
+            Paragraph("<b>Before you start</b>", S["body"]),
+            Paragraph("• Your IT support provider emails you a download link. "
+                      "Only install from a link they sent you.", S["cell"]),
+            Paragraph("• You may be asked for the password you use to sign in to this computer.", S["cell"]),
+            Paragraph("• You only need to do this once per computer.", S["cell"]),
+        ]),
 
         step(1, "Open the link and download the installer",
              "Click the link in the email. The page picks the right version for your computer and marks it "
@@ -642,17 +613,15 @@ def install_guide(opts):
              "Screen recording isn't allowed yet. Repeat step 4, then quit and reopen RustDesk."),
         ]),
     ]
-    build(opts.out / "install-remote-support.pdf", f"Installing {app}", st, opts)
+    build(path, f"Installing {app}", st, app)
 
 
-def help_guide(opts):
-    app = opts.app_name
+def help_guide(path, app):
     st = [
         Paragraph(f"Getting help with {app}", S["title"]),
         Paragraph(f"What to do when you call for help and your technician connects to your computer with "
                   f"{app}. You stay in control the whole time.", S["lede"]),
-        Spacer(1, 14),
-        contact_box(opts),
+        Spacer(1, 2),
 
         step(1, "Open the app",
              f"Double-click the <b>{app}</b> shortcut on your desktop (1), or type <b>{app}</b> into the Windows "
@@ -706,24 +675,46 @@ def help_guide(opts):
              "Screen recording or Accessibility permission is off. See step 4 of the installation guide."),
         ]),
     ]
-    build(opts.out / "getting-help.pdf", f"Getting help with {app}", st, opts)
+    build(path, f"Getting help with {app}", st, app)
+
+
+GUIDE_FILES = ("install-remote-support.pdf", "getting-help.pdf")
+
+
+def generate_guides(out_dir, app_name: str = "Remote Support", host: str = "") -> list[Path]:
+    """Write both client guides into out_dir and return their paths.
+
+    app_name is the name clients see on the app (a tenant's or group's
+    branded name); host is the server hostname shown in the download-page
+    picture. Each file is written under a temporary name and then moved into
+    place, so a page serving the old guides never sees a half-written PDF.
+    """
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    app = (app_name or "").strip() or "Remote Support"
+    host = (host or "").strip() or "your-support-server"
+    builders = {
+        "install-remote-support.pdf": lambda p: install_guide(p, app, host),
+        "getting-help.pdf": lambda p: help_guide(p, app),
+    }
+    paths = []
+    for name in GUIDE_FILES:
+        final, tmp = out / name, out / f".{name}.tmp"
+        builders[name](tmp)
+        tmp.replace(final)
+        paths.append(final)
+    return paths
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--company", default="", help="your company name, printed in the header and footer")
-    ap.add_argument("--phone", default="", help="support phone number")
-    ap.add_argument("--email", default="", help="support email address")
-    ap.add_argument("--host", default="", help="dashboard hostname shown in the download-page picture")
     ap.add_argument("--app-name", default="Remote Support",
-                    help="the app name clients see (a client group's branded name)")
+                    help="the app name clients see (a tenant's or client group's branded name)")
+    ap.add_argument("--host", default="", help="server hostname shown in the download-page picture")
     ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent, help="output folder")
     opts = ap.parse_args()
-    opts.out.mkdir(parents=True, exist_ok=True)
-    install_guide(opts)
-    help_guide(opts)
-    print(f"Wrote {opts.out / 'install-remote-support.pdf'}")
-    print(f"Wrote {opts.out / 'getting-help.pdf'}")
+    for path in generate_guides(opts.out, opts.app_name, opts.host):
+        print(f"Wrote {path}")
 
 
 if __name__ == "__main__":

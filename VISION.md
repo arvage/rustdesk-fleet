@@ -58,7 +58,9 @@ Named so far:
 
 - **Client PDF guides** ([`client-docs/`](client-docs/README.md)) are
   generated per tenant when the tenant is created. They do not include IT
-  support contact details.
+  support contact details. `generate_guides()` in `client-docs/build_client_docs.py`
+  is ready for tenant creation to call; the hook itself waits for the tenant
+  model.
 
 ## Questions to settle before building
 

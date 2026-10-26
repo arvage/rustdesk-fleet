@@ -11,17 +11,27 @@ download link, or print them for a site visit.
 The pictures are drawn illustrations, not screenshots, so they stay sharp in
 print and carry no real device or customer data.
 
-## Rebuilding with your details
+The guides carry no IT support contact details, because the same guides go
+to every tenant's clients.
 
-The committed PDFs leave the company, phone and email as blank lines to fill in
-by hand. To print them instead, or to use a client group's branded app name:
+## Generating guides for a tenant
+
+`generate_guides()` writes both PDFs for one tenant, using the app name its
+clients see and its server hostname. Tenant creation is meant to call it once
+tenants exist (see [`VISION.md`](../VISION.md)); until then, run it by hand:
+
+```python
+from build_client_docs import generate_guides
+generate_guides("/path/to/tenant/guides", app_name="Acme Remote Help", host="rds.acme.example")
+```
+
+Or from the command line:
 
 ```bash
 pip install reportlab
-python3 client-docs/build_client_docs.py \
-  --company "Your Company" --phone "(555) 010-2030" --email help@example.com \
-  --host rds.example.com --app-name "Remote Support"
+python3 client-docs/build_client_docs.py --app-name "Acme Remote Help" \
+  --host rds.acme.example --out /path/to/tenant/guides
 ```
 
-`--out <folder>` writes the PDFs somewhere else, for example one folder per
-client group.
+With no options it rebuilds the default copies in this folder, which the
+download page links today (`/guides/<file>`).

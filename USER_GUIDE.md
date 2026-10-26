@@ -202,7 +202,7 @@ Instead of emailing a binary, share a **download link** from a group page:
   and guides the client through installing it. It's unlisted (no indexing).
 - The page also links two PDF guides for the client: how to install, and
   what to do during a support session. They live in `client-docs/`; see its
-  README to rebuild them with your contact details.
+  README to rebuild them with a branded app name.
 
 ---
 
