@@ -28,14 +28,40 @@ def _gen_password(length: int = 16) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
-def _account_extras(user_id: int) -> dict:
+def _tenant_group_ids(conn, tenant_id: int, group_ids: list[int]) -> list[int]:
+    """The subset of group_ids that are this tenant's groups (others are
+    silently dropped, exactly like ids that don't exist)."""
+    if not group_ids:
+        return []
+    marks = ",".join("?" * len(group_ids))
+    rows = conn.execute(
+        f"SELECT id FROM client_groups WHERE tenant_id = ? AND id IN ({marks})", (tenant_id, *group_ids)
+    ).fetchall()
+    found = {r["id"] for r in rows}
+    return [g for g in dict.fromkeys(group_ids) if g in found]
+
+
+def _target(conn, tenant_id: int, user_id: int, cols: str = "id, email"):
+    """A user of this tenant by id, or None (another tenant's id included)."""
+    return conn.execute(
+        f"SELECT {cols} FROM users WHERE id = ? AND tenant_id = ?", (user_id, tenant_id)
+    ).fetchone()
+
+
+def _not_found(request: Request):
+    _set_flash(request, "error", "User not found.")
+    return RedirectResponse("/users", status_code=303)
+
+
+def _account_extras(tenant_id: int, user_id: int) -> dict:
     """auth_method + registered passkeys for rendering account.html."""
     conn = get_db()
-    auth_row = conn.execute("SELECT auth_method FROM users WHERE id = ?", (user_id,)).fetchone()
+    auth_row = conn.execute("SELECT auth_method FROM users WHERE id = ? AND tenant_id = ?",
+                            (user_id, tenant_id)).fetchone()
     passkeys = conn.execute(
         "SELECT id, nickname, created_at, last_used_at FROM webauthn_credentials "
-        "WHERE user_id = ? ORDER BY created_at",
-        (user_id,),
+        "WHERE user_id = ? AND tenant_id = ? ORDER BY created_at",
+        (user_id, tenant_id),
     ).fetchall()
     conn.close()
     return {
@@ -47,21 +73,24 @@ def _account_extras(user_id: int) -> dict:
 @router.get("/users", response_class=HTMLResponse)
 async def users_list(request: Request, current_user: dict = Depends(require_auth)):
     _require_admin(current_user)
+    tid = current_user["tenant_id"]
     conn = get_db()
     users = conn.execute(
-        "SELECT id, email, display_name, role, created_at, auth_method FROM users ORDER BY created_at"
+        "SELECT id, email, display_name, role, created_at, auth_method FROM users"
+        " WHERE tenant_id = ? ORDER BY created_at", (tid,)
     ).fetchall()
     groups = conn.execute(
-        "SELECT id, slug, display_name FROM client_groups ORDER BY display_name"
+        "SELECT id, slug, display_name FROM client_groups WHERE tenant_id = ? ORDER BY display_name", (tid,)
     ).fetchall()
     access_rows = conn.execute(
-        "SELECT user_id, group_id FROM user_group_access"
+        "SELECT user_id, group_id FROM user_group_access WHERE tenant_id = ?", (tid,)
     ).fetchall()
     smtp_row = conn.execute(
-        "SELECT enabled, smtp_host FROM notification_settings WHERE id = 1"
+        "SELECT enabled, smtp_host FROM notification_settings WHERE tenant_id = ?", (tid,)
     ).fetchone()
     passkey_rows = conn.execute(
-        "SELECT id, user_id, nickname, created_at, last_used_at FROM webauthn_credentials ORDER BY created_at"
+        "SELECT id, user_id, nickname, created_at, last_used_at FROM webauthn_credentials"
+        " WHERE tenant_id = ? ORDER BY created_at", (tid,)
     ).fetchall()
     conn.close()
 
@@ -106,7 +135,7 @@ async def users_list(request: Request, current_user: dict = Depends(require_auth
         {
             "users": users_with_access,
             "groups": groups,
-            "roles": [{"key": k, "name": v["name"]} for k, v in all_roles().items()],
+            "roles": [{"key": k, "name": v["name"]} for k, v in all_roles(tid).items()],
             "current_user": current_user,
             "smtp_ready": smtp_ready,
             "groups_json": groups_json,
@@ -129,10 +158,11 @@ async def user_create(
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
+    tid = current_user["tenant_id"]
     email = email.lower().strip()
     display_name = display_name.strip()
 
-    if role not in all_roles():
+    if role not in all_roles(tid):
         _set_flash(request, "error", "Invalid role.")
         return RedirectResponse("/users", status_code=303)
 
@@ -148,24 +178,25 @@ async def user_create(
     pw_hash = bcrypt.hashpw(final_password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
     conn = get_db()
-    existing = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+    existing = conn.execute("SELECT id FROM users WHERE tenant_id = ? AND email = ?", (tid, email)).fetchone()
     if existing:
         conn.close()
         _set_flash(request, "error", f"A user with email {email} already exists.")
         return RedirectResponse("/users", status_code=303)
 
-    conn.execute(
-        "INSERT INTO users (email, display_name, role, password_hash) VALUES (?, ?, ?, ?)",
-        (email, display_name, role, pw_hash),
+    cur = conn.execute(
+        "INSERT INTO users (tenant_id, email, display_name, role, password_hash) VALUES (?, ?, ?, ?, ?)",
+        (tid, email, display_name, role, pw_hash),
     )
     conn.commit()
-    user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    user_id = cur.lastrowid
 
+    group_ids = _tenant_group_ids(conn, tid, group_ids)
     if role == "tech" and group_ids:
         for gid in group_ids:
             conn.execute(
-                "INSERT OR IGNORE INTO user_group_access (user_id, group_id) VALUES (?, ?)",
-                (user_id, gid),
+                "INSERT OR IGNORE INTO user_group_access (tenant_id, user_id, group_id) VALUES (?, ?, ?)",
+                (tid, user_id, gid),
             )
         conn.commit()
 
@@ -174,21 +205,21 @@ async def user_create(
     if group_ids:
         placeholders = ",".join("?" * len(group_ids))
         rows = conn.execute(
-            f"SELECT display_name FROM client_groups WHERE id IN ({placeholders})",
-            group_ids,
+            f"SELECT display_name FROM client_groups WHERE tenant_id = ? AND id IN ({placeholders})",
+            (tid, *group_ids),
         ).fetchall()
         group_names = [r["display_name"] for r in rows]
 
-    log_event(conn, "user_created", email, current_user["email"])
+    log_event(conn, "user_created", email, current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
 
     email_sent = False
     if send_email == "1":
-        ok, _ = send_credentials_email(email, display_name, final_password)
+        ok, _ = send_credentials_email(tid, email, display_name, final_password)
         email_sent = ok
 
-    fire_notification("user_created", {
+    fire_notification(tid, "user_created", {
         "email": email,
         "display_name": display_name or email,
         "role": role,
@@ -212,19 +243,25 @@ async def user_set_role(
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
-    if role not in all_roles():
+    tid = current_user["tenant_id"]
+    conn = get_db()
+    target = _target(conn, tid, user_id, "email, role")
+    if not target:
+        conn.close()
+        return _not_found(request)
+    if role not in all_roles(tid):
+        conn.close()
         _set_flash(request, "error", "Invalid role.")
         return RedirectResponse("/users", status_code=303)
     if user_id == current_user["id"]:
+        conn.close()
         _set_flash(request, "error", "You cannot change your own role.")
         return RedirectResponse("/users", status_code=303)
 
-    conn = get_db()
-    target = conn.execute("SELECT email, role FROM users WHERE id = ?", (user_id,)).fetchone()
-    conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
-    if target and target["role"] != role:
-        bump_session_version(conn, user_id)
-    log_event(conn, "user_role_changed", f"{target['email'] if target else user_id} -> {role}", current_user["email"])
+    conn.execute("UPDATE users SET role = ? WHERE id = ? AND tenant_id = ?", (role, user_id, tid))
+    if target["role"] != role:
+        bump_session_version(conn, tid, user_id)
+    log_event(conn, "user_role_changed", f"{target['email']} -> {role}", current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
     _set_flash(request, "success", "Role updated.")
@@ -239,18 +276,23 @@ async def user_set_access(
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
+    tid = current_user["tenant_id"]
     conn = get_db()
-    target = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
-    conn.execute("DELETE FROM user_group_access WHERE user_id = ?", (user_id,))
+    target = _target(conn, tid, user_id)
+    if not target:
+        conn.close()
+        return _not_found(request)
+    group_ids = _tenant_group_ids(conn, tid, group_ids)
+    conn.execute("DELETE FROM user_group_access WHERE user_id = ? AND tenant_id = ?", (user_id, tid))
     for gid in group_ids:
         conn.execute(
-            "INSERT OR IGNORE INTO user_group_access (user_id, group_id) VALUES (?, ?)",
-            (user_id, gid),
+            "INSERT OR IGNORE INTO user_group_access (tenant_id, user_id, group_id) VALUES (?, ?, ?)",
+            (tid, user_id, gid),
         )
     log_event(
         conn, "user_access_updated",
-        f"{target['email'] if target else user_id} groups={sorted(group_ids)}",
-        current_user["email"],
+        f"{target['email']} groups={sorted(group_ids)}",
+        current_user["email"], tenant_id=tid,
     )
     conn.commit()
     conn.close()
@@ -268,15 +310,15 @@ async def user_reset_password(
     temp_password = _gen_password()
     pw_hash = bcrypt.hashpw(temp_password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
+    tid = current_user["tenant_id"]
     conn = get_db()
-    user = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = _target(conn, tid, user_id)
     if not user:
         conn.close()
-        _set_flash(request, "error", "User not found.")
-        return RedirectResponse("/users", status_code=303)
-    conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pw_hash, user_id))
-    bump_session_version(conn, user_id)
-    log_event(conn, "user_password_reset", user["email"], current_user["email"])
+        return _not_found(request)
+    conn.execute("UPDATE users SET password_hash = ? WHERE id = ? AND tenant_id = ?", (pw_hash, user_id, tid))
+    bump_session_version(conn, tid, user_id)
+    log_event(conn, "user_password_reset", user["email"], current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
 
@@ -293,16 +335,21 @@ async def user_edit(
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
+    tid = current_user["tenant_id"]
     email = email.lower().strip()
     display_name = display_name.strip()
 
+    conn = get_db()
+    if not _target(conn, tid, user_id):
+        conn.close()
+        return _not_found(request)
     if not email or "@" not in email:
+        conn.close()
         _set_flash(request, "error", "Enter a valid email address.")
         return RedirectResponse("/users", status_code=303)
 
-    conn = get_db()
     conflict = conn.execute(
-        "SELECT id FROM users WHERE email = ? AND id != ?", (email, user_id)
+        "SELECT id FROM users WHERE tenant_id = ? AND email = ? AND id != ?", (tid, email, user_id)
     ).fetchone()
     if conflict:
         conn.close()
@@ -310,10 +357,10 @@ async def user_edit(
         return RedirectResponse("/users", status_code=303)
 
     conn.execute(
-        "UPDATE users SET email = ?, display_name = ? WHERE id = ?",
-        (email, display_name, user_id),
+        "UPDATE users SET email = ?, display_name = ? WHERE id = ? AND tenant_id = ?",
+        (email, display_name, user_id, tid),
     )
-    log_event(conn, "user_updated", email, current_user["email"])
+    log_event(conn, "user_updated", email, current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
 
@@ -328,24 +375,26 @@ async def user_delete(
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
+    tid = current_user["tenant_id"]
+    conn = get_db()
+    deleted = _target(conn, tid, user_id, "email, display_name, role")
+    if not deleted:
+        conn.close()
+        return _not_found(request)
     if user_id == current_user["id"]:
+        conn.close()
         _set_flash(request, "error", "You cannot delete your own account.")
         return RedirectResponse("/users", status_code=303)
 
-    conn = get_db()
-    deleted = conn.execute(
-        "SELECT email, display_name, role FROM users WHERE id = ?", (user_id,)
-    ).fetchone()
-    conn.execute("DELETE FROM user_group_access WHERE user_id = ?", (user_id,))
-    conn.execute("DELETE FROM webauthn_credentials WHERE user_id = ?", (user_id,))
-    conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-    if deleted:
-        log_event(conn, "user_deleted", deleted["email"], current_user["email"])
+    conn.execute("DELETE FROM user_group_access WHERE user_id = ? AND tenant_id = ?", (user_id, tid))
+    conn.execute("DELETE FROM webauthn_credentials WHERE user_id = ? AND tenant_id = ?", (user_id, tid))
+    conn.execute("DELETE FROM users WHERE id = ? AND tenant_id = ?", (user_id, tid))
+    log_event(conn, "user_deleted", deleted["email"], current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
 
     if deleted:
-        fire_notification("user_deleted", {
+        fire_notification(tid, "user_deleted", {
             "email": deleted["email"],
             "display_name": deleted["display_name"] or deleted["email"],
             "role": deleted["role"],
@@ -364,29 +413,32 @@ async def user_revoke_passkey(
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
+    tid = current_user["tenant_id"]
     conn = get_db()
-    target = conn.execute("SELECT email, auth_method FROM users WHERE id = ?", (user_id,)).fetchone()
+    target = _target(conn, tid, user_id, "email, auth_method")
     cred = conn.execute(
-        "SELECT nickname FROM webauthn_credentials WHERE id = ? AND user_id = ?", (cred_id, user_id)
+        "SELECT nickname FROM webauthn_credentials WHERE id = ? AND user_id = ? AND tenant_id = ?",
+        (cred_id, user_id, tid),
     ).fetchone()
     if not target or not cred:
         conn.close()
         _set_flash(request, "error", "Passkey not found.")
         return RedirectResponse("/users", status_code=303)
 
-    conn.execute("DELETE FROM webauthn_credentials WHERE id = ? AND user_id = ?", (cred_id, user_id))
+    conn.execute("DELETE FROM webauthn_credentials WHERE id = ? AND user_id = ? AND tenant_id = ?",
+                 (cred_id, user_id, tid))
     remaining = conn.execute(
-        "SELECT COUNT(*) FROM webauthn_credentials WHERE user_id = ?", (user_id,)
+        "SELECT COUNT(*) FROM webauthn_credentials WHERE user_id = ? AND tenant_id = ?", (user_id, tid)
     ).fetchone()[0]
     if remaining == 0:
         # Never leave an account requiring a passkey with none registered.
-        conn.execute("UPDATE users SET auth_method = 'password' WHERE id = ?", (user_id,))
+        conn.execute("UPDATE users SET auth_method = 'password' WHERE id = ? AND tenant_id = ?", (user_id, tid))
         if target["auth_method"] != "password":
-            bump_session_version(conn, user_id)
+            bump_session_version(conn, tid, user_id)
     log_event(
         conn, "passkey_revoked_by_admin",
         f"{target['email']} cred={cred['nickname'] or cred_id}",
-        current_user["email"],
+        current_user["email"], tenant_id=tid,
     )
     conn.commit()
     conn.close()
@@ -401,18 +453,18 @@ async def user_reset_passkeys(
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
+    tid = current_user["tenant_id"]
     conn = get_db()
-    target = conn.execute("SELECT email, auth_method FROM users WHERE id = ?", (user_id,)).fetchone()
+    target = _target(conn, tid, user_id, "email, auth_method")
     if not target:
         conn.close()
-        _set_flash(request, "error", "User not found.")
-        return RedirectResponse("/users", status_code=303)
+        return _not_found(request)
 
-    conn.execute("DELETE FROM webauthn_credentials WHERE user_id = ?", (user_id,))
-    conn.execute("UPDATE users SET auth_method = 'password' WHERE id = ?", (user_id,))
+    conn.execute("DELETE FROM webauthn_credentials WHERE user_id = ? AND tenant_id = ?", (user_id, tid))
+    conn.execute("UPDATE users SET auth_method = 'password' WHERE id = ? AND tenant_id = ?", (user_id, tid))
     if target["auth_method"] != "password":
-        bump_session_version(conn, user_id)
-    log_event(conn, "auth_method_force_reset", target["email"], current_user["email"])
+        bump_session_version(conn, tid, user_id)
+    log_event(conn, "auth_method_force_reset", target["email"], current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
     _set_flash(request, "success", "Passkeys reset — this account now signs in with a password.")
@@ -426,14 +478,14 @@ async def user_sign_out(
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
+    tid = current_user["tenant_id"]
     conn = get_db()
-    target = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    target = _target(conn, tid, user_id)
     if not target:
         conn.close()
-        _set_flash(request, "error", "User not found.")
-        return RedirectResponse("/users", status_code=303)
-    bump_session_version(conn, user_id)
-    log_event(conn, "user_signed_out", target["email"], current_user["email"])
+        return _not_found(request)
+    bump_session_version(conn, tid, user_id)
+    log_event(conn, "user_signed_out", target["email"], current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
     _set_flash(request, "success", f"{target['email']} has been signed out on every device.")
@@ -447,21 +499,19 @@ async def user_mfa_reminder(
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
+    tid = current_user["tenant_id"]
     conn = get_db()
-    target = conn.execute(
-        "SELECT email, display_name FROM users WHERE id = ?", (user_id,)
-    ).fetchone()
+    target = _target(conn, tid, user_id, "email, display_name")
     conn.close()
     if not target:
-        _set_flash(request, "error", "User not found.")
-        return RedirectResponse("/users", status_code=303)
+        return _not_found(request)
 
-    ok, err = send_mfa_reminder_email(target["email"], target["display_name"])
+    ok, err = send_mfa_reminder_email(tid, target["email"], target["display_name"])
 
     conn = get_db()
     log_event(
         conn, "mfa_reminder_sent" if ok else "mfa_reminder_failed",
-        target["email"], current_user["email"],
+        target["email"], current_user["email"], tenant_id=tid,
     )
     conn.commit()
     conn.close()
@@ -477,7 +527,8 @@ async def user_mfa_reminder(
 async def account_get(request: Request, current_user: dict = Depends(require_auth)):
     conn = get_db()
     user = conn.execute(
-        "SELECT email, display_name FROM users WHERE id = ?", (current_user["id"],)
+        "SELECT email, display_name FROM users WHERE id = ? AND tenant_id = ?",
+        (current_user["id"], current_user["tenant_id"])
     ).fetchone()
     conn.close()
     return templates.TemplateResponse(
@@ -485,7 +536,7 @@ async def account_get(request: Request, current_user: dict = Depends(require_aut
         {
             "current_user": current_user, "user": user, "error": None,
             "pw_success": False, "profile_success": False,
-            **_account_extras(current_user["id"]),
+            **_account_extras(current_user["tenant_id"], current_user["id"]),
         },
     )
 
@@ -502,42 +553,46 @@ async def account_update_profile(
 
     if not email or "@" not in email:
         conn = get_db()
-        user = conn.execute("SELECT email, display_name FROM users WHERE id = ?", (current_user["id"],)).fetchone()
+        user = conn.execute("SELECT email, display_name FROM users WHERE id = ? AND tenant_id = ?",
+        (current_user["id"], current_user["tenant_id"])).fetchone()
         conn.close()
         return templates.TemplateResponse(
             request, "account.html",
             {
                 "current_user": current_user, "user": user, "error": "Enter a valid email address.",
                 "pw_success": False, "profile_success": False,
-                **_account_extras(current_user["id"]),
+                **_account_extras(current_user["tenant_id"], current_user["id"]),
             },
             status_code=400,
         )
 
     conn = get_db()
     conflict = conn.execute(
-        "SELECT id FROM users WHERE email = ? AND id != ?", (email, current_user["id"])
+        "SELECT id FROM users WHERE tenant_id = ? AND email = ? AND id != ?",
+        (current_user["tenant_id"], email, current_user["id"])
     ).fetchone()
     if conflict:
-        user = conn.execute("SELECT email, display_name FROM users WHERE id = ?", (current_user["id"],)).fetchone()
+        user = conn.execute("SELECT email, display_name FROM users WHERE id = ? AND tenant_id = ?",
+        (current_user["id"], current_user["tenant_id"])).fetchone()
         conn.close()
         return templates.TemplateResponse(
             request, "account.html",
             {
                 "current_user": current_user, "user": user, "error": "That email is already in use.",
                 "pw_success": False, "profile_success": False,
-                **_account_extras(current_user["id"]),
+                **_account_extras(current_user["tenant_id"], current_user["id"]),
             },
             status_code=400,
         )
 
     conn.execute(
-        "UPDATE users SET email = ?, display_name = ? WHERE id = ?",
-        (email, display_name, current_user["id"]),
+        "UPDATE users SET email = ?, display_name = ? WHERE id = ? AND tenant_id = ?",
+        (email, display_name, current_user["id"], current_user["tenant_id"]),
     )
-    log_event(conn, "profile_updated", email, current_user["email"])
+    log_event(conn, "profile_updated", email, current_user["email"], tenant_id=current_user["tenant_id"])
     conn.commit()
-    user = conn.execute("SELECT email, display_name FROM users WHERE id = ?", (current_user["id"],)).fetchone()
+    user = conn.execute("SELECT email, display_name FROM users WHERE id = ? AND tenant_id = ?",
+        (current_user["id"], current_user["tenant_id"])).fetchone()
     conn.close()
 
     return templates.TemplateResponse(
@@ -545,7 +600,7 @@ async def account_update_profile(
         {
             "current_user": {**current_user, "name": display_name or email}, "user": user,
             "error": None, "pw_success": False, "profile_success": True,
-            **_account_extras(current_user["id"]),
+            **_account_extras(current_user["tenant_id"], current_user["id"]),
         },
     )
 
@@ -560,7 +615,8 @@ async def account_change_password(
 ):
     conn = get_db()
     db_user = conn.execute(
-        "SELECT email, display_name, password_hash FROM users WHERE id = ?", (current_user["id"],)
+        "SELECT email, display_name, password_hash FROM users WHERE id = ? AND tenant_id = ?",
+        (current_user["id"], current_user["tenant_id"])
     ).fetchone()
     conn.close()
 
@@ -570,12 +626,13 @@ async def account_change_password(
             {
                 "current_user": current_user, "user": db_user, "error": msg,
                 "pw_success": False, "profile_success": False,
-                **_account_extras(current_user["id"]),
+                **_account_extras(current_user["tenant_id"], current_user["id"]),
             },
             status_code=400,
         )
 
-    if not db_user or not bcrypt.checkpw(current_password.encode(), db_user["password_hash"].encode()):
+    if not db_user or not db_user["password_hash"] or not bcrypt.checkpw(
+            current_password.encode(), db_user["password_hash"].encode()):
         return _pw_error("Current password is incorrect.")
     if len(new_password) < 10:
         return _pw_error("New password must be at least 10 characters.")
@@ -583,13 +640,16 @@ async def account_change_password(
         return _pw_error("New passwords do not match.")
 
     pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt(rounds=12)).decode()
+    tid = current_user["tenant_id"]
     conn = get_db()
-    conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pw_hash, current_user["id"]))
-    bump_session_version(conn, current_user["id"])
-    log_event(conn, "password_changed", current_user["email"], current_user["email"])
+    conn.execute("UPDATE users SET password_hash = ? WHERE id = ? AND tenant_id = ?",
+                 (pw_hash, current_user["id"], tid))
+    bump_session_version(conn, tid, current_user["id"])
+    log_event(conn, "password_changed", current_user["email"], current_user["email"], tenant_id=tid)
     conn.commit()
     # Other sessions end; this one carries on with the new version.
-    sign_in(request, conn.execute("SELECT * FROM users WHERE id = ?", (current_user["id"],)).fetchone())
+    sign_in(request, conn.execute("SELECT * FROM users WHERE id = ? AND tenant_id = ?",
+                                  (current_user["id"], tid)).fetchone())
     conn.close()
 
     return templates.TemplateResponse(
@@ -597,16 +657,17 @@ async def account_change_password(
         {
             "current_user": current_user, "user": db_user, "error": None,
             "pw_success": True, "profile_success": False,
-            **_account_extras(current_user["id"]),
+            **_account_extras(current_user["tenant_id"], current_user["id"]),
         },
     )
 
 
 @router.post("/account/sign-out-everywhere")
 async def account_sign_out_everywhere(request: Request, current_user: dict = Depends(require_auth)):
+    tid = current_user["tenant_id"]
     conn = get_db()
-    bump_session_version(conn, current_user["id"])
-    log_event(conn, "signed_out_everywhere", current_user["email"], current_user["email"])
+    bump_session_version(conn, tid, current_user["id"])
+    log_event(conn, "signed_out_everywhere", current_user["email"], current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
     request.session.clear()

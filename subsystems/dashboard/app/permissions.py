@@ -53,22 +53,22 @@ SYSTEM_ROLES = {
 }
 
 # ── Role storage + a small cache (resolved every request via require_auth) ────
-_cache: dict[str, set] = {}
-_cache_at = 0.0
+# Roles are per tenant (TENANCY.md): every tenant has its own copy of the
+# built-in roles plus any custom ones.
+_cache: dict[int, tuple[float, dict]] = {}
 _CACHE_TTL = 15.0
 _lock = threading.Lock()
 
 
 def invalidate_cache() -> None:
-    global _cache_at
     with _lock:
-        _cache_at = 0.0
+        _cache.clear()
 
 
-def _load_roles() -> dict[str, dict]:
-    """{key: {name, perms(set), is_system, description}} from the DB."""
+def _load_roles(tenant_id: int) -> dict[str, dict]:
+    """{key: {name, perms(set), is_system, description}} for one tenant."""
     conn = get_db()
-    rows = conn.execute("SELECT * FROM roles").fetchall()
+    rows = conn.execute("SELECT * FROM roles WHERE tenant_id = ?", (tenant_id,)).fetchall()
     conn.close()
     out: dict[str, dict] = {}
     for r in rows:
@@ -83,20 +83,19 @@ def _load_roles() -> dict[str, dict]:
     return out
 
 
-def all_roles() -> dict[str, dict]:
-    global _cache, _cache_at
+def all_roles(tenant_id: int) -> dict[str, dict]:
     with _lock:
-        if time.monotonic() - _cache_at < _CACHE_TTL and _cache:
-            return _cache
-    roles = _load_roles()
+        hit = _cache.get(tenant_id)
+        if hit and time.monotonic() - hit[0] < _CACHE_TTL and hit[1]:
+            return hit[1]
+    roles = _load_roles(tenant_id)
     with _lock:
-        _cache = roles
-        _cache_at = time.monotonic()
+        _cache[tenant_id] = (time.monotonic(), roles)
     return roles
 
 
-def get_role_permissions(role_key: str) -> set:
-    role = all_roles().get(role_key)
+def get_role_permissions(tenant_id: int, role_key: str) -> set:
+    role = all_roles(tenant_id).get(role_key)
     if role:
         return role["perms"]
     # Unknown role: admin is all, anything else nothing.

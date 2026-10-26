@@ -2,7 +2,7 @@
 generate_installer.py — build a pre-configured RustDesk installer for any
 supported platform.
 
-Reads server config (host, pubkey) and group settings from the fleet DB,
+Reads the tenant's relay (host, pubkey) and group settings from the fleet DB,
 substitutes placeholders in the appropriate template, and either compiles
 with makensis (Windows) or writes a shell script (Linux / macOS).
 
@@ -11,9 +11,12 @@ fleet.sqlite3) rather than hardcoded, so builds stay reproducible even as
 new upstream releases come out. Run `update-version` to check GitHub for a
 newer release and pull down its binaries — nothing changes until you do.
 
+Installers always point at the relay host (relays.host), never at one of the
+tenant's web domains, so a tenant changing its domain never strands devices.
+
 Usage:
     python3 generate_installer.py build --group acme-internal --platform windows-x64
-    python3 generate_installer.py build --group acme-internal --platform linux
+    python3 generate_installer.py build --tenant 2 --group acme --platform linux
     python3 generate_installer.py list
     python3 generate_installer.py update-version
 """
@@ -38,8 +41,7 @@ from pathlib import Path
 FLEET_ROOT   = Path(os.environ.get("FLEET_DATA_DIR") or "/opt/rustdesk-fleet")
 DB_PATH      = FLEET_ROOT / "fleet.sqlite3"
 SCHEMA_PATH  = Path(__file__).parent / "schema.sql"
-ASSETS_DIR   = FLEET_ROOT / "installer-assets"
-OUTPUT_DIR   = FLEET_ROOT / "installers"
+ASSETS_DIR   = FLEET_ROOT / "installer-assets"   # provider-level: one client version for everyone
 TMPL_DIR     = Path(__file__).parent
 VERSION_FILE = FLEET_ROOT / "rustdesk_version.txt"
 
@@ -228,12 +230,23 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def log_event(conn: sqlite3.Connection, event: str, detail: str = "", user_email: str = "") -> None:
+def log_event(conn: sqlite3.Connection, event: str, detail: str = "", user_email: str = "",
+              *, tenant_id: int | None) -> None:
     conn.execute(
-        "INSERT INTO provisioning_events (event, detail, user_email) VALUES (?, ?, ?)",
-        (event, detail, user_email or None),
+        "INSERT INTO provisioning_events (tenant_id, event, detail, user_email) VALUES (?, ?, ?, ?)",
+        (tenant_id, event, detail, user_email or None),
     )
     conn.commit()
+
+
+def output_dir(tenant_id: int) -> Path:
+    """Where a tenant's built installers go (tenant #1: <data dir>/installers)."""
+    from tenant_paths import installers_dir
+    return installers_dir(tenant_id)
+
+
+def get_relay(conn: sqlite3.Connection, tenant_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM relays WHERE tenant_id = ?", (tenant_id,)).fetchone()
 
 
 def _shell_password_substitutions(pw: str | None) -> dict[str, str]:
@@ -262,8 +275,8 @@ def _group_branding(group: sqlite3.Row) -> tuple[str | None, Path | None, Path |
     """(app name, .ico, .png) for a group; each None when not set."""
     import branding
     name = (group["brand_app_name"] or "").strip() if "brand_app_name" in group.keys() else ""
-    ico, png = branding.icon_paths(group["id"])
-    if not branding.has_icon(group["id"]):
+    ico, png = branding.icon_paths(group["tenant_id"], group["id"])
+    if not branding.has_icon(group["tenant_id"], group["id"]):
         ico = png = None
     return name or None, ico, png
 
@@ -378,7 +391,7 @@ def _build_nsis(
         )
 
     output_filename = f"RemoteSupport-{group['slug']}-{version}-{cfg['output_suffix']}"
-    output_path = OUTPUT_DIR / output_filename
+    output_path = output_dir(group["tenant_id"]) / output_filename
 
     pw = group["unattended_password"] if "unattended_password" in group.keys() else None
 
@@ -474,7 +487,7 @@ def _build_script(
     cfg = PLATFORMS[platform]
 
     output_filename = f"RemoteSupport-{group['slug']}-{version}-{cfg['output_suffix']}"
-    output_path = OUTPUT_DIR / output_filename
+    output_path = output_dir(group["tenant_id"]) / output_filename
 
     pw = group["unattended_password"] if "unattended_password" in group.keys() else None
 
@@ -506,51 +519,60 @@ def _build_script(
     return output_path
 
 
-def sign_installer_row(conn, installer_id: int, path, scfg: dict, user_email: str = "") -> dict:
+def sign_installer_row(conn, tenant_id: int, installer_id: int, path, scfg: dict, user_email: str = "") -> dict:
     """Sign one installer in place and update its row. Raises on failure.
 
     jsign signs with --replace, so the signed file keeps the same path; links
     prefer signed_path, so serving picks up the signed build automatically.
     """
     import sign_installer
-    conn.execute("UPDATE installers SET status='signing' WHERE id=?", (installer_id,))
+    conn.execute("UPDATE installers SET status='signing' WHERE id=? AND tenant_id=?", (installer_id, tenant_id))
     conn.commit()
     res = sign_installer.sign(path, scfg)
     if not res["ok"]:
-        conn.execute("UPDATE installers SET status='built', error_message=? WHERE id=?",
-                     (res["error"], installer_id))
+        conn.execute("UPDATE installers SET status='built', error_message=? WHERE id=? AND tenant_id=?",
+                     (res["error"], installer_id, tenant_id))
         conn.commit()
-        log_event(conn, "installer_sign_failed", f"installer_id={installer_id} {res['error'][:300]}", user_email)
+        log_event(conn, "installer_sign_failed", f"installer_id={installer_id} {res['error'][:300]}", user_email,
+                  tenant_id=tenant_id)
         raise InstallerError(res["error"])
     conn.execute(
         """UPDATE installers
            SET status='signed', signed_path=?, sha256_signed=?, signed_at=datetime('now'),
                error_message=NULL
-           WHERE id=?""",
-        (str(path), res["sha256"], installer_id),
+           WHERE id=? AND tenant_id=?""",
+        (str(path), res["sha256"], installer_id, tenant_id),
     )
     conn.commit()
-    log_event(conn, "installer_signed", f"installer_id={installer_id} sha256={res['sha256'][:16]}...", user_email)
-    return dict(conn.execute("SELECT * FROM installers WHERE id=?", (installer_id,)).fetchone())
+    log_event(conn, "installer_signed", f"installer_id={installer_id} sha256={res['sha256'][:16]}...", user_email,
+              tenant_id=tenant_id)
+    return dict(conn.execute("SELECT * FROM installers WHERE id=? AND tenant_id=?",
+                             (installer_id, tenant_id)).fetchone())
 
 
-def sign_existing(installer_id: int, user_email: str = "") -> dict:
-    """Manual sign/re-sign of a built installer, by id. Used by the dashboard."""
+def sign_existing(tenant_id: int, group_slug: str, installer_id: int, user_email: str = "") -> dict:
+    """Manual sign/re-sign of one of a group's built installers. Used by the
+    dashboard. An installer of another group or tenant is "not found"."""
     import sign_installer
     conn = get_db()
-    row = conn.execute("SELECT * FROM installers WHERE id=?", (installer_id,)).fetchone()
+    row = conn.execute(
+        """SELECT i.* FROM installers i
+           JOIN client_groups cg ON cg.id = i.group_id AND cg.tenant_id = i.tenant_id
+           WHERE i.id = ? AND i.tenant_id = ? AND cg.slug = ?""",
+        (installer_id, tenant_id, group_slug),
+    ).fetchone()
     if row is None:
-        raise InstallerError(f"Installer {installer_id} not found.")
+        raise InstallerError("Installer not found.")
     path = row["signed_path"] or row["unsigned_path"]
     if not path or not Path(path).exists():
         raise InstallerError("Installer file is missing on disk — rebuild it first.")
     scfg = sign_installer.get_config()
     if not scfg.get("enabled"):
         raise InstallerError("Code signing is not enabled. Configure it under Admin → Signing.")
-    return sign_installer_row(conn, installer_id, path, scfg, user_email)
+    return sign_installer_row(conn, tenant_id, installer_id, path, scfg, user_email)
 
 
-def build_installer(group_slug: str, platform: str = "windows-x64", user_email: str = "") -> dict:
+def build_installer(tenant_id: int, group_slug: str, platform: str = "windows-x64", user_email: str = "") -> dict:
     if platform not in PLATFORMS:
         raise InstallerError(
             f"Unknown platform '{platform}'. Valid options: {', '.join(PLATFORMS)}"
@@ -559,12 +581,12 @@ def build_installer(group_slug: str, platform: str = "windows-x64", user_email: 
     conn = get_db()
     ensure_schema(conn)
 
-    server = conn.execute("SELECT * FROM server_config WHERE id = 1").fetchone()
+    server = get_relay(conn, tenant_id)
     if server is None or server["status"] != "active":
-        raise InstallerError("Server not active. Run setup_server.py init first.")
+        raise InstallerError("Relay not active. Run setup_server.py init first.")
 
     group = conn.execute(
-        "SELECT * FROM client_groups WHERE slug = ?", (group_slug,)
+        "SELECT * FROM client_groups WHERE tenant_id = ? AND slug = ?", (tenant_id, group_slug)
     ).fetchone()
     if group is None:
         raise InstallerError(f"Client group '{group_slug}' not found.")
@@ -575,17 +597,18 @@ def build_installer(group_slug: str, platform: str = "windows-x64", user_email: 
     if problem:
         raise InstallerError(f"{problem} Change it on the group page, then rebuild.")
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir(tenant_id).mkdir(parents=True, exist_ok=True)
     version = get_pinned_version()
 
     cur = conn.execute(
-        """INSERT INTO installers (group_id, platform, rustdesk_version, status)
-           VALUES (?, ?, ?, 'pending')""",
-        (group["id"], platform, version),
+        """INSERT INTO installers (tenant_id, group_id, platform, rustdesk_version, status)
+           VALUES (?, ?, ?, ?, 'pending')""",
+        (tenant_id, group["id"], platform, version),
     )
     installer_id = cur.lastrowid
     conn.commit()
-    log_event(conn, "installer_build_start", f"group={group_slug} platform={platform} installer_id={installer_id}", user_email)
+    log_event(conn, "installer_build_start", f"group={group_slug} platform={platform} installer_id={installer_id}",
+              user_email, tenant_id=tenant_id)
 
     try:
         cfg = PLATFORMS[platform]
@@ -599,11 +622,12 @@ def build_installer(group_slug: str, platform: str = "windows-x64", user_email: 
         conn.execute(
             """UPDATE installers
                SET status='built', unsigned_path=?, sha256_unsigned=?
-               WHERE id=?""",
-            (str(output_path), sha256, installer_id),
+               WHERE id=? AND tenant_id=?""",
+            (str(output_path), sha256, installer_id, tenant_id),
         )
         conn.commit()
-        log_event(conn, "installer_built", f"installer_id={installer_id} sha256={sha256[:16]}...", user_email)
+        log_event(conn, "installer_built", f"installer_id={installer_id} sha256={sha256[:16]}...", user_email,
+                  tenant_id=tenant_id)
 
         # Auto-sign when signing is enabled with auto_sign on. A signing failure
         # must not fail the build — the installer is still usable unsigned — so
@@ -612,30 +636,34 @@ def build_installer(group_slug: str, platform: str = "windows-x64", user_email: 
             import sign_installer
             scfg = sign_installer.get_config()
             if scfg.get("enabled") and scfg.get("auto_sign"):
-                sign_installer_row(conn, installer_id, output_path, scfg, user_email)
+                sign_installer_row(conn, tenant_id, installer_id, output_path, scfg, user_email)
         except Exception as e:
-            log_event(conn, "installer_sign_failed", f"installer_id={installer_id} {str(e)[:300]}", user_email)
+            log_event(conn, "installer_sign_failed", f"installer_id={installer_id} {str(e)[:300]}", user_email,
+                      tenant_id=tenant_id)
 
     except Exception as e:
         conn.execute(
-            "UPDATE installers SET status='failed', error_message=? WHERE id=?",
-            (str(e), installer_id),
+            "UPDATE installers SET status='failed', error_message=? WHERE id=? AND tenant_id=?",
+            (str(e), installer_id, tenant_id),
         )
         conn.commit()
-        log_event(conn, "installer_build_failed", str(e)[:500], user_email)
+        log_event(conn, "installer_build_failed", str(e)[:500], user_email, tenant_id=tenant_id)
         raise
 
-    return dict(conn.execute("SELECT * FROM installers WHERE id=?", (installer_id,)).fetchone())
+    return dict(conn.execute("SELECT * FROM installers WHERE id=? AND tenant_id=?",
+                             (installer_id, tenant_id)).fetchone())
 
 
-def list_installers() -> list:
+def list_installers(tenant_id: int) -> list:
     conn = get_db()
     ensure_schema(conn)
     return conn.execute(
         """SELECT i.*, cg.slug AS group_slug, cg.display_name
            FROM installers i
-           JOIN client_groups cg ON i.group_id = cg.id
-           ORDER BY i.created_at DESC"""
+           JOIN client_groups cg ON i.group_id = cg.id AND cg.tenant_id = i.tenant_id
+           WHERE i.tenant_id = ?
+           ORDER BY i.created_at DESC""",
+        (tenant_id,),
     ).fetchall()
 
 
@@ -644,6 +672,7 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_build = sub.add_parser("build", help="Build a pre-configured installer for a client group")
+    p_build.add_argument("--tenant", type=int, default=1, help="Tenant id (default: 1)")
     p_build.add_argument("--group", required=True, help="Client group slug")
     p_build.add_argument(
         "--platform",
@@ -652,7 +681,8 @@ def main():
         help="Target platform (default: windows-x64)",
     )
 
-    sub.add_parser("list", help="List all generated installers")
+    p_list = sub.add_parser("list", help="List a tenant's generated installers")
+    p_list.add_argument("--tenant", type=int, default=1, help="Tenant id (default: 1)")
 
     sub.add_parser(
         "update-version",
@@ -663,7 +693,7 @@ def main():
 
     if args.cmd == "build":
         try:
-            result = build_installer(args.group, args.platform)
+            result = build_installer(args.tenant, args.group, args.platform)
         except InstallerError as e:
             sys.exit(f"Build failed: {e}")
         print(f"Installer {result['status']}.")
@@ -674,7 +704,7 @@ def main():
         print(f"  sha256:   {result['sha256_unsigned']}")
 
     elif args.cmd == "list":
-        rows = list_installers()
+        rows = list_installers(args.tenant)
         if not rows:
             print("No installers built yet.")
         for r in rows:

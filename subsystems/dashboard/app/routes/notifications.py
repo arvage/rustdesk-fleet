@@ -26,8 +26,8 @@ async def notifications_page(
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
-    settings = get_settings()
-    event_states = get_event_states()
+    settings = get_settings(current_user["tenant_id"])
+    event_states = get_event_states(current_user["tenant_id"])
     return templates.TemplateResponse(
         request,
         "notifications.html",
@@ -64,36 +64,37 @@ async def notifications_save(
     tls = smtp_tls if smtp_tls in ("starttls", "ssl", "none") else "starttls"
     is_enabled = 1 if enabled == "1" else 0
 
+    tid = current_user["tenant_id"]
     conn = get_db()
-    existing = conn.execute("SELECT id FROM notification_settings WHERE id = 1").fetchone()
+    existing = conn.execute("SELECT tenant_id FROM notification_settings WHERE tenant_id = ?", (tid,)).fetchone()
     if existing:
         # If password field was left blank, preserve the stored one
         if smtp_pass.strip():
             conn.execute(
                 """UPDATE notification_settings SET enabled=?, smtp_host=?, smtp_port=?,
                    smtp_tls=?, smtp_user=?, smtp_pass=?, from_addr=?, to_addrs=?,
-                   updated_at=datetime('now') WHERE id=1""",
+                   updated_at=datetime('now') WHERE tenant_id=?""",
                 (is_enabled, smtp_host.strip(), port, tls, smtp_user.strip(),
-                 smtp_pass, from_addr.strip(), to_addrs.strip()),
+                 smtp_pass, from_addr.strip(), to_addrs.strip(), tid),
             )
         else:
             conn.execute(
                 """UPDATE notification_settings SET enabled=?, smtp_host=?, smtp_port=?,
                    smtp_tls=?, smtp_user=?, from_addr=?, to_addrs=?,
-                   updated_at=datetime('now') WHERE id=1""",
+                   updated_at=datetime('now') WHERE tenant_id=?""",
                 (is_enabled, smtp_host.strip(), port, tls, smtp_user.strip(),
-                 from_addr.strip(), to_addrs.strip()),
+                 from_addr.strip(), to_addrs.strip(), tid),
             )
     else:
         conn.execute(
             """INSERT INTO notification_settings
-               (id, enabled, smtp_host, smtp_port, smtp_tls, smtp_user, smtp_pass,
+               (tenant_id, enabled, smtp_host, smtp_port, smtp_tls, smtp_user, smtp_pass,
                 from_addr, to_addrs)
-               VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (is_enabled, smtp_host.strip(), port, tls, smtp_user.strip(),
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (tid, is_enabled, smtp_host.strip(), port, tls, smtp_user.strip(),
              smtp_pass, from_addr.strip(), to_addrs.strip()),
         )
-    log_event(conn, "notification_settings_updated", smtp_host.strip(), current_user["email"])
+    log_event(conn, "notification_settings_updated", smtp_host.strip(), current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
 
@@ -114,12 +115,13 @@ async def notifications_event_toggle(
     enabled = 1 if form.get("enabled") == "1" else 0
 
     conn = get_db()
+    tid = current_user["tenant_id"]
     conn.execute(
-        "INSERT OR REPLACE INTO notification_events (event_type, enabled) VALUES (?, ?)",
-        (event_type, enabled),
+        "INSERT OR REPLACE INTO notification_events (tenant_id, event_type, enabled) VALUES (?, ?, ?)",
+        (tid, event_type, enabled),
     )
     log_event(conn, "notification_triggers_updated",
-              f"{event_type}={'on' if enabled else 'off'}", current_user["email"])
+              f"{event_type}={'on' if enabled else 'off'}", current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
 
@@ -144,14 +146,16 @@ async def notifications_health_alerts(
     mem = _clamp(mem_threshold)
     disk = _clamp(disk_threshold)
 
+    tid = current_user["tenant_id"]
     conn = get_db()
-    conn.execute("INSERT OR IGNORE INTO notification_settings (id) VALUES (1)")
+    conn.execute("INSERT OR IGNORE INTO notification_settings (tenant_id) VALUES (?)", (tid,))
     conn.execute(
         "UPDATE notification_settings SET mem_threshold=?, disk_threshold=?,"
-        " updated_at=datetime('now') WHERE id=1",
-        (mem, disk),
+        " updated_at=datetime('now') WHERE tenant_id=?",
+        (mem, disk, tid),
     )
-    log_event(conn, "health_alert_thresholds_updated", f"mem={mem}% disk={disk}%", current_user["email"])
+    log_event(conn, "health_alert_thresholds_updated", f"mem={mem}% disk={disk}%", current_user["email"],
+              tenant_id=tid)
     conn.commit()
     conn.close()
 
@@ -165,10 +169,11 @@ async def notifications_test(
     current_user: dict = Depends(require_auth),
 ):
     _require_admin(current_user)
-    settings = get_settings()
-    ok, err = send_test_email(settings)
+    tid = current_user["tenant_id"]
+    settings = get_settings(tid)
+    ok, err = send_test_email(tid, settings)
     conn = get_db()
-    log_event(conn, "notification_test_sent", "" if ok else f"failed: {err}", current_user["email"])
+    log_event(conn, "notification_test_sent", "" if ok else f"failed: {err}", current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
     if ok:

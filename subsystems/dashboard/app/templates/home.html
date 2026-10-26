@@ -214,6 +214,8 @@
   </div>
 </div>
 
+{# Backups are the provider's; only the provider home tenant shows them (TENANCY.md). #}
+{% if provider_home %}
 <div class="section">
   <div class="section-head" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
     <h2>Backups</h2>
@@ -292,6 +294,7 @@
     </p>
   </div></div>
 </div>
+{% endif %}
 
 {% if update_available and 'update_server' in (current_user.permissions or []) %}
 <div class="section">

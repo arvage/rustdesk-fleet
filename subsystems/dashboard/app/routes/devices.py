@@ -4,16 +4,20 @@ from datetime import datetime, timezone, date, timedelta
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app import paths
 from app.auth import require_auth
-from app.deps import get_db, get_devices, get_hbbs_peers, log_event
+from app.deps import device_known, get_db, get_devices, get_hbbs_peers, log_event
 from app.permissions import require_perm
 from app.notifications import fire_notification
+from app.tenancy import Tenant, get_tenant
 from app.templates_config import templates
 
-HBBS_DB_PATH = paths.HBBS_DB
-
 router = APIRouter()
+
+
+def _device_not_found(request: Request, rustdesk_id: str, next_url: str = ""):
+    """Same answer for an id that doesn't exist and for another tenant's."""
+    _set_flash(request, "error", f"Device {rustdesk_id} not found.")
+    return RedirectResponse(_back_to(next_url), status_code=303)
 
 
 def _set_flash(request: Request, type_: str, msg: str) -> None:
@@ -29,8 +33,9 @@ async def devices_list(
     request: Request,
     group: str = "",
     current_user: dict = Depends(require_auth),
+    tenant: Tenant = Depends(get_tenant),
 ):
-    devices, peer_count = get_devices(group)
+    devices, peer_count = get_devices(tenant, group)
 
     # Newly-registered devices (last 7 days) that still need a client group,
     # newest first — shown as a highlighted group at the top of the page.
@@ -47,7 +52,8 @@ async def devices_list(
 
     conn = get_db()
     groups = conn.execute(
-        "SELECT id, slug, display_name FROM client_groups ORDER BY display_name"
+        "SELECT id, slug, display_name FROM client_groups WHERE tenant_id = ? ORDER BY display_name",
+        (tenant.id,),
     ).fetchall()
     conn.close()
 
@@ -74,38 +80,48 @@ async def device_edit(
     group_id: str = Form(""),
     next: str = Form(""),
     current_user: dict = Depends(require_auth),
+    tenant: Tenant = Depends(get_tenant),
 ):
     require_perm(current_user, "manage_devices")
+    tid = tenant.id
     label = label.strip() or None
-    gid = int(group_id) if group_id else None
 
     conn = get_db()
+    if not device_known(conn, tenant, rustdesk_id):
+        conn.close()
+        return _device_not_found(request, rustdesk_id, next)
+    gid = int(group_id) if group_id.isdigit() else None
+    if gid is not None and not conn.execute(
+            "SELECT 1 FROM client_groups WHERE id = ? AND tenant_id = ?", (gid, tid)).fetchone():
+        gid = None  # not one of this tenant's groups
     existing = conn.execute(
-        "SELECT id FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
+        "SELECT id FROM devices WHERE tenant_id = ? AND rustdesk_id = ?", (tid, rustdesk_id)
     ).fetchone()
     if existing:
         conn.execute(
-            "UPDATE devices SET label = ?, group_id = ? WHERE rustdesk_id = ?",
-            (label, gid, rustdesk_id),
+            "UPDATE devices SET label = ?, group_id = ? WHERE tenant_id = ? AND rustdesk_id = ?",
+            (label, gid, tid, rustdesk_id),
         )
-        log_event(conn, "device_updated", rustdesk_id, current_user["email"])
+        log_event(conn, "device_updated", rustdesk_id, current_user["email"], tenant_id=tid)
         conn.commit()
         conn.close()
     else:
         conn.execute(
-            "INSERT INTO devices (rustdesk_id, label, group_id, status, last_seen) VALUES (?, ?, ?, 'registered', ?)",
-            (rustdesk_id, label, gid, _now_utc()),
+            "INSERT INTO devices (tenant_id, rustdesk_id, label, group_id, status, last_seen)"
+            " VALUES (?, ?, ?, ?, 'registered', ?)",
+            (tid, rustdesk_id, label, gid, _now_utc()),
         )
-        log_event(conn, "device_registered", rustdesk_id, current_user["email"])
+        log_event(conn, "device_registered", rustdesk_id, current_user["email"], tenant_id=tid)
         conn.commit()
         group_name = ""
         if gid:
-            row = conn.execute("SELECT display_name FROM client_groups WHERE id=?", (gid,)).fetchone()
+            row = conn.execute("SELECT display_name FROM client_groups WHERE id = ? AND tenant_id = ?",
+                               (gid, tid)).fetchone()
             if row:
                 group_name = row["display_name"]
         conn.close()
-        peer = get_hbbs_peers().get(rustdesk_id, {})
-        fire_notification("device_registered", {
+        peer = get_hbbs_peers(tenant).get(rustdesk_id, {})
+        fire_notification(tid, "device_registered", {
             "rustdesk_id": rustdesk_id,
             "label": label or "",
             "group_name": group_name,
@@ -131,17 +147,22 @@ async def device_assign_group(
     group_id: str = Form(""),
     label: str | None = Form(None),
     current_user: dict = Depends(require_auth),
+    tenant: Tenant = Depends(get_tenant),
 ):
     """Assign a device to a client group, optionally setting its label
     (used by the Recently registered panel). The label is left untouched
     when the form doesn't send one."""
     require_perm(current_user, "manage_devices")
+    tid = tenant.id
     if label is not None:
         label = label.strip() or None
     conn = get_db()
+    if not device_known(conn, tenant, rustdesk_id):
+        conn.close()
+        return _device_not_found(request, rustdesk_id)
     group = conn.execute(
-        "SELECT id, display_name FROM client_groups WHERE id = ?",
-        (int(group_id) if group_id.isdigit() else -1,),
+        "SELECT id, display_name FROM client_groups WHERE id = ? AND tenant_id = ?",
+        (int(group_id) if group_id.isdigit() else -1, tid),
     ).fetchone()
     if not group:
         conn.close()
@@ -149,32 +170,33 @@ async def device_assign_group(
         return RedirectResponse("/devices", status_code=303)
 
     existing = conn.execute(
-        "SELECT id FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
+        "SELECT id FROM devices WHERE tenant_id = ? AND rustdesk_id = ?", (tid, rustdesk_id)
     ).fetchone()
     if existing:
         if label is not None:
             conn.execute(
-                "UPDATE devices SET group_id = ?, label = ? WHERE rustdesk_id = ?",
-                (group["id"], label, rustdesk_id),
+                "UPDATE devices SET group_id = ?, label = ? WHERE tenant_id = ? AND rustdesk_id = ?",
+                (group["id"], label, tid, rustdesk_id),
             )
         else:
             conn.execute(
-                "UPDATE devices SET group_id = ? WHERE rustdesk_id = ?",
-                (group["id"], rustdesk_id),
+                "UPDATE devices SET group_id = ? WHERE tenant_id = ? AND rustdesk_id = ?",
+                (group["id"], tid, rustdesk_id),
             )
-        log_event(conn, "device_updated", rustdesk_id, current_user["email"])
+        log_event(conn, "device_updated", rustdesk_id, current_user["email"], tenant_id=tid)
         conn.commit()
         conn.close()
     else:
         conn.execute(
-            "INSERT INTO devices (rustdesk_id, label, group_id, status, last_seen) VALUES (?, ?, ?, 'registered', ?)",
-            (rustdesk_id, label, group["id"], _now_utc()),
+            "INSERT INTO devices (tenant_id, rustdesk_id, label, group_id, status, last_seen)"
+            " VALUES (?, ?, ?, ?, 'registered', ?)",
+            (tid, rustdesk_id, label, group["id"], _now_utc()),
         )
-        log_event(conn, "device_registered", rustdesk_id, current_user["email"])
+        log_event(conn, "device_registered", rustdesk_id, current_user["email"], tenant_id=tid)
         conn.commit()
         conn.close()
-        peer = get_hbbs_peers().get(rustdesk_id, {})
-        fire_notification("device_registered", {
+        peer = get_hbbs_peers(tenant).get(rustdesk_id, {})
+        fire_notification(tid, "device_registered", {
             "rustdesk_id": rustdesk_id,
             "label": label or "",
             "group_name": group["display_name"],
@@ -191,14 +213,19 @@ async def device_delete(
     rustdesk_id: str,
     next: str = Form(""),
     current_user: dict = Depends(require_auth),
+    tenant: Tenant = Depends(get_tenant),
 ):
     require_perm(current_user, "manage_devices")
+    tid = tenant.id
     conn = get_db()
+    if not device_known(conn, tenant, rustdesk_id):
+        conn.close()
+        return _device_not_found(request, rustdesk_id, next)
     existing = conn.execute(
         """SELECT d.rustdesk_id, d.label, d.last_seen, cg.display_name AS group_name
-           FROM devices d LEFT JOIN client_groups cg ON cg.id = d.group_id
-           WHERE d.rustdesk_id = ?""",
-        (rustdesk_id,),
+           FROM devices d LEFT JOIN client_groups cg ON cg.id = d.group_id AND cg.tenant_id = d.tenant_id
+           WHERE d.tenant_id = ? AND d.rustdesk_id = ?""",
+        (tid, rustdesk_id),
     ).fetchone()
     notif_ctx = {
         "rustdesk_id": rustdesk_id,
@@ -214,28 +241,30 @@ async def device_delete(
     # routes/client_api.py). A manual Sync of stale peers does NOT bring it
     # back — only actual communication does.
     if existing:
-        conn.execute("UPDATE devices SET hidden = 1 WHERE rustdesk_id = ?", (rustdesk_id,))
+        conn.execute("UPDATE devices SET hidden = 1 WHERE tenant_id = ? AND rustdesk_id = ?", (tid, rustdesk_id))
     else:
         conn.execute(
-            "INSERT INTO devices (rustdesk_id, hidden, status, last_seen) VALUES (?, 1, 'deleted', ?)",
-            (rustdesk_id, _now_utc()),
+            "INSERT INTO devices (tenant_id, rustdesk_id, hidden, status, last_seen) VALUES (?, ?, 1, 'deleted', ?)",
+            (tid, rustdesk_id, _now_utc()),
         )
-    conn.execute("DELETE FROM device_info WHERE rustdesk_id = ?", (rustdesk_id,))
-    conn.execute("DELETE FROM device_sessions WHERE rustdesk_id = ?", (rustdesk_id,))
-    conn.execute("DELETE FROM device_file_transfers WHERE rustdesk_id = ?", (rustdesk_id,))
-    log_event(conn, "device_deleted", rustdesk_id, current_user["email"])
+    conn.execute("DELETE FROM device_info WHERE tenant_id = ? AND rustdesk_id = ?", (tid, rustdesk_id))
+    conn.execute("DELETE FROM device_sessions WHERE tenant_id = ? AND rustdesk_id = ?", (tid, rustdesk_id))
+    conn.execute("DELETE FROM device_file_transfers WHERE tenant_id = ? AND rustdesk_id = ?", (tid, rustdesk_id))
+    log_event(conn, "device_deleted", rustdesk_id, current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
-    fire_notification("device_deleted", notif_ctx)
+    fire_notification(tid, "device_deleted", notif_ctx)
 
     _set_flash(request, "success", f"Device {rustdesk_id} deleted.")
     return RedirectResponse(_back_to(next), status_code=303)
 
 
 @router.post("/devices/sync")
-async def devices_sync(request: Request, current_user: dict = Depends(require_auth)):
+async def devices_sync(request: Request, current_user: dict = Depends(require_auth),
+                       tenant: Tenant = Depends(get_tenant)):
     require_perm(current_user, "manage_devices")
-    peers = get_hbbs_peers()
+    tid = tenant.id
+    peers = get_hbbs_peers(tenant)
     if not peers:
         _set_flash(request, "error", "No peers found in RustDesk server database.")
         return RedirectResponse("/devices", status_code=303)
@@ -245,23 +274,23 @@ async def devices_sync(request: Request, current_user: dict = Depends(require_au
     new_count = 0
     for rustdesk_id in peers:
         existing = conn.execute(
-            "SELECT id, hidden FROM devices WHERE rustdesk_id = ?", (rustdesk_id,)
+            "SELECT id, hidden FROM devices WHERE tenant_id = ? AND rustdesk_id = ?", (tid, rustdesk_id)
         ).fetchone()
         if existing:
             if not existing["hidden"]:
                 conn.execute(
-                    "UPDATE devices SET last_seen = ? WHERE rustdesk_id = ?",
-                    (now, rustdesk_id),
+                    "UPDATE devices SET last_seen = ? WHERE tenant_id = ? AND rustdesk_id = ?",
+                    (now, tid, rustdesk_id),
                 )
         else:
             conn.execute(
-                "INSERT INTO devices (rustdesk_id, status, last_seen) VALUES (?, 'registered', ?)",
-                (rustdesk_id, now),
+                "INSERT INTO devices (tenant_id, rustdesk_id, status, last_seen) VALUES (?, ?, 'registered', ?)",
+                (tid, rustdesk_id, now),
             )
             new_count += 1
-            log_event(conn, "device_registered", rustdesk_id, current_user["email"])
+            log_event(conn, "device_registered", rustdesk_id, current_user["email"], tenant_id=tid)
             peer = peers[rustdesk_id]
-            fire_notification("device_registered", {
+            fire_notification(tid, "device_registered", {
                 "rustdesk_id": rustdesk_id,
                 "label": "",
                 "group_name": "",

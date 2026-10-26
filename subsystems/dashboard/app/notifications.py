@@ -1,9 +1,10 @@
 """
 notifications.py — email notification engine for RustDesk Fleet.
 
-Call fire_notification(event_type, context) from any route handler to
-send a non-blocking email.  The send runs in a daemon thread so it never
-delays the HTTP response.
+Call fire_notification(tenant_id, event_type, context) from any route
+handler to send a non-blocking email. The send runs in a daemon thread so it
+never delays the HTTP response. Settings, recipients, toggles, templates and
+the delivery log are all per tenant (TENANCY.md).
 
 Supported event types (EVENT_LABELS keys):
   device_registered  — a new device appeared in the fleet
@@ -70,35 +71,39 @@ _SUBJECTS: dict[str, str] = {
 def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
-def get_settings() -> dict:
+def get_settings(tenant_id: int) -> dict:
     conn = _get_db()
-    row = conn.execute("SELECT * FROM notification_settings WHERE id = 1").fetchone()
+    row = conn.execute("SELECT * FROM notification_settings WHERE tenant_id = ?", (tenant_id,)).fetchone()
     conn.close()
     if row:
         return dict(row)
     return {
+        "tenant_id": tenant_id,
         "enabled": 0, "smtp_host": "", "smtp_port": 587, "smtp_tls": "starttls",
         "smtp_user": "", "smtp_pass": "", "from_addr": "", "to_addrs": "",
         "mem_threshold": 90, "disk_threshold": 90,
     }
 
 
-def get_event_states() -> dict[str, bool]:
+def get_event_states(tenant_id: int) -> dict[str, bool]:
     """Return {event_type: enabled} for all known events."""
     conn = _get_db()
-    rows = conn.execute("SELECT event_type, enabled FROM notification_events").fetchall()
+    rows = conn.execute("SELECT event_type, enabled FROM notification_events WHERE tenant_id = ?",
+                        (tenant_id,)).fetchall()
     conn.close()
     stored = {r["event_type"]: bool(r["enabled"]) for r in rows}
     return {et: stored.get(et, True) for et in EVENT_LABELS}
 
 
-def get_log(limit: int = 50) -> list[dict]:
+def get_log(tenant_id: int, limit: int = 50) -> list[dict]:
     conn = _get_db()
     rows = conn.execute(
-        "SELECT * FROM notification_log ORDER BY created_at DESC LIMIT ?", (limit,)
+        "SELECT * FROM notification_log WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?",
+        (tenant_id, limit),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -114,10 +119,10 @@ def _now_la() -> str:
     )
 
 
-def _render(event_type: str, context: dict) -> tuple[str, str]:
+def _render(tenant_id: int, event_type: str, context: dict) -> tuple[str, str]:
     """Return (subject, html_body) for the given event and context."""
     from app.email_templates import render
-    subject, html, _ = render(event_type, context)
+    subject, html, _ = render(tenant_id, event_type, context)
     return subject, html
 
 
@@ -126,9 +131,10 @@ def _render(event_type: str, context: dict) -> tuple[str, str]:
 def _send_sync(
     settings: dict, to_list: list[str], subject: str, html: str, reply_to: str = ""
 ) -> None:
-    """Blocking send — must be called from a thread, not the async event loop."""
+    """Blocking send — must be called from a thread, not the async event loop.
+    settings is one tenant's notification_settings row (its logo is used)."""
     from app.email_templates import LOGO_CID, logo_bytes
-    logo = logo_bytes() if f"cid:{LOGO_CID}" in html else None
+    logo = logo_bytes(settings["tenant_id"]) if f"cid:{LOGO_CID}" in html else None
     if logo:
         # multipart/related so the logo travels inline with the message
         # (shows without the recipient having to allow remote images).
@@ -169,18 +175,20 @@ def _send_sync(
     smtp.quit()
 
 
-def _log(event_type: str, subject: str, recipients: str, status: str, error: str = "") -> None:
+def _log(tenant_id: int, event_type: str, subject: str, recipients: str, status: str,
+         error: str = "") -> None:
     try:
         conn = _get_db()
         conn.execute(
-            "INSERT INTO notification_log (event_type, subject, recipients, status, error)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (event_type, subject, recipients, status, error or None),
+            "INSERT INTO notification_log (tenant_id, event_type, subject, recipients, status, error)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (tenant_id, event_type, subject, recipients, status, error or None),
         )
-        # Cap log to 200 rows
+        # Cap each tenant's log to 200 rows
         conn.execute(
-            "DELETE FROM notification_log WHERE id NOT IN"
-            " (SELECT id FROM notification_log ORDER BY created_at DESC LIMIT 200)"
+            "DELETE FROM notification_log WHERE tenant_id = ? AND id NOT IN"
+            " (SELECT id FROM notification_log WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 200)",
+            (tenant_id, tenant_id),
         )
         conn.commit()
         conn.close()
@@ -190,17 +198,29 @@ def _log(event_type: str, subject: str, recipients: str, status: str, error: str
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def fire_notification(event_type: str, context: dict) -> None:
-    """Fire an email notification in a background daemon thread.
+def _tenant_open(tenant_id: int) -> bool:
+    from app.tenancy import OPEN_STATUSES
+    conn = _get_db()
+    row = conn.execute("SELECT status FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+    conn.close()
+    return bool(row) and row["status"] in OPEN_STATUSES
+
+
+def fire_notification(tenant_id: int, event_type: str, context: dict) -> None:
+    """Fire one tenant's email notification in a background daemon thread,
+    with that tenant's SMTP settings, recipients, toggles and templates.
+    Suspended and cancelled tenants get none.
 
     Returns immediately; never raises.
     """
     def _worker():
         try:
-            settings = get_settings()
+            if not _tenant_open(tenant_id):
+                return
+            settings = get_settings(tenant_id)
             if not settings.get("enabled"):
                 return
-            states = get_event_states()
+            states = get_event_states(tenant_id)
             if not states.get(event_type, True):
                 return
 
@@ -208,13 +228,13 @@ def fire_notification(event_type: str, context: dict) -> None:
             if not to_list or not settings.get("smtp_host"):
                 return
 
-            subject, html = _render(event_type, context)
+            subject, html = _render(tenant_id, event_type, context)
             _send_sync(settings, to_list, subject, html)
-            _log(event_type, subject, ", ".join(to_list), "sent")
+            _log(tenant_id, event_type, subject, ", ".join(to_list), "sent")
         except Exception as exc:
             try:
                 subject = _SUBJECTS.get(event_type, event_type)
-                _log(event_type, subject, "", "failed", str(exc)[:500])
+                _log(tenant_id, event_type, subject, "", "failed", str(exc)[:500])
             except Exception:
                 pass
 
@@ -222,15 +242,15 @@ def fire_notification(event_type: str, context: dict) -> None:
     t.start()
 
 
-def send_credentials_email(to_email: str, display_name: str, password: str) -> tuple[bool, str]:
+def send_credentials_email(tenant_id: int, to_email: str, display_name: str, password: str) -> tuple[bool, str]:
     """Send a welcome/credentials email to a new user. Returns (ok, error_msg)."""
-    settings = get_settings()
+    settings = get_settings(tenant_id)
     if not settings.get("enabled") or not settings.get("smtp_host"):
         return False, "Notifications not configured or disabled."
     if not settings.get("from_addr"):
         return False, "No from address configured."
     try:
-        subject, html = _render("user_credentials", {
+        subject, html = _render(tenant_id, "user_credentials", {
             "name": display_name or to_email, "email": to_email, "password": password,
         })
         _send_sync(settings, [to_email], subject, html)
@@ -239,15 +259,15 @@ def send_credentials_email(to_email: str, display_name: str, password: str) -> t
         return False, str(exc)
 
 
-def send_mfa_reminder_email(to_email: str, display_name: str) -> tuple[bool, str]:
+def send_mfa_reminder_email(tenant_id: int, to_email: str, display_name: str) -> tuple[bool, str]:
     """Nudge an existing user who hasn't set up a passkey yet. Returns (ok, error_msg)."""
-    settings = get_settings()
+    settings = get_settings(tenant_id)
     if not settings.get("enabled") or not settings.get("smtp_host"):
         return False, "Notifications not configured or disabled."
     if not settings.get("from_addr"):
         return False, "No from address configured."
     try:
-        subject, html = _render("mfa_reminder", {"name": display_name or to_email, "email": to_email})
+        subject, html = _render(tenant_id, "mfa_reminder", {"name": display_name or to_email, "email": to_email})
         _send_sync(settings, [to_email], subject, html)
         return True, ""
     except Exception as exc:
@@ -255,6 +275,7 @@ def send_mfa_reminder_email(to_email: str, display_name: str) -> tuple[bool, str
 
 
 def send_download_link_email(
+    tenant_id: int,
     to_email: str,
     recipient_name: str,
     group_name: str,
@@ -270,27 +291,27 @@ def send_download_link_email(
     which has no internal fleet branding unless one is set there.
     Replies go to the staff member who sent it.
     """
-    settings = get_settings()
+    settings = get_settings(tenant_id)
     if not settings.get("enabled") or not settings.get("smtp_host"):
         return False, "Email isn't configured — set up SMTP on the Notifications page first."
     if not settings.get("from_addr"):
         return False, "No from address configured on the Notifications page."
 
-    subject, html = _render("download_link", {
+    subject, html = _render(tenant_id, "download_link", {
         "recipient_name": recipient_name, "group_name": group_name, "url": url,
         "expires_at": expires_at_local, "message": message, "sender_name": sender_name,
     })
     try:
         _send_sync(settings, [to_email], subject, html, reply_to=reply_to)
-        _log("download_link_email", subject, to_email, "sent")
+        _log(tenant_id, "download_link_email", subject, to_email, "sent")
         return True, ""
     except Exception as exc:
-        _log("download_link_email", subject, to_email, "failed", str(exc)[:500])
+        _log(tenant_id, "download_link_email", subject, to_email, "failed", str(exc)[:500])
         return False, str(exc)
 
 
-def send_test_email(settings: dict) -> tuple[bool, str]:
-    """Send a test email with the given settings dict.  Returns (ok, error_msg)."""
+def send_test_email(tenant_id: int, settings: dict) -> tuple[bool, str]:
+    """Send a test email with one tenant's settings dict. Returns (ok, error_msg)."""
     to_list = [a.strip() for a in settings.get("to_addrs", "").split(",") if a.strip()]
     if not to_list:
         return False, "No recipient addresses configured."
@@ -300,13 +321,13 @@ def send_test_email(settings: dict) -> tuple[bool, str]:
         return False, "From address is required."
 
     from app.email_templates import TEMPLATES
-    _, html = _render("device_registered", TEMPLATES["device_registered"]["sample"])
+    _, html = _render(tenant_id, "device_registered", TEMPLATES["device_registered"]["sample"])
     subject = "RustDesk Fleet — test notification"
 
     try:
-        _send_sync(settings, to_list, subject, html)
-        _log("test", subject, ", ".join(to_list), "sent")
+        _send_sync({**settings, "tenant_id": tenant_id}, to_list, subject, html)
+        _log(tenant_id, "test", subject, ", ".join(to_list), "sent")
         return True, ""
     except Exception as exc:
-        _log("test", subject, ", ".join(to_list), "failed", str(exc)[:500])
+        _log(tenant_id, "test", subject, ", ".join(to_list), "failed", str(exc)[:500])
         return False, str(exc)

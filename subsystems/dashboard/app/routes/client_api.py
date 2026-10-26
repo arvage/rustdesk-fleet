@@ -145,12 +145,12 @@ def _client_ip(request: Request) -> str:
 SESSION_STALE_S = 120
 
 
-def _reconcile_sessions(conn, rid: str, conns: list) -> None:
+def _reconcile_sessions(conn, tenant_id: int, rid: str, conns: list) -> None:
     """Open/close device_sessions rows to match the conns in this heartbeat."""
     current = {str(c) for c in conns}
     open_rows = conn.execute(
-        "SELECT id, conn_ref FROM device_sessions WHERE rustdesk_id = ? AND ended_at IS NULL",
-        (rid,),
+        "SELECT id, conn_ref FROM device_sessions WHERE tenant_id = ? AND rustdesk_id = ? AND ended_at IS NULL",
+        (tenant_id, rid),
     ).fetchall()
     open_refs = {r["conn_ref"]: r["id"] for r in open_rows}
 
@@ -158,19 +158,20 @@ def _reconcile_sessions(conn, rid: str, conns: list) -> None:
     for ref, sid in open_refs.items():
         if ref not in current:
             conn.execute(
-                "UPDATE device_sessions SET ended_at = last_seen_at WHERE id = ?", (sid,)
+                "UPDATE device_sessions SET ended_at = last_seen_at WHERE id = ? AND tenant_id = ?",
+                (sid, tenant_id),
             )
     # Touch still-active sessions; open newly-seen ones.
     for ref in current:
         if ref in open_refs:
             conn.execute(
-                "UPDATE device_sessions SET last_seen_at = datetime('now') WHERE id = ?",
-                (open_refs[ref],),
+                "UPDATE device_sessions SET last_seen_at = datetime('now') WHERE id = ? AND tenant_id = ?",
+                (open_refs[ref], tenant_id),
             )
         else:
             conn.execute(
-                "INSERT INTO device_sessions (rustdesk_id, conn_ref) VALUES (?, ?)",
-                (rid, ref),
+                "INSERT INTO device_sessions (tenant_id, rustdesk_id, conn_ref) VALUES (?, ?, ?)",
+                (tenant_id, rid, ref),
             )
 
 
@@ -183,35 +184,36 @@ CONN_TYPES = {0: "Remote control", 1: "File transfer", 2: "Port forward",
 _AUDIT_RETRY_WINDOW_S = 300
 
 
-def _audit_session_id(conn, rid: str, ref: str, create: bool) -> int | None:
+def _audit_session_id(conn, tenant_id: int, rid: str, ref: str, create: bool) -> int | None:
     """The device_sessions row for this conn: the open one, else (when the
     report is a late retry) one started moments ago; inserted if `create`."""
     row = conn.execute(
         f"""SELECT id FROM device_sessions
-            WHERE rustdesk_id = ? AND conn_ref = ?
+            WHERE tenant_id = ? AND rustdesk_id = ? AND conn_ref = ?
               AND (ended_at IS NULL OR started_at > datetime('now', '-{_AUDIT_RETRY_WINDOW_S} seconds'))
             ORDER BY (ended_at IS NULL) DESC, id DESC LIMIT 1""",
-        (rid, ref),
+        (tenant_id, rid, ref),
     ).fetchone()
     if row:
         return row["id"]
     if not create:
         return None
     cur = conn.execute(
-        "INSERT INTO device_sessions (rustdesk_id, conn_ref) VALUES (?, ?)", (rid, ref)
+        "INSERT INTO device_sessions (tenant_id, rustdesk_id, conn_ref) VALUES (?, ?, ?)", (tenant_id, rid, ref)
     )
     return cur.lastrowid
 
 
-def sweep_stale_sessions() -> int:
-    """Close sessions for devices that stopped heartbeating mid-session.
-    Returns the number of sessions closed. Safe to call periodically."""
+def sweep_stale_sessions(tenant) -> int:
+    """Close the tenant's sessions for devices that stopped heartbeating
+    mid-session. Returns the number closed. Safe to call periodically."""
     conn = get_db()
     try:
         cur = conn.execute(
             f"""UPDATE device_sessions SET ended_at = last_seen_at
-                WHERE ended_at IS NULL
-                  AND last_seen_at < datetime('now', '-{SESSION_STALE_S} seconds')"""
+                WHERE tenant_id = ? AND ended_at IS NULL
+                  AND last_seen_at < datetime('now', '-{SESSION_STALE_S} seconds')""",
+            (tenant.id,),
         )
         conn.commit()
         return cur.rowcount or 0
@@ -235,19 +237,20 @@ async def client_sysinfo(request: Request):
         k: v for k, v in data.items()
         if k not in _STORED_FIELDS and k not in ("id", "uuid") and "password" not in k.lower()
     }
+    tid = request_tenant(request).id
     conn = get_db()
     conn.execute(
         """INSERT INTO device_info
-               (rustdesk_id, hostname, os, username, cpu, memory, client_version,
+               (tenant_id, rustdesk_id, hostname, os, username, cpu, memory, client_version,
                 extra, report_ip, sysinfo_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-           ON CONFLICT(rustdesk_id) DO UPDATE SET
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(tenant_id, rustdesk_id) DO UPDATE SET
                hostname = excluded.hostname, os = excluded.os,
                username = excluded.username, cpu = excluded.cpu,
                memory = excluded.memory, client_version = excluded.client_version,
                extra = excluded.extra, report_ip = excluded.report_ip,
                sysinfo_at = excluded.sysinfo_at""",
-        (rid, fields["hostname"], fields["os"], fields["username"], fields["cpu"],
+        (tid, rid, fields["hostname"], fields["os"], fields["username"], fields["cpu"],
          fields["memory"], fields["version"], json.dumps(extra)[:4000] if extra else None,
          _client_ip(request)),
     )
@@ -266,31 +269,32 @@ async def client_audit_conn(request: Request):
 
     ref = str(data.get("conn_id"))
     peer = data.get("peer")
+    tid = request_tenant(request).id
     conn = get_db()
     if data.get("action") == "close":
-        sid = _audit_session_id(conn, rid, ref, create=False)
+        sid = _audit_session_id(conn, tid, rid, ref, create=False)
         if sid:
             conn.execute(
                 """UPDATE device_sessions SET ended_at = datetime('now'), last_seen_at = datetime('now')
-                   WHERE id = ? AND ended_at IS NULL""",
-                (sid,),
+                   WHERE id = ? AND tenant_id = ? AND ended_at IS NULL""",
+                (sid, tid),
             )
     elif data.get("action") == "new":
-        sid = _audit_session_id(conn, rid, ref, create=True)
+        sid = _audit_session_id(conn, tid, rid, ref, create=True)
         ip = str(data.get("ip") or "").replace("::ffff:", "")[:64]
         if ip:
-            conn.execute("UPDATE device_sessions SET peer_ip = ? WHERE id = ?", (ip, sid))
+            conn.execute("UPDATE device_sessions SET peer_ip = ? WHERE id = ? AND tenant_id = ?", (ip, sid, tid))
     elif isinstance(peer, list) and peer:
-        sid = _audit_session_id(conn, rid, ref, create=True)
+        sid = _audit_session_id(conn, tid, rid, ref, create=True)
         try:
             ctype = int(data.get("type"))
         except (TypeError, ValueError):
             ctype = None
         conn.execute(
-            "UPDATE device_sessions SET peer_id = ?, peer_name = ?, conn_type = ? WHERE id = ?",
+            "UPDATE device_sessions SET peer_id = ?, peer_name = ?, conn_type = ? WHERE id = ? AND tenant_id = ?",
             (str(peer[0] or "")[:64] or None,
              str(peer[1] if len(peer) > 1 and peer[1] is not None else "")[:200] or None,
-             ctype, sid),
+             ctype, sid, tid),
         )
     conn.commit()
     conn.close()
@@ -335,28 +339,29 @@ async def client_audit_file(request: Request):
     peer_ip = str(info.get("ip") or "").replace("::ffff:", "")[:64] or None
     nonce = str(data.get("nonce") or "")[:64] or None
 
+    tid = request_tenant(request).id
     conn = get_db()
     if nonce and conn.execute(
-        "SELECT 1 FROM device_file_transfers WHERE nonce = ?", (nonce,)
+        "SELECT 1 FROM device_file_transfers WHERE tenant_id = ? AND nonce = ?", (tid, nonce)
     ).fetchone():
         conn.close()
         return PlainTextResponse("")   # a retry of a report we already stored
 
-    sid = _audit_session_id(conn, rid, ref, create=False) if ref else None
+    sid = _audit_session_id(conn, tid, rid, ref, create=False) if ref else None
     if sid:
         # Fill in who connected if the conn audit didn't reach us.
         conn.execute(
             """UPDATE device_sessions SET peer_id = COALESCE(peer_id, ?),
                    peer_name = COALESCE(peer_name, ?), peer_ip = COALESCE(peer_ip, ?)
-               WHERE id = ?""",
-            (peer_id, peer_name, peer_ip, sid),
+               WHERE id = ? AND tenant_id = ?""",
+            (peer_id, peer_name, peer_ip, sid, tid),
         )
     conn.execute(
         """INSERT INTO device_file_transfers
-               (rustdesk_id, session_id, conn_ref, peer_id, peer_name, peer_ip,
+               (tenant_id, rustdesk_id, session_id, conn_ref, peer_id, peer_name, peer_ip,
                 direction, path, is_file, file_count, files, nonce)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (rid, sid, ref, peer_id, peer_name, peer_ip, direction,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (tid, rid, sid, ref, peer_id, peer_name, peer_ip, direction,
          str(data.get("path") or "")[:1000], 1 if data.get("is_file") else 0,
          count, json.dumps(files), nonce),
     )
@@ -383,46 +388,52 @@ async def client_heartbeat(request: Request):
         client_policy_ts = int(data.get("modified_at") or 0)
     except (TypeError, ValueError):
         client_policy_ts = 0
+    tenant = request_tenant(request)
+    tid = tenant.id
     conn = get_db()
     cur = conn.execute(
         """UPDATE device_info
            SET heartbeat_at = datetime('now'), active_conns = ?, report_ip = ?, policy_ts = ?
-           WHERE rustdesk_id = ?""",
-        (len(conns), _client_ip(request), client_policy_ts, rid),
+           WHERE tenant_id = ? AND rustdesk_id = ?""",
+        (len(conns), _client_ip(request), client_policy_ts, tid, rid),
     )
     need_sysinfo = cur.rowcount == 0
     if need_sysinfo:
         conn.execute(
-            """INSERT INTO device_info (rustdesk_id, heartbeat_at, active_conns, report_ip, policy_ts)
-               VALUES (?, datetime('now'), ?, ?, ?)""",
-            (rid, len(conns), _client_ip(request), client_policy_ts),
+            """INSERT INTO device_info (tenant_id, rustdesk_id, heartbeat_at, active_conns, report_ip, policy_ts)
+               VALUES (?, ?, datetime('now'), ?, ?, ?)""",
+            (tid, rid, len(conns), _client_ip(request), client_policy_ts),
         )
     else:
         need_sysinfo = conn.execute(
-            "SELECT sysinfo_at IS NULL FROM device_info WHERE rustdesk_id = ?", (rid,)
+            "SELECT sysinfo_at IS NULL FROM device_info WHERE tenant_id = ? AND rustdesk_id = ?", (tid, rid)
         ).fetchone()[0]
     # A verified heartbeat means this device is genuinely communicating again.
     # If it had been deleted (hidden), un-hide it so it re-registers on its own.
     unhidden = conn.execute(
-        "UPDATE devices SET hidden = 0, status = 'registered' WHERE rustdesk_id = ? AND hidden = 1",
-        (rid,),
+        "UPDATE devices SET hidden = 0, status = 'registered' WHERE tenant_id = ? AND rustdesk_id = ? AND hidden = 1",
+        (tid, rid),
     ).rowcount
     if unhidden:
-        log_event(conn, "device_reappeared", rid, "")
+        log_event(conn, "device_reappeared", rid, "", tenant_id=tid)
     # "Last seen" on the device lists; otherwise only a manual Sync moves it.
-    conn.execute("UPDATE devices SET last_seen = datetime('now') WHERE rustdesk_id = ?", (rid,))
-    _reconcile_sessions(conn, rid, conns)
+    conn.execute("UPDATE devices SET last_seen = datetime('now') WHERE tenant_id = ? AND rustdesk_id = ?", (tid, rid))
+    _reconcile_sessions(conn, tid, rid, conns)
     policy = conn.execute(
         """SELECT cg.auto_update, cg.remote_config, cg.policy_ts
-           FROM devices d JOIN client_groups cg ON cg.id = d.group_id
-           WHERE d.rustdesk_id = ? AND d.hidden = 0""",
-        (rid,),
+           FROM devices d JOIN client_groups cg ON cg.id = d.group_id AND cg.tenant_id = d.tenant_id
+           WHERE d.tenant_id = ? AND d.rustdesk_id = ? AND d.hidden = 0""",
+        (tid, rid),
     ).fetchone()
     conn.commit()
     conn.close()
 
     # Asking for sysinfo is safe: it only makes the client re-send its details.
     resp: dict = {"sysinfo": True} if need_sysinfo else {}
+    # A suspended or cancelled tenant's devices still report in, but get no
+    # config pushed (TENANCY.md).
+    if not tenant.is_open:
+        policy = None
     if policy and policy["policy_ts"] and client_policy_ts != policy["policy_ts"]:
         options = {
             key: policy[col]

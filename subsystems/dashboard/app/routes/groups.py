@@ -7,19 +7,29 @@ from fastapi import APIRouter, Depends, Form, Request
 SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]$')
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from app import paths
 from app.auth import require_auth
 from app.deps import (
     get_db, get_device_info, get_hbbs_peers, label_sort_key, log_event, merge_device_info,
 )
 from app.notifications import fire_notification
 from app.permissions import require_perm, user_can
-from app.routes.links import DEFAULT_EXPIRY, EXPIRY_OPTIONS, latest_installers, link_state
+from app.routes.links import DEFAULT_EXPIRY, EXPIRY_OPTIONS, installers_dir, latest_installers, link_state
+from app.tenancy import Tenant, get_tenant
 from app.templates_config import templates
 
-OUTPUT_DIR = paths.INSTALLERS_DIR
-
 router = APIRouter()
+
+
+def _group(conn, tenant_id: int, slug: str, cols: str = "*"):
+    """One of this tenant's groups by slug, or None (another tenant's slug too)."""
+    return conn.execute(
+        f"SELECT {cols} FROM client_groups WHERE tenant_id = ? AND slug = ?", (tenant_id, slug)
+    ).fetchone()
+
+
+def _group_not_found(request: Request, slug: str = ""):
+    _set_flash(request, "error", f"Group '{slug}' not found." if slug else "Group not found.")
+    return RedirectResponse("/groups", status_code=303)
 
 
 def _set_flash(request: Request, type_: str, msg: str) -> None:
@@ -42,8 +52,10 @@ async def groups_list(request: Request, current_user: dict = Depends(require_aut
                   COUNT(CASE WHEN d.hidden = 0 THEN d.id END) AS device_count,
                   GROUP_CONCAT(CASE WHEN d.hidden = 0 THEN d.rustdesk_id END) AS rustdesk_ids
            FROM client_groups cg
-           LEFT JOIN devices d ON d.group_id = cg.id
-           GROUP BY cg.id ORDER BY cg.created_at"""
+           LEFT JOIN devices d ON d.group_id = cg.id AND d.tenant_id = cg.tenant_id
+           WHERE cg.tenant_id = ?
+           GROUP BY cg.id ORDER BY cg.created_at""",
+        (current_user["tenant_id"],),
     ).fetchall()
     conn.close()
     return templates.TemplateResponse(
@@ -62,9 +74,10 @@ async def groups_create(
     require_perm(current_user, "manage_groups")
     from setup_server import create_group, ProvisioningError
     try:
-        create_group(slug, display_name, unattended_password.strip() or None, current_user["email"])
+        create_group(current_user["tenant_id"], slug, display_name, unattended_password.strip() or None,
+                     current_user["email"])
         conn = get_db()
-        log_event(conn, "group_created", slug, current_user["email"])
+        log_event(conn, "group_created", slug, current_user["email"], tenant_id=current_user["tenant_id"])
         conn.close()
         _set_flash(request, "success", f"Group '{slug}' created.")
         return RedirectResponse(f"/groups/{slug}", status_code=303)
@@ -75,43 +88,42 @@ async def groups_create(
 
 @router.get("/groups/{slug}", response_class=HTMLResponse)
 async def group_detail(
-    request: Request, slug: str, current_user: dict = Depends(require_auth)
+    request: Request, slug: str, current_user: dict = Depends(require_auth),
+    tenant: Tenant = Depends(get_tenant),
 ):
+    tid = tenant.id
     conn = get_db()
-    group = conn.execute(
-        "SELECT * FROM client_groups WHERE slug = ?", (slug,)
-    ).fetchone()
+    group = _group(conn, tid, slug)
     if group is None:
         conn.close()
-        _set_flash(request, "error", f"Group '{slug}' not found.")
-        return RedirectResponse("/groups", status_code=303)
+        return _group_not_found(request, slug)
 
     fleet_devices = conn.execute(
-        "SELECT * FROM devices WHERE group_id = ? AND hidden = 0",
-        (group["id"],),
+        "SELECT * FROM devices WHERE tenant_id = ? AND group_id = ? AND hidden = 0",
+        (tid, group["id"]),
     ).fetchall()
 
     all_groups = conn.execute(
-        "SELECT id, display_name FROM client_groups ORDER BY display_name"
+        "SELECT id, display_name FROM client_groups WHERE tenant_id = ? ORDER BY display_name", (tid,)
     ).fetchall()
 
     installers = conn.execute(
-        "SELECT * FROM installers WHERE group_id = ? ORDER BY created_at DESC",
-        (group["id"],),
+        "SELECT * FROM installers WHERE tenant_id = ? AND group_id = ? ORDER BY created_at DESC",
+        (tid, group["id"]),
     ).fetchall()
 
     link_rows = conn.execute(
-        "SELECT * FROM download_links WHERE group_id = ? ORDER BY created_at DESC",
-        (group["id"],),
+        "SELECT * FROM download_links WHERE tenant_id = ? AND group_id = ? ORDER BY created_at DESC",
+        (tid, group["id"]),
     ).fetchall()
-    shareable = latest_installers(conn, group["id"])
+    shareable = latest_installers(conn, tid, group["id"])
     au = conn.execute(
         """SELECT COUNT(*) AS reporting,
                   SUM(CASE WHEN di.policy_ts = ? THEN 1 ELSE 0 END) AS applied
-           FROM devices d JOIN device_info di ON di.rustdesk_id = d.rustdesk_id
-           WHERE d.group_id = ? AND d.hidden = 0
+           FROM devices d JOIN device_info di ON di.rustdesk_id = d.rustdesk_id AND di.tenant_id = d.tenant_id
+           WHERE d.tenant_id = ? AND d.group_id = ? AND d.hidden = 0
              AND di.heartbeat_at > datetime('now', '-1 day')""",
-        (group["policy_ts"] or -1, group["id"]),
+        (group["policy_ts"] or -1, tid, group["id"]),
     ).fetchone()
     conn.close()
 
@@ -123,8 +135,8 @@ async def group_detail(
         for r in link_rows
     ]
 
-    peers = get_hbbs_peers()
-    info = get_device_info()
+    peers = get_hbbs_peers(tenant)
+    info = get_device_info(tid)
     devices = []
     for d in fleet_devices:
         rid = d["rustdesk_id"]
@@ -148,8 +160,8 @@ async def group_detail(
         signing_enabled = False
     try:
         import branding
-        icon_png = branding.icon_paths(group["id"])[1]
-        brand_icon_v = int(icon_png.stat().st_mtime) if branding.has_icon(group["id"]) else None
+        icon_png = branding.icon_paths(tid, group["id"])[1]
+        brand_icon_v = int(icon_png.stat().st_mtime) if branding.has_icon(tid, group["id"]) else None
     except Exception:
         brand_icon_v = None
 
@@ -194,9 +206,16 @@ async def group_edit(
     current_user: dict = Depends(require_auth),
 ):
     require_perm(current_user, "manage_groups")
+    tid = current_user["tenant_id"]
     new_slug = new_slug.strip().lower()
     display_name = display_name.strip()
     unattended_password = unattended_password.strip()
+
+    conn = get_db()
+    group = _group(conn, tid, slug, "id, unattended_password")
+    conn.close()
+    if group is None:
+        return _group_not_found(request)
 
     if not SLUG_RE.match(new_slug):
         _set_flash(request, "error", "Invalid slug — lowercase letters, digits, hyphens, 3–50 chars.")
@@ -212,15 +231,10 @@ async def group_edit(
             return RedirectResponse(f"/groups/{slug}", status_code=303)
 
     conn = get_db()
-    group = conn.execute("SELECT id FROM client_groups WHERE slug = ?", (slug,)).fetchone()
-    if group is None:
-        conn.close()
-        _set_flash(request, "error", "Group not found.")
-        return RedirectResponse("/groups", status_code=303)
-
     if new_slug != slug:
         conflict = conn.execute(
-            "SELECT id FROM client_groups WHERE slug = ? AND id != ?", (new_slug, group["id"])
+            "SELECT id FROM client_groups WHERE tenant_id = ? AND slug = ? AND id != ?",
+            (tid, new_slug, group["id"])
         ).fetchone()
         if conflict:
             conn.close()
@@ -232,15 +246,13 @@ async def group_edit(
     elif unattended_password:
         new_pw = unattended_password
     else:
-        new_pw = conn.execute(
-            "SELECT unattended_password FROM client_groups WHERE id = ?", (group["id"],)
-        ).fetchone()["unattended_password"]
+        new_pw = group["unattended_password"]
 
     conn.execute(
-        "UPDATE client_groups SET slug = ?, display_name = ?, unattended_password = ? WHERE id = ?",
-        (new_slug, display_name, new_pw, group["id"]),
+        "UPDATE client_groups SET slug = ?, display_name = ?, unattended_password = ? WHERE id = ? AND tenant_id = ?",
+        (new_slug, display_name, new_pw, group["id"], tid),
     )
-    log_event(conn, "group_updated", new_slug, current_user["email"])
+    log_event(conn, "group_updated", new_slug, current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
     _set_flash(request, "success", "Group updated.")
@@ -263,19 +275,17 @@ async def group_client_settings(
     current_user: dict = Depends(require_auth),
 ):
     require_perm(current_user, "manage_groups")
-    wanted = {"auto_update": auto_update, "remote_config": remote_config}
-    if any(v not in ("", "Y", "N") for v in wanted.values()):
-        _set_flash(request, "error", "Unknown client setting.")
-        return RedirectResponse(f"/groups/{slug}#client-settings", status_code=303)
-
+    tid = current_user["tenant_id"]
     conn = get_db()
-    group = conn.execute(
-        "SELECT id, auto_update, remote_config, policy_ts FROM client_groups WHERE slug = ?", (slug,)
-    ).fetchone()
+    group = _group(conn, tid, slug, "id, auto_update, remote_config, policy_ts")
     if group is None:
         conn.close()
-        _set_flash(request, "error", "Group not found.")
-        return RedirectResponse("/groups", status_code=303)
+        return _group_not_found(request)
+    wanted = {"auto_update": auto_update, "remote_config": remote_config}
+    if any(v not in ("", "Y", "N") for v in wanted.values()):
+        conn.close()
+        _set_flash(request, "error", "Unknown client setting.")
+        return RedirectResponse(f"/groups/{slug}#client-settings", status_code=303)
 
     changed = [col for col, v in wanted.items() if (group[col] or "") != v]
     if changed:
@@ -287,12 +297,13 @@ async def group_client_settings(
         new_ts = max(int(time.time()), (group["policy_ts"] or 0) + 1) if managed else None
         conn.execute(
             """UPDATE client_groups SET auto_update = ?, remote_config = ?, policy_ts = ?
-               WHERE id = ?""",
-            (auto_update or None, remote_config or None, new_ts, group["id"]),
+               WHERE id = ? AND tenant_id = ?""",
+            (auto_update or None, remote_config or None, new_ts, group["id"], tid),
         )
         names = {"": "not managed", "Y": "on", "N": "off"}
         detail = " ".join(f"{col}={names[wanted[col]]}" for col in changed)
-        log_event(conn, "group_client_settings_changed", f"group={slug} {detail}", current_user["email"])
+        log_event(conn, "group_client_settings_changed", f"group={slug} {detail}", current_user["email"],
+                  tenant_id=tid)
         conn.close()
         summary = "; ".join(
             f"{_CLIENT_SETTINGS[col]} {names[wanted[col]]}" for col in changed
@@ -309,6 +320,12 @@ async def group_client_settings(
 async def group_branding(request: Request, slug: str, current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_groups")
     import branding
+    tid = current_user["tenant_id"]
+    conn = get_db()
+    group = _group(conn, tid, slug, "id")
+    if group is None:
+        conn.close()
+        return _group_not_found(request)
     form = await request.form()
     app_name = (form.get("brand_app_name") or "").strip()
     icon = form.get("icon")
@@ -316,32 +333,28 @@ async def group_branding(request: Request, slug: str, current_user: dict = Depen
 
     problem = branding.app_name_problem(app_name)
     if problem:
+        conn.close()
         _set_flash(request, "error", problem)
         return RedirectResponse(f"/groups/{slug}#branding", status_code=303)
-
-    conn = get_db()
-    group = conn.execute("SELECT id FROM client_groups WHERE slug = ?", (slug,)).fetchone()
-    if group is None:
-        conn.close()
-        _set_flash(request, "error", "Group not found.")
-        return RedirectResponse("/groups", status_code=303)
 
     changes = []
     if hasattr(icon, "read") and icon.filename:
         try:
-            branding.save_icon(group["id"], await icon.read(branding.MAX_UPLOAD_BYTES + 1))
+            branding.save_icon(tid, group["id"], await icon.read(branding.MAX_UPLOAD_BYTES + 1))
         except branding.BrandingError as e:
             conn.close()
             _set_flash(request, "error", str(e))
             return RedirectResponse(f"/groups/{slug}#branding", status_code=303)
         changes.append("icon updated")
     elif remove_icon:
-        branding.delete_icon(group["id"])
+        branding.delete_icon(tid, group["id"])
         changes.append("icon removed")
 
-    conn.execute("UPDATE client_groups SET brand_app_name = ? WHERE id = ?", (app_name or None, group["id"]))
+    conn.execute("UPDATE client_groups SET brand_app_name = ? WHERE id = ? AND tenant_id = ?",
+                 (app_name or None, group["id"], tid))
     changes.append(f"app name={app_name or 'default'}")
-    log_event(conn, "group_branding_updated", f"group={slug} " + ", ".join(changes), current_user["email"])
+    log_event(conn, "group_branding_updated", f"group={slug} " + ", ".join(changes), current_user["email"],
+              tenant_id=tid)
     conn.commit()
     conn.close()
     _set_flash(request, "success", "Branding saved. Build new installers to apply it.")
@@ -351,12 +364,13 @@ async def group_branding(request: Request, slug: str, current_user: dict = Depen
 @router.get("/groups/{slug}/branding/icon.png")
 async def group_branding_icon(request: Request, slug: str, current_user: dict = Depends(require_auth)):
     import branding
+    tid = current_user["tenant_id"]
     conn = get_db()
-    group = conn.execute("SELECT id FROM client_groups WHERE slug = ?", (slug,)).fetchone()
+    group = _group(conn, tid, slug, "id")
     conn.close()
-    if group is None or not branding.has_icon(group["id"]):
+    if group is None or not branding.has_icon(tid, group["id"]):
         return HTMLResponse("Not found", status_code=404)
-    return FileResponse(branding.icon_paths(group["id"])[1], media_type="image/png")
+    return FileResponse(branding.icon_paths(tid, group["id"])[1], media_type="image/png")
 
 
 @router.post("/groups/{slug}/installers/{installer_id}/delete")
@@ -367,13 +381,14 @@ async def installer_delete(
     current_user: dict = Depends(require_auth),
 ):
     require_perm(current_user, "manage_groups")
+    tid = current_user["tenant_id"]
     conn = get_db()
     row = conn.execute(
         """SELECT i.id, i.unsigned_path, i.platform, i.rustdesk_version, cg.display_name AS group_name
            FROM installers i
-           JOIN client_groups cg ON cg.id = i.group_id
-           WHERE i.id = ? AND cg.slug = ?""",
-        (installer_id, slug),
+           JOIN client_groups cg ON cg.id = i.group_id AND cg.tenant_id = i.tenant_id
+           WHERE i.id = ? AND i.tenant_id = ? AND cg.slug = ?""",
+        (installer_id, tid, slug),
     ).fetchone()
     if row is None:
         conn.close()
@@ -382,15 +397,16 @@ async def installer_delete(
 
     if row["unsigned_path"]:
         candidate = Path(row["unsigned_path"]).resolve()
-        if candidate.parent == OUTPUT_DIR.resolve() and candidate.exists():
+        if candidate.parent == installers_dir(tid).resolve() and candidate.exists():
             candidate.unlink()
 
-    conn.execute("DELETE FROM installers WHERE id = ?", (installer_id,))
-    log_event(conn, "installer_deleted", f"group={slug} installer_id={installer_id}", current_user["email"])
+    conn.execute("DELETE FROM installers WHERE id = ? AND tenant_id = ?", (installer_id, tid))
+    log_event(conn, "installer_deleted", f"group={slug} installer_id={installer_id}", current_user["email"],
+              tenant_id=tid)
     conn.commit()
     conn.close()
 
-    fire_notification("installer_deleted", {
+    fire_notification(tid, "installer_deleted", {
         "group_name": row["group_name"],
         "group_slug": slug,
         "platform": row["platform"],
@@ -411,11 +427,17 @@ async def group_build(
 ):
     require_perm(current_user, "manage_groups")
     from generate_installer import build_installer, InstallerError, PLATFORMS
+    tid = current_user["tenant_id"]
+    conn = get_db()
+    grp = _group(conn, tid, slug, "display_name")
+    conn.close()
+    if grp is None:
+        return _group_not_found(request)
     if platform not in PLATFORMS:
         _set_flash(request, "error", f"Unknown platform: {platform}")
         return RedirectResponse(f"/groups/{slug}", status_code=303)
     try:
-        result = build_installer(slug, platform, current_user["email"])
+        result = build_installer(tid, slug, platform, current_user["email"])
         label = PLATFORMS[platform]["label"]
         if result["status"] == "signed":
             sha_short = (result["sha256_signed"] or "")[:16]
@@ -424,11 +446,10 @@ async def group_build(
             sha_short = (result["sha256_unsigned"] or "")[:16]
             _set_flash(request, "success", f"{label} installer ready (unsigned). SHA256: {sha_short}…")
         conn = get_db()
-        grp = conn.execute("SELECT display_name FROM client_groups WHERE slug=?", (slug,)).fetchone()
-        log_event(conn, "installer_built", f"group={slug} platform={platform}", current_user["email"])
+        log_event(conn, "installer_built", f"group={slug} platform={platform}", current_user["email"], tenant_id=tid)
         conn.close()
-        fire_notification("installer_built", {
-            "group_name": grp["display_name"] if grp else slug,
+        fire_notification(tid, "installer_built", {
+            "group_name": grp["display_name"],
             "group_slug": slug,
             "platform": label,
             "version": result.get("rustdesk_version", ""),
@@ -447,7 +468,7 @@ async def group_sign_installer(
     require_perm(current_user, "manage_groups")
     from generate_installer import sign_existing, InstallerError
     try:
-        row = sign_existing(installer_id, current_user["email"])
+        row = sign_existing(current_user["tenant_id"], slug, installer_id, current_user["email"])
         _set_flash(request, "success", f"Installer signed. SHA256: {(row['sha256_signed'] or '')[:16]}…")
     except InstallerError as e:
         _set_flash(request, "error", f"Signing failed: {e}")
@@ -458,16 +479,18 @@ async def group_sign_installer(
 async def download(
     request: Request, filename: str, current_user: dict = Depends(require_auth)
 ):
-    candidate = (OUTPUT_DIR / filename).resolve()
-    if candidate.parent != OUTPUT_DIR.resolve():
+    tid = current_user["tenant_id"]
+    out_dir = installers_dir(tid)
+    candidate = (out_dir / filename).resolve()
+    if candidate.parent != out_dir.resolve():
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Invalid filename.")
 
     conn = get_db()
     row = conn.execute(
-        "SELECT id FROM installers WHERE (unsigned_path = ? OR signed_path = ?) "
+        "SELECT id FROM installers WHERE tenant_id = ? AND (unsigned_path = ? OR signed_path = ?) "
         "AND status IN ('built','signed')",
-        (str(candidate), str(candidate)),
+        (tid, str(candidate), str(candidate)),
     ).fetchone()
     conn.close()
     if row is None or not candidate.exists():

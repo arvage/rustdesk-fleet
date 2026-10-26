@@ -27,7 +27,6 @@ from datetime import datetime, timezone
 from app import paths
 
 DB_PATH = paths.FLEET_DB
-LOGO_PATH = paths.EMAIL_LOGO
 LOGO_CID = "rdf-email-logo"
 MAX_LOGO_BYTES = 2 * 1024 * 1024
 TEXT_FIELDS = ("subject", "heading", "intro", "outro", "button_text")
@@ -251,6 +250,7 @@ _COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 def _db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
@@ -287,11 +287,11 @@ def ensure_tables(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def get_design() -> dict:
+def get_design(tenant_id: int) -> dict:
     d = dict(DESIGN_DEFAULTS)
     try:
         conn = _db()
-        row = conn.execute("SELECT * FROM email_design WHERE id = 1").fetchone()
+        row = conn.execute("SELECT * FROM email_design WHERE tenant_id = ?", (tenant_id,)).fetchone()
         conn.close()
     except sqlite3.Error:
         row = None
@@ -302,7 +302,7 @@ def get_design() -> dict:
     return d
 
 
-def save_design(values: dict) -> dict:
+def save_design(tenant_id: int, values: dict) -> dict:
     """Validate and store design settings. Returns the cleaned values."""
     clean = dict(DESIGN_DEFAULTS)
     for k in ("brand_name", "client_brand_name"):
@@ -322,31 +322,32 @@ def save_design(values: dict) -> dict:
     cols = list(DESIGN_DEFAULTS)
     conn = _db()
     conn.execute(
-        f"INSERT OR REPLACE INTO email_design (id, {', '.join(cols)}, updated_at)"
-        f" VALUES (1, {', '.join('?' * len(cols))}, datetime('now'))",
-        [clean[c] for c in cols],
+        f"INSERT OR REPLACE INTO email_design (tenant_id, {', '.join(cols)}, updated_at)"
+        f" VALUES (?, {', '.join('?' * len(cols))}, datetime('now'))",
+        [tenant_id, *[clean[c] for c in cols]],
     )
     conn.commit()
     conn.close()
     return clean
 
 
-def reset_design() -> None:
+def reset_design(tenant_id: int) -> None:
     conn = _db()
-    conn.execute("DELETE FROM email_design")
+    conn.execute("DELETE FROM email_design WHERE tenant_id = ?", (tenant_id,))
     conn.commit()
     conn.close()
 
 
-def get_template(key: str) -> dict:
-    """Defaults merged with any saved override; adds 'customized'."""
+def get_template(tenant_id: int, key: str) -> dict:
+    """Defaults merged with the tenant's saved override, if any; adds 'customized'."""
     spec = TEMPLATES[key]
     t = {f: spec.get(f, "") for f in TEXT_FIELDS}
     t["show_details"] = True
     t["customized"] = False
     try:
         conn = _db()
-        row = conn.execute("SELECT * FROM email_templates WHERE key = ?", (key,)).fetchone()
+        row = conn.execute("SELECT * FROM email_templates WHERE tenant_id = ? AND key = ?",
+                           (tenant_id, key)).fetchone()
         conn.close()
     except sqlite3.Error:
         row = None
@@ -362,7 +363,7 @@ def get_template(key: str) -> dict:
     return t
 
 
-def save_template(key: str, values: dict, user_email: str) -> None:
+def save_template(tenant_id: int, key: str, values: dict, user_email: str) -> None:
     spec = TEMPLATES[key]
     clean = {f: str(values.get(f, "")).replace("\r\n", "\n").strip()[:4000] for f in TEXT_FIELDS}
     clean["subject"] = " ".join(clean["subject"].split())[:200] or spec["subject"]
@@ -372,18 +373,18 @@ def save_template(key: str, values: dict, user_email: str) -> None:
     conn = _db()
     conn.execute(
         """INSERT OR REPLACE INTO email_templates
-               (key, subject, heading, intro, outro, button_text, show_details, updated_by, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-        (key, clean["subject"], clean["heading"], clean["intro"], clean["outro"], clean["button_text"],
+               (tenant_id, key, subject, heading, intro, outro, button_text, show_details, updated_by, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (tenant_id, key, clean["subject"], clean["heading"], clean["intro"], clean["outro"], clean["button_text"],
          show, user_email),
     )
     conn.commit()
     conn.close()
 
 
-def reset_template(key: str) -> None:
+def reset_template(tenant_id: int, key: str) -> None:
     conn = _db()
-    conn.execute("DELETE FROM email_templates WHERE key = ?", (key,))
+    conn.execute("DELETE FROM email_templates WHERE tenant_id = ? AND key = ?", (tenant_id, key))
     conn.commit()
     conn.close()
 
@@ -394,7 +395,13 @@ class LogoError(ValueError):
     pass
 
 
-def save_logo(data: bytes) -> None:
+def logo_path(tenant_id: int):
+    """The tenant's email logo (tenant #1: <data dir>/branding/email-logo.png)."""
+    from app.tenancy import tenant_files_dir
+    return tenant_files_dir(tenant_id) / "branding" / "email-logo.png"
+
+
+def save_logo(tenant_id: int, data: bytes) -> None:
     """Validate an uploaded image and store it as a PNG (max 600 px wide)."""
     if len(data) > MAX_LOGO_BYTES:
         raise LogoError("The logo must be under 2 MB.")
@@ -408,22 +415,24 @@ def save_logo(data: bytes) -> None:
         img = img.convert("RGBA")
     if img.width > 600:
         img = img.resize((600, max(1, round(img.height * 600 / img.width))))
-    LOGO_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = LOGO_PATH.with_suffix(".tmp")
+    path = logo_path(tenant_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
     img.save(tmp, "PNG", optimize=True)
-    tmp.replace(LOGO_PATH)
+    tmp.replace(path)
 
 
-def remove_logo() -> None:
-    LOGO_PATH.unlink(missing_ok=True)
+def remove_logo(tenant_id: int) -> None:
+    logo_path(tenant_id).unlink(missing_ok=True)
 
 
-def has_logo() -> bool:
-    return LOGO_PATH.exists()
+def has_logo(tenant_id: int) -> bool:
+    return logo_path(tenant_id).exists()
 
 
-def logo_bytes() -> bytes | None:
-    return LOGO_PATH.read_bytes() if LOGO_PATH.exists() else None
+def logo_bytes(tenant_id: int) -> bytes | None:
+    path = logo_path(tenant_id)
+    return path.read_bytes() if path.exists() else None
 
 
 # ── Rendering ────────────────────────────────────────────────────────────────
@@ -493,7 +502,7 @@ def _paragraphs(text: str, ctx: dict, style: str, accent: str) -> str:
     return "".join(out)
 
 
-def render(key: str, ctx: dict, *, preview: bool = False,
+def render(tenant_id: int, key: str, ctx: dict, *, preview: bool = False,
            template: dict | None = None, design: dict | None = None) -> tuple[str, str, bool]:
     """Return (subject, html, uses_logo). With preview=True the logo is inlined
     as a data URI (for the browser) instead of a cid: reference (for email).
@@ -501,8 +510,8 @@ def render(key: str, ctx: dict, *, preview: bool = False,
     spec = TEMPLATES.get(key)
     if spec is None:
         return key, f"<p>Event: <strong>{html.escape(key)}</strong></p>", False
-    t = template or get_template(key)
-    d = design or get_design()
+    t = template or get_template(tenant_id, key)
+    d = design or get_design(tenant_id)
     c = _prepare(key, ctx)
     client = spec["audience"] == "client"
     font = FONTS.get(d["font"], FONTS["system"])[1]
@@ -513,10 +522,10 @@ def render(key: str, ctx: dict, *, preview: bool = False,
 
     # Header: brand title and/or logo; team emails also put the heading here.
     title = d["client_brand_name"] if client else d["brand_name"]
-    show_logo = has_logo() and bool(d["show_logo_client"] if client else d["show_logo_team"])
+    show_logo = has_logo(tenant_id) and bool(d["show_logo_client"] if client else d["show_logo_team"])
     logo_html = ""
     if show_logo:
-        src = ("data:image/png;base64," + base64.b64encode(logo_bytes()).decode()) if preview else f"cid:{LOGO_CID}"
+        src = ("data:image/png;base64," + base64.b64encode(logo_bytes(tenant_id)).decode()) if preview else f"cid:{LOGO_CID}"
         logo_html = (f'<img src="{src}" alt="{esc(title or "Logo")}" height="{int(d["logo_height"])}" '
                      f'style="display:block;height:{int(d["logo_height"])}px;width:auto;border:0;margin:0 0 10px">')
     heading = _fill(t["heading"], c)

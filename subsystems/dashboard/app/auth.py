@@ -7,23 +7,25 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app import ratelimit
 from app.deps import get_db, log_event
+from app.tenancy import Tenant, get_tenant
 from app.templates_config import templates
 
 router = APIRouter()
 
-# Cached once True, never reset — only tracks whether first-run setup is complete.
-_setup_done: bool = False
+# Tenants whose first-run setup is complete (they have a user). Only ever
+# grows; a tenant id in here never goes back to /setup.
+_setup_done: set[int] = set()
 
 
-def _users_exist() -> bool:
-    global _setup_done
-    if _setup_done:
+def _users_exist(tenant: Tenant) -> bool:
+    if tenant.id in _setup_done:
         return True
     conn = get_db()
-    count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    count = conn.execute("SELECT COUNT(*) FROM users WHERE tenant_id = ?", (tenant.id,)).fetchone()[0]
     conn.close()
-    _setup_done = count > 0
-    return _setup_done
+    if count:
+        _setup_done.add(tenant.id)
+    return bool(count)
 
 
 class _AuthRedirect(Exception):
@@ -34,38 +36,53 @@ class _SetupRedirect(Exception):
     pass
 
 
+def _email_key(tenant: Tenant, email: str) -> str:
+    """Rate-limit key for an email: per tenant, since the same address can
+    be a different account on each tenant."""
+    email = email.lower().strip()
+    return f"{tenant.id}/{email}" if email else ""
+
+
 def note_login_failure(request: Request, email: str, count_email: bool = True) -> None:
-    """Count a failed sign-in for this email and IP; log any lockout it starts.
-    With count_email=False only the IP is counted (the email is still logged)."""
+    """Count a failed sign-in for this email (within the request's tenant)
+    and IP; log any lockout it starts. With count_email=False only the IP is
+    counted (the email is still logged)."""
+    tenant = get_tenant(request)
     ip = ratelimit.client_ip(request)
-    if ratelimit.record_failure(email if count_email else "", ip):
+    if ratelimit.record_failure(_email_key(tenant, email) if count_email else "", ip):
         conn = get_db()
-        log_event(conn, "login_locked", f"email={email.lower().strip()} ip={ip}", "")
+        log_event(conn, "login_locked", f"email={email.lower().strip()} ip={ip}", "", tenant_id=tenant.id)
         conn.close()
 
 
 def locked_seconds(request: Request, email: str) -> int:
     """Seconds until this email and IP may try again. Pass email="" to check
     only the IP lock."""
-    return ratelimit.locked_seconds(email, ratelimit.client_ip(request))
+    return ratelimit.locked_seconds(_email_key(get_tenant(request), email), ratelimit.client_ip(request))
 
 
 def sign_in(request: Request, user) -> None:
     """Start a session for a users row (password or passkey login). The
     session only carries the id and session_version; everything else is
-    read from the database on each request."""
-    ratelimit.clear_email(user["email"])
+    read from the database on each request. The row must belong to the
+    request's tenant."""
+    tenant = get_tenant(request)
+    if user["tenant_id"] != tenant.id:
+        raise _AuthRedirect()
+    ratelimit.clear_email(_email_key(tenant, user["email"]))
     request.session.clear()
     request.session["user_id"] = user["id"]
     request.session["session_version"] = user["session_version"]
 
 
-def bump_session_version(conn, user_id: int) -> int:
+def bump_session_version(conn, tenant_id: int, user_id: int) -> int:
     """End every session this user has open. Returns the new version, which
     the caller can pass to sign_in() to keep the current session alive.
     Doesn't commit."""
-    conn.execute("UPDATE users SET session_version = session_version + 1 WHERE id = ?", (user_id,))
-    row = conn.execute("SELECT session_version FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.execute("UPDATE users SET session_version = session_version + 1 WHERE id = ? AND tenant_id = ?",
+                 (user_id, tenant_id))
+    row = conn.execute("SELECT session_version FROM users WHERE id = ? AND tenant_id = ?",
+                       (user_id, tenant_id)).fetchone()
     return row["session_version"] if row else 0
 
 
@@ -74,15 +91,19 @@ def require_auth(request: Request) -> dict:
 
     Checks the users table on every request, so deleting a user, changing
     their role or bumping their session_version takes effect immediately.
+    The user must belong to the request's tenant: a session from another
+    tenant's host is cleared and sent to /login.
     """
-    if not _users_exist():
+    tenant = get_tenant(request)
+    if not _users_exist(tenant):
         raise _SetupRedirect()
     user_id = request.session.get("user_id")
     if not user_id:
         raise _AuthRedirect()
     conn = get_db()
     user = conn.execute(
-        "SELECT id, email, display_name, role, session_version FROM users WHERE id = ?", (user_id,)
+        "SELECT id, tenant_id, email, display_name, role, session_version FROM users"
+        " WHERE id = ? AND tenant_id = ?", (user_id, tenant.id)
     ).fetchone()
     conn.close()
     if user is None or request.session.get("session_version") != user["session_version"]:
@@ -92,9 +113,10 @@ def require_auth(request: Request) -> dict:
     role = user["role"]
     return {
         "id": user["id"],
+        "tenant_id": user["tenant_id"],
         "role": role,
-        "role_name": (all_roles().get(role) or {}).get("name", role),
-        "permissions": get_role_permissions(role),
+        "role_name": (all_roles(tenant.id).get(role) or {}).get("name", role),
+        "permissions": get_role_permissions(tenant.id, role),
         "name": user["display_name"] or user["email"],
         "email": user["email"],
     }
@@ -122,8 +144,8 @@ def _setup_page(request: Request, error: str | None, token: str = "", status_cod
 
 
 @router.get("/setup", response_class=HTMLResponse)
-async def setup_get(request: Request):
-    if _users_exist():
+async def setup_get(request: Request, tenant: Tenant = Depends(get_tenant)):
+    if _users_exist(tenant):
         return RedirectResponse("/", status_code=303)
     if not _setup_token():
         return _setup_page(request, None, status_code=503)
@@ -142,9 +164,10 @@ async def setup_post(
     password: str = Form(...),
     password2: str = Form(...),
     setup_token: str = Form(""),
+    tenant: Tenant = Depends(get_tenant),
 ):
-    global _setup_done
-    if _users_exist():
+    """Create the first admin of the request's tenant."""
+    if _users_exist(tenant):
         return RedirectResponse("/", status_code=303)
     if not _setup_token():
         return _setup_page(request, None, status_code=503)
@@ -171,20 +194,20 @@ async def setup_post(
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
     conn = get_db()
     conn.execute(
-        "INSERT INTO users (email, display_name, role, password_hash) VALUES (?, ?, 'admin', ?)",
-        (email, display_name, pw_hash),
+        "INSERT INTO users (tenant_id, email, display_name, role, password_hash) VALUES (?, ?, ?, 'admin', ?)",
+        (tenant.id, email, display_name, pw_hash),
     )
     conn.commit()
     conn.close()
-    _setup_done = True
+    _setup_done.add(tenant.id)
     return RedirectResponse("/login?setup=1", status_code=303)
 
 
 # ── Login / logout ────────────────────────────────────────────────────────────
 
 @router.get("/login", response_class=HTMLResponse)
-async def login_get(request: Request):
-    if not _users_exist():
+async def login_get(request: Request, tenant: Tenant = Depends(get_tenant)):
+    if not _users_exist(tenant):
         return RedirectResponse("/setup", status_code=303)
     if request.session.get("user_id"):
         return RedirectResponse("/", status_code=303)
@@ -199,6 +222,7 @@ async def login_post(
     request: Request,
     email: str = Form(...),
     password: str = Form(""),
+    tenant: Tenant = Depends(get_tenant),
 ):
     def locked_page(wait: int):
         return templates.TemplateResponse(
@@ -211,9 +235,10 @@ async def login_post(
     if wait:
         return locked_page(wait)
 
+    # Only the request's tenant: the same email may be another tenant's user.
     conn = get_db()
     user = conn.execute(
-        "SELECT * FROM users WHERE email = ?", (email.lower().strip(),)
+        "SELECT * FROM users WHERE tenant_id = ? AND email = ?", (tenant.id, email.lower().strip())
     ).fetchone()
     conn.close()
 
@@ -247,6 +272,7 @@ async def login_post(
         # Second factor required before the real session is granted —
         # require_auth() never reads this key, so nothing is accessible yet.
         request.session["pending_2fa_user_id"] = user["id"]
+        request.session["pending_2fa_tenant_id"] = tenant.id
         return RedirectResponse("/login/webauthn", status_code=303)
 
     sign_in(request, user)

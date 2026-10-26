@@ -44,16 +44,21 @@ def set_auth_method(user, method, with_passkey=True):
     conn = get_db()
     conn.execute("UPDATE users SET auth_method = ? WHERE id = ?", (method, user["id"]))
     if with_passkey:
-        conn.execute("INSERT INTO webauthn_credentials (user_id, credential_id, public_key) "
-                     "VALUES (?, 'cmVhbC1jcmVk', x'00')", (user["id"],))
+        conn.execute("INSERT INTO webauthn_credentials (tenant_id, user_id, credential_id, public_key) "
+                     "VALUES (?, ?, 'cmVhbC1jcmVk', x'00')", (user["tenant_id"], user["id"]))
     conn.commit()
     conn.close()
 
 
-def lock_email(email):
+def email_key(email, tenant_id=1):
+    # Email lockouts are per tenant (app/auth.py _email_key).
+    return f"{tenant_id}/{email}"
+
+
+def lock_email(email, tenant_id=1):
     from app import ratelimit
     for _ in range(ratelimit.MAX_EMAIL_FAILURES):
-        ratelimit.record_failure(email, "")
+        ratelimit.record_failure(email_key(email, tenant_id), "")
 
 
 def lock_ip(ip="testclient"):
@@ -102,4 +107,4 @@ def test_failed_passkey_attempts_count_only_against_the_ip(client, admin):
         codes.append(client.post("/login/webauthn/complete", json={"id": "wrong-cred"}).status_code)
     # Not locked after 5 (no email count); the IP locks after 20.
     assert codes == [400] * ratelimit.MAX_IP_FAILURES + [429]
-    assert ratelimit.locked_seconds(admin["email"], "") == 0
+    assert ratelimit.locked_seconds(email_key(admin["email"]), "") == 0

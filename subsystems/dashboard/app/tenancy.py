@@ -18,7 +18,6 @@ from pathlib import Path
 
 from fastapi import Request
 
-from app import paths
 from app.tenant_migration import LEGACY_TENANT_ID
 from app.tenant_schema import normalize_host
 
@@ -85,10 +84,10 @@ class Tenant:
 
 def tenant_files_dir(tenant_id: int) -> Path:
     """Where a tenant's installers, group icons and email logo live. Tenant #1
-    keeps the data directory itself, where those files always were."""
-    if tenant_id == LEGACY_TENANT_ID:
-        return paths.DATA_DIR
-    return paths.DATA_DIR / "tenants" / str(int(tenant_id))
+    keeps the data directory itself, where those files always were. Shared
+    with the scripts in subsystems/single-tenant (tenant_paths.py)."""
+    from tenant_paths import tenant_files_dir as _dir
+    return _dir(tenant_id)
 
 
 def is_provider_home(tenant: Tenant) -> bool:

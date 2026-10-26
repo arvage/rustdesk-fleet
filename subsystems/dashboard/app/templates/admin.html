@@ -9,6 +9,7 @@
   <div class="stat-card"><div class="stat-label">Devices</div><div class="stat-value">{{ device_count }}</div></div>
   <div class="stat-card"><div class="stat-label">Active sessions</div><div class="stat-value">{{ active_sessions }}</div></div>
   <div class="stat-card"><div class="stat-label">Users</div><div class="stat-value">{{ user_count }}</div></div>
+  {% if provider_home %}
   <div class="stat-card">
     <div class="stat-label">Last backup</div>
     {% if backup_status and backup_status.ok %}
@@ -20,10 +21,12 @@
     <div class="stat-value" style="font-size:16px;color:var(--text-3)">none yet</div>
     {% endif %}
   </div>
+  {% endif %}
 </div>
 
 <div class="card-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px">
 
+  {% if provider_home %}
   <!-- Backup & restore -->
   <div class="card"><div class="card-body">
     <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Backup &amp; restore</h2>
@@ -43,6 +46,7 @@
     </p>
     <a href="/admin/signing" class="btn btn-ghost btn-sm">Open signing settings</a>
   </div></div>
+  {% endif %}
 
   <!-- Users -->
   <div class="card"><div class="card-body">

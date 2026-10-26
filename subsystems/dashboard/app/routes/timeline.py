@@ -93,21 +93,21 @@ def _ticks(start: datetime, end: datetime, rng: str) -> list[dict]:
     return out
 
 
-def _online_spans(conn, rid: str, start: datetime, end: datetime) -> list[dict]:
+def _online_spans(conn, tenant_id: int, rid: str, start: datetime, end: datetime) -> list[dict]:
     """[{s, e, state}] with state 'online' | 'offline' | 'unknown', covering
     the window wherever the history says something."""
     before = conn.execute(
         """SELECT event FROM provisioning_events
-           WHERE detail = ? AND event IN ('device_online','device_offline') AND created_at < ?
+           WHERE tenant_id = ? AND detail = ? AND event IN ('device_online','device_offline') AND created_at < ?
            ORDER BY created_at DESC, id DESC LIMIT 1""",
-        (rid, _sql(start)),
+        (tenant_id, rid, _sql(start)),
     ).fetchone()
     rows = conn.execute(
         """SELECT event, created_at FROM provisioning_events
-           WHERE detail = ? AND event IN ('device_online','device_offline')
+           WHERE tenant_id = ? AND detail = ? AND event IN ('device_online','device_offline')
              AND created_at >= ? AND created_at < ?
            ORDER BY created_at, id""",
-        (rid, _sql(start), _sql(end)),
+        (tenant_id, rid, _sql(start), _sql(end)),
     ).fetchall()
 
     def state_of(ev):
@@ -146,15 +146,16 @@ async def device_timeline(
     end = now - RANGES[rng] * back
     start = end - RANGES[rng]
 
+    tid = current_user["tenant_id"]
     conn = get_db()
     dev = conn.execute(
         """SELECT d.rustdesk_id, d.label, di.hostname, di.os, di.heartbeat_at, di.active_conns,
                   cg.display_name AS group_name, cg.slug AS group_slug
            FROM devices d
-           LEFT JOIN device_info di   ON di.rustdesk_id = d.rustdesk_id
-           LEFT JOIN client_groups cg ON cg.id = d.group_id
-           WHERE d.rustdesk_id = ?""",
-        (rid,),
+           LEFT JOIN device_info di   ON di.rustdesk_id = d.rustdesk_id AND di.tenant_id = d.tenant_id
+           LEFT JOIN client_groups cg ON cg.id = d.group_id AND cg.tenant_id = d.tenant_id
+           WHERE d.tenant_id = ? AND d.rustdesk_id = ?""",
+        (tid, rid),
     ).fetchone()
     if not dev:
         conn.close()
@@ -166,32 +167,32 @@ async def device_timeline(
                   COALESCE(pd.label, pdi.hostname) AS peer_device_name,
                   """ + DASHBOARD_USER_SQL + """ AS dashboard_user
            FROM device_sessions s
-           LEFT JOIN devices pd      ON pd.rustdesk_id  = s.peer_id
-           LEFT JOIN device_info pdi ON pdi.rustdesk_id = s.peer_id
-           WHERE s.rustdesk_id = ? AND s.started_at < ?
+           LEFT JOIN devices pd      ON pd.rustdesk_id  = s.peer_id AND pd.tenant_id  = s.tenant_id
+           LEFT JOIN device_info pdi ON pdi.rustdesk_id = s.peer_id AND pdi.tenant_id = s.tenant_id
+           WHERE s.tenant_id = ? AND s.rustdesk_id = ? AND s.started_at < ?
              AND COALESCE(s.ended_at, ?) > ?
            ORDER BY s.started_at""",
-        (rid, _sql(end), _sql(now), _sql(start)),
+        (tid, rid, _sql(end), _sql(now), _sql(start)),
     ).fetchall()
 
     dev_events = conn.execute(
         f"""SELECT event, created_at, user_email FROM provisioning_events
-            WHERE detail = ? AND event IN ({','.join('?' * len(_DEVICE_EVENTS))})
+            WHERE tenant_id = ? AND detail = ? AND event IN ({','.join('?' * len(_DEVICE_EVENTS))})
               AND created_at >= ? AND created_at <= ?
             ORDER BY created_at""",
-        (rid, *_DEVICE_EVENTS, _sql(start), _sql(end)),
+        (tid, rid, *_DEVICE_EVENTS, _sql(start), _sql(end)),
     ).fetchall()
 
     xfer_rows = conn.execute(
         """SELECT f.*, s.peer_id AS s_peer_id, s.peer_name AS s_peer_name
            FROM device_file_transfers f
-           LEFT JOIN device_sessions s ON s.id = f.session_id
-           WHERE f.rustdesk_id = ? AND f.created_at >= ? AND f.created_at <= ?
+           LEFT JOIN device_sessions s ON s.id = f.session_id AND s.tenant_id = f.tenant_id
+           WHERE f.tenant_id = ? AND f.rustdesk_id = ? AND f.created_at >= ? AND f.created_at <= ?
            ORDER BY f.created_at""",
-        (rid, _sql(start), _sql(end)),
+        (tid, rid, _sql(start), _sql(end)),
     ).fetchall()
 
-    online = _online_spans(conn, rid, start, end)
+    online = _online_spans(conn, tid, rid, start, end)
     conn.close()
 
     # ── Sessions → one lane per connecting computer ──────────────────────────
@@ -387,6 +388,7 @@ async def fleet_timeline(
         start = end - RANGES[rng]
     tick_rng = rng if rng in RANGES else ("24h" if end - start <= timedelta(days=2) else "7d")
 
+    tid = current_user["tenant_id"]
     conn = get_db()
     rows = conn.execute(
         """SELECT s.id, s.rustdesk_id, s.started_at, s.ended_at, s.peer_id, s.peer_name,
@@ -396,18 +398,18 @@ async def fleet_timeline(
                   COALESCE(pd.label, pdi.hostname) AS peer_device_name,
                   """ + DASHBOARD_USER_SQL + """ AS dashboard_user
            FROM device_sessions s
-           LEFT JOIN devices d        ON d.rustdesk_id   = s.rustdesk_id
-           LEFT JOIN device_info di   ON di.rustdesk_id  = s.rustdesk_id
-           LEFT JOIN client_groups cg ON cg.id           = d.group_id
-           LEFT JOIN devices pd       ON pd.rustdesk_id  = s.peer_id
-           LEFT JOIN device_info pdi  ON pdi.rustdesk_id = s.peer_id
-           WHERE COALESCE(d.hidden, 0) = 0
+           LEFT JOIN devices d        ON d.rustdesk_id   = s.rustdesk_id AND d.tenant_id   = s.tenant_id
+           LEFT JOIN device_info di   ON di.rustdesk_id  = s.rustdesk_id AND di.tenant_id  = s.tenant_id
+           LEFT JOIN client_groups cg ON cg.id           = d.group_id    AND cg.tenant_id  = s.tenant_id
+           LEFT JOIN devices pd       ON pd.rustdesk_id  = s.peer_id     AND pd.tenant_id  = s.tenant_id
+           LEFT JOIN device_info pdi  ON pdi.rustdesk_id = s.peer_id     AND pdi.tenant_id = s.tenant_id
+           WHERE s.tenant_id = ? AND COALESCE(d.hidden, 0) = 0
              AND s.started_at < ? AND COALESCE(s.ended_at, ?) > ?
            ORDER BY s.started_at""",
-        (_sql(end), _sql(now), _sql(start)),
+        (tid, _sql(end), _sql(now), _sql(start)),
     ).fetchall()
     groups = conn.execute(
-        "SELECT slug, display_name FROM client_groups ORDER BY display_name"
+        "SELECT slug, display_name FROM client_groups WHERE tenant_id = ? ORDER BY display_name", (tid,)
     ).fetchall()
     conn.close()
 

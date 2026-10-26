@@ -1,3 +1,4 @@
+import dataclasses
 import threading
 import time
 from pathlib import Path
@@ -9,6 +10,7 @@ from app.auth import _users_exist, require_auth
 from app.deps import get_db, log_event
 from app.notifications import fire_notification
 from app.permissions import require_perm
+from app.tenancy import Tenant, active_tenants, get_tenant, is_provider_home
 from app.templates_config import templates
 
 router = APIRouter()
@@ -17,45 +19,55 @@ router = APIRouter()
 # ── Update watcher (server + client) ─────────────────────────────────────────
 # Polls GitHub hourly for the latest rustdesk-server release and the latest
 # RustDesk client release, firing "server_update_available" /
-# "client_update_available" once per new version. Each version notified is
-# recorded in provisioning_events, so restarts don't re-send it.
+# "client_update_available" once per new version, per tenant (each tenant's
+# own recipients). Each version notified is recorded in that tenant's
+# provisioning_events, so restarts don't re-send it.
 
 _UPDATE_CHECK_INTERVAL_S = 3600  # matches the 1h caches on both lookups
 _UPDATE_CHECK_STARTUP_DELAY_S = 60
 
 
-def _notify_once(event: str, current: str, latest: str) -> None:
+def _notify_once(tenant_id: int, event: str, current: str, latest: str) -> None:
     conn = get_db()
     try:
         already = conn.execute(
-            "SELECT 1 FROM provisioning_events WHERE event = ? AND detail = ?",
-            (event, latest),
+            "SELECT 1 FROM provisioning_events WHERE tenant_id = ? AND event = ? AND detail = ?",
+            (tenant_id, event, latest),
         ).fetchone()
         if already:
             return
-        log_event(conn, event, latest, "")
+        log_event(conn, event, latest, "", tenant_id=tenant_id)
     finally:
         conn.close()
 
-    fire_notification(event, {"current_version": current, "latest_version": latest})
+    fire_notification(tenant_id, event, {"current_version": current, "latest_version": latest})
 
 
 def _check_server_update() -> None:
+    """Each tenant's own relay version against the latest release."""
     from setup_server import get_server_version, get_latest_server_version
 
-    current = get_server_version()
     latest = get_latest_server_version()
-    if current and latest and current != latest:
-        _notify_once("server_update_available", current, latest)
+    if not latest:
+        return
+    for tenant in active_tenants():
+        if tenant.relay is None:
+            continue
+        current = get_server_version(dataclasses.asdict(tenant.relay))
+        if current and current != latest:
+            _notify_once(tenant.id, "server_update_available", current, latest)
 
 
 def _check_client_update() -> None:
+    """The client version is provider-level (one pin for every tenant's
+    installers); every tenant that builds installers hears about updates."""
     from generate_installer import get_latest_client_version, get_pinned_version, version_tuple
 
     current = get_pinned_version()
     latest = get_latest_client_version()
     if current and latest and version_tuple(latest) > version_tuple(current):
-        _notify_once("client_update_available", current, latest)
+        for tenant in active_tenants():
+            _notify_once(tenant.id, "client_update_available", current, latest)
 
 
 def _refresh_os_lifecycle() -> None:
@@ -81,10 +93,10 @@ def _bg_update_watch_loop() -> None:
 _rebuild_lock = threading.Lock()
 
 
-def _rebuild_outdated_installers(version: str, user_email: str) -> None:
-    """Rebuild each group's current installer for every platform it has, if
-    that installer predates `version`. Runs in a background thread — a full
-    rebuild can take longer than a request should."""
+def _rebuild_outdated_installers(tenant_id: int, version: str, user_email: str) -> None:
+    """Rebuild each of the tenant's groups' current installers for every
+    platform it has, if that installer predates `version`. Runs in a
+    background thread — a full rebuild can take longer than a request should."""
     from generate_installer import build_installer, InstallerError
     from app.routes.links import latest_installers
 
@@ -93,12 +105,12 @@ def _rebuild_outdated_installers(version: str, user_email: str) -> None:
     try:
         conn = get_db()
         groups = conn.execute(
-            "SELECT id, slug FROM client_groups WHERE status = 'active'"
+            "SELECT id, slug FROM client_groups WHERE tenant_id = ? AND status = 'active'", (tenant_id,)
         ).fetchall()
         todo = [
             (g["slug"], i["platform"])
             for g in groups
-            for i in latest_installers(conn, g["id"])
+            for i in latest_installers(conn, tenant_id, g["id"])
             if i["rustdesk_version"] != version
         ]
         conn.close()
@@ -106,13 +118,14 @@ def _rebuild_outdated_installers(version: str, user_email: str) -> None:
         built = failed = 0
         for slug, platform in todo:
             try:
-                build_installer(slug, platform, user_email)
+                build_installer(tenant_id, slug, platform, user_email)
                 built += 1
             except InstallerError:
                 failed += 1  # recorded on the installer row + audit log
 
         conn = get_db()
-        log_event(conn, "installers_rebuilt", f"version={version} built={built} failed={failed}", user_email)
+        log_event(conn, "installers_rebuilt", f"version={version} built={built} failed={failed}", user_email,
+                  tenant_id=tenant_id)
         conn.close()
     finally:
         _rebuild_lock.release()
@@ -133,14 +146,16 @@ LANDING_PAGE = Path(__file__).resolve().parents[4] / "site" / "index.html"
 # Plain `def` (not async): the GitHub lookups below are blocking, so let
 # FastAPI run this in its threadpool instead of stalling the event loop.
 @router.get("/", response_class=HTMLResponse)
-def home(request: Request):
-    if _users_exist() and not request.session.get("user_id") and LANDING_PAGE.is_file():
+def home(request: Request, tenant: Tenant = Depends(get_tenant)):
+    # Unknown hosts never get here (TenantMiddleware answers 404).
+    if _users_exist(tenant) and not request.session.get("user_id") and LANDING_PAGE.is_file():
         return FileResponse(LANDING_PAGE, media_type="text/html")
     current_user = require_auth(request)
-    from setup_server import get_status, get_server_version, get_latest_server_version
+    from setup_server import get_server_version, get_latest_server_version
     from generate_installer import get_latest_client_version, get_pinned_version, version_tuple
-    status = get_status()
-    current_version = get_server_version()
+    relay = dataclasses.asdict(tenant.relay) if tenant.relay else None
+    status = relay
+    current_version = get_server_version(relay)
     latest_version = get_latest_server_version()
     update_available = bool(
         current_version and latest_version and current_version != latest_version
@@ -150,16 +165,19 @@ def home(request: Request):
     client_update_available = bool(
         client_version and latest_client and version_tuple(latest_client) > version_tuple(client_version)
     )
-    try:
-        import backup
-        backup_status = backup.status()
-    except Exception:
-        backup_status = None
-    try:
-        import backup_remote
-        offsite = backup_remote.offsite_summary()
-    except Exception:
-        offsite = None
+    # Backups are the provider's (TENANCY.md): shown on the provider home only.
+    backup_status = offsite = None
+    if is_provider_home(tenant):
+        try:
+            import backup
+            backup_status = backup.status()
+        except Exception:
+            backup_status = None
+        try:
+            import backup_remote
+            offsite = backup_remote.offsite_summary()
+        except Exception:
+            offsite = None
     return templates.TemplateResponse(
         request,
         "home.html",
@@ -175,8 +193,18 @@ def home(request: Request):
             "rebuild_running": _rebuild_lock.locked(),
             "backup_status": backup_status,
             "offsite": offsite,
+            "provider_home": is_provider_home(tenant),
         },
     )
+
+
+def require_provider_home(tenant: Tenant = Depends(get_tenant)) -> Tenant:
+    """Provider-level pages (backups, signing) exist only on the provider
+    home tenant for now; anywhere else they are simply not there (404)."""
+    if not is_provider_home(tenant):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404)
+    return tenant
 
 
 @router.get("/help", response_class=HTMLResponse)
@@ -184,7 +212,7 @@ def help_page(request: Request, current_user: dict = Depends(require_auth)):
     return templates.TemplateResponse(request, "help.html", {"current_user": current_user})
 
 
-@router.post("/server/backup")
+@router.post("/server/backup", dependencies=[Depends(require_provider_home)])
 def server_backup(request: Request, current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_backups")
     import backup
@@ -202,7 +230,7 @@ def server_backup(request: Request, current_user: dict = Depends(require_auth)):
     return RedirectResponse("/", status_code=303)
 
 
-@router.get("/server/backup/download/latest")
+@router.get("/server/backup/download/latest", dependencies=[Depends(require_provider_home)])
 def server_backup_download(current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_backups")
     import backup
@@ -214,6 +242,7 @@ def server_backup_download(current_user: dict = Depends(require_auth)):
 
 @router.post("/server/update")
 async def server_update(request: Request, current_user: dict = Depends(require_auth)):
+    """Update the request's tenant's own relay."""
     require_perm(current_user, "update_server")
     from setup_server import get_latest_server_version, update_server, ProvisioningError
 
@@ -223,7 +252,7 @@ async def server_update(request: Request, current_user: dict = Depends(require_a
         return RedirectResponse("/", status_code=303)
 
     try:
-        update_server(latest, current_user["email"])
+        update_server(current_user["tenant_id"], latest, current_user["email"])
         _set_flash(request, "success", f"Server updated to {latest}.")
     except ProvisioningError as e:
         _set_flash(request, "error", f"Update failed: {e}")
@@ -248,7 +277,8 @@ def installers_update_version(
     conn = get_db()
     if result["updated"]:
         archs = ", ".join(a["arch"] for a in result["archs"])
-        log_event(conn, "client_version_updated", f"{result['current']} -> {result['latest']} ({archs})", current_user["email"])
+        log_event(conn, "client_version_updated", f"{result['current']} -> {result['latest']} ({archs})",
+                  current_user["email"], tenant_id=current_user["tenant_id"])
     conn.close()
 
     version = result["latest"]
@@ -256,7 +286,8 @@ def installers_update_version(
            else f"Installers already use RustDesk {version}.")
     if rebuild == "1":
         threading.Thread(
-            target=_rebuild_outdated_installers, args=(version, current_user["email"]),
+            target=_rebuild_outdated_installers,
+            args=(current_user["tenant_id"], version, current_user["email"]),
             daemon=True, name="installer-rebuild",
         ).start()
         msg += " Rebuilding every group's installers in the background — check the group pages in a minute or two."

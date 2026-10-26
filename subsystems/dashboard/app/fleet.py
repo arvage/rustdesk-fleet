@@ -134,30 +134,31 @@ def days_since(s: str) -> int | None:
 
 # ── Snapshot ─────────────────────────────────────────────────────────────────
 
-def _last_sessions() -> dict[str, str]:
+def _last_sessions(tenant_id: int) -> dict[str, str]:
     conn = get_db()
     rows = conn.execute(
-        "SELECT rustdesk_id, MAX(started_at) AS last FROM device_sessions GROUP BY rustdesk_id"
+        "SELECT rustdesk_id, MAX(started_at) AS last FROM device_sessions WHERE tenant_id = ? GROUP BY rustdesk_id",
+        (tenant_id,),
     ).fetchall()
     conn.close()
     return {r["rustdesk_id"]: r["last"] for r in rows}
 
 
-def _live_status() -> dict[str, str]:
+def _live_status(tenant) -> dict[str, str]:
     try:
         from app.routes.api import _compute_status
-        return _compute_status()
+        return _compute_status(tenant)
     except Exception:
         return {}
 
 
-def fleet_snapshot() -> list[dict]:
-    """Every visible device (label order) with derived fields added:
-    ram_gb, cores_n, os_eos, os_support, live_status, last_seen_days,
+def fleet_snapshot(tenant) -> list[dict]:
+    """Every visible device of one tenant (label order) with derived fields
+    added: ram_gb, cores_n, os_eos, os_support, live_status, last_seen_days,
     registered_days, last_session, last_session_days."""
-    devices, _ = get_devices()
-    sessions = _last_sessions()
-    status = _live_status()
+    devices, _ = get_devices(tenant)
+    sessions = _last_sessions(tenant.id)
+    status = _live_status(tenant)
     today = date.today()
     for d in devices:
         rid = d["rustdesk_id"]

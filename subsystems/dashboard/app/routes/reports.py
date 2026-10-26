@@ -11,12 +11,13 @@ from app.reports import (
     ReportContext, stat_tone,
 )
 from app.routes.admin import _require_admin
+from app.tenancy import Tenant, get_tenant
 from app.templates_config import templates
 
 router = APIRouter()
 
 
-def _context(key: str, group: str, days: str) -> ReportContext:
+def _context(tenant: Tenant, key: str, group: str, days: str) -> ReportContext:
     valid_days = {d for d, _ in PERIODS}
     try:
         n = int(days)
@@ -24,7 +25,7 @@ def _context(key: str, group: str, days: str) -> ReportContext:
         n = 0
     if n not in valid_days:
         n = DEFAULT_DAYS.get(key, 30)
-    return ReportContext(group="" if key in NO_GROUP_FILTER else group, days=n)
+    return ReportContext(tenant=tenant, group="" if key in NO_GROUP_FILTER else group, days=n)
 
 
 @router.get("/admin/reports", response_class=HTMLResponse)
@@ -44,16 +45,18 @@ async def reports_index(request: Request, current_user: dict = Depends(require_a
 async def report_view(
     request: Request, key: str, group: str = "", days: str = "",
     current_user: dict = Depends(require_auth),
+    tenant: Tenant = Depends(get_tenant),
 ):
     _require_admin(current_user)
     if key not in REPORTS:
         request.session["flash"] = {"type": "error", "msg": "Report not found."}
         return RedirectResponse("/admin/reports", status_code=303)
     title, desc, _cat, uses_period, fn = REPORTS[key]
-    ctx = _context(key, group, days)
+    ctx = _context(tenant, key, group, days)
     data = fn(ctx)
     conn = get_db()
-    groups = conn.execute("SELECT slug, display_name FROM client_groups ORDER BY display_name").fetchall()
+    groups = conn.execute("SELECT slug, display_name FROM client_groups WHERE tenant_id = ? ORDER BY display_name",
+                          (tenant.id,)).fetchall()
     conn.close()
     return templates.TemplateResponse(request, "report.html", {
         "key": key, "title": title, "description": desc,
@@ -68,11 +71,12 @@ async def report_view(
 async def report_csv(
     key: str, section: int, group: str = "", days: str = "",
     current_user: dict = Depends(require_auth),
+    tenant: Tenant = Depends(get_tenant),
 ):
     _require_admin(current_user)
     if key not in REPORTS:
         return Response("Not found", status_code=404)
-    ctx = _context(key, group, days)
+    ctx = _context(tenant, key, group, days)
     sections = REPORTS[key][4](ctx)["sections"]
     if not 0 <= section < len(sections):
         return Response("Not found", status_code=404)

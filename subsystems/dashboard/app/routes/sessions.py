@@ -12,16 +12,19 @@ router = APIRouter()
 # Dashboard user behind session `s`: whoever clicked Connect on the device
 # shortly before it started, else the user the connecting RustDesk id is
 # linked to (rustdesk_peer_users).
+# Every lookup stays inside the session's own tenant.
 DASHBOARD_USER_SQL = """COALESCE(
            (SELECT COALESCE(u.display_name, c.user_email)
-              FROM connect_clicks c LEFT JOIN users u ON u.email = c.user_email
-             WHERE c.rustdesk_id = s.rustdesk_id
+              FROM connect_clicks c
+              LEFT JOIN users u ON u.email = c.user_email AND u.tenant_id = c.tenant_id
+             WHERE c.tenant_id = s.tenant_id AND c.rustdesk_id = s.rustdesk_id
                AND c.clicked_at BETWEEN datetime(s.started_at, '-3 minutes')
                                     AND datetime(s.started_at, '+1 minute')
              ORDER BY c.clicked_at DESC LIMIT 1),
            (SELECT COALESCE(u.display_name, pu.user_email)
-              FROM rustdesk_peer_users pu LEFT JOIN users u ON u.email = pu.user_email
-             WHERE pu.peer_id = s.peer_id))"""
+              FROM rustdesk_peer_users pu
+              LEFT JOIN users u ON u.email = pu.user_email AND u.tenant_id = pu.tenant_id
+             WHERE pu.tenant_id = s.tenant_id AND pu.peer_id = s.peer_id))"""
 
 _LIST_SQL = """
     SELECT s.rustdesk_id, s.started_at, s.ended_at,
@@ -32,16 +35,18 @@ _LIST_SQL = """
            CAST((julianday(COALESCE(s.ended_at, 'now')) - julianday(s.started_at)) * 86400
                 AS INTEGER) AS duration_s
     FROM device_sessions s
-    LEFT JOIN devices d       ON d.rustdesk_id  = s.rustdesk_id
-    LEFT JOIN client_groups cg ON cg.id         = d.group_id
-    LEFT JOIN device_info di   ON di.rustdesk_id = s.rustdesk_id
+    LEFT JOIN devices d       ON d.rustdesk_id  = s.rustdesk_id AND d.tenant_id   = s.tenant_id
+    LEFT JOIN client_groups cg ON cg.id         = d.group_id    AND cg.tenant_id  = s.tenant_id
+    LEFT JOIN device_info di   ON di.rustdesk_id = s.rustdesk_id AND di.tenant_id = s.tenant_id
     -- The controller may itself be a fleet device; if so, show its name too.
-    LEFT JOIN devices pd       ON pd.rustdesk_id  = s.peer_id
-    LEFT JOIN device_info pdi  ON pdi.rustdesk_id = s.peer_id
-    {where}
+    LEFT JOIN devices pd       ON pd.rustdesk_id  = s.peer_id AND pd.tenant_id  = s.tenant_id
+    LEFT JOIN device_info pdi  ON pdi.rustdesk_id = s.peer_id AND pdi.tenant_id = s.tenant_id
+    WHERE s.tenant_id = ? {where}
     ORDER BY (s.ended_at IS NULL) DESC, s.started_at DESC
     LIMIT ?
 """
+# Use as _LIST_SQL.format(where="AND s.rustdesk_id = ?") with params
+# (tenant_id, rid, limit), or where="" with (tenant_id, limit).
 
 
 def fmt_duration(secs) -> str:

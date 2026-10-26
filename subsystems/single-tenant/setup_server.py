@@ -1,11 +1,13 @@
 """
 setup_server.py — single-tenant RustDesk fleet bootstrap.
 
-Replaces the old per-tenant allocate_tenant.py allocator. There is now
-exactly one hbbs/hbbr pair for the whole fleet. This script:
+Stands up and maintains a tenant's hbbs/hbbr relay. Each tenant has one
+relay, described by its row in `relays` (host, ports, keypair, data dir,
+compose file). Today only tenant #1's relay exists, the one this script has
+always managed; creating relays for new tenants is phase 1b. This script:
 
-    1. Stands up that one server (idempotent — safe to re-run)
-    2. Captures its keypair into server_config
+    1. Stands up tenant #1's relay (idempotent — safe to re-run)
+    2. Captures its keypair into its relays row
     3. Provides client_group management (create/list groups — these are
        just labels for devices/installers, not separate infrastructure)
 
@@ -33,7 +35,9 @@ FLEET_ROOT = Path(os.environ.get("FLEET_DATA_DIR") or "/opt/rustdesk-fleet")
 DB_PATH = FLEET_ROOT / "fleet.sqlite3"
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 COMPOSE_SRC = Path(__file__).parent / "docker-compose.yml"
+# Tenant #1's relay stack (the one `init` stands up).
 COMPOSE_DST = FLEET_ROOT / "docker-compose.yml"
+LEGACY_TENANT_ID = 1
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$")
 
@@ -74,21 +78,63 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def log_event(conn: sqlite3.Connection, event: str, detail: str = "", user_email: str = "") -> None:
+def log_event(conn: sqlite3.Connection, event: str, detail: str = "", user_email: str = "",
+              *, tenant_id: int | None) -> None:
     conn.execute(
-        "INSERT INTO provisioning_events (event, detail, user_email) VALUES (?, ?, ?)",
-        (event, detail, user_email or None),
+        "INSERT INTO provisioning_events (tenant_id, event, detail, user_email) VALUES (?, ?, ?, ?)",
+        (tenant_id, event, detail, user_email or None),
     )
     conn.commit()
+
+
+def _has_tenancy(conn: sqlite3.Connection) -> bool:
+    """Whether the dashboard's tenancy migration has run on this database.
+    On a brand-new install `init` runs before the dashboard ever starts; it
+    then records the relay in server_config, and the dashboard's migration
+    turns that into tenant #1's relays row and domain."""
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'relays'"
+    ).fetchone() is not None and "tenant_id" in [
+        r[1] for r in conn.execute("PRAGMA table_info(provisioning_events)")]
+
+
+def get_relay(tenant_id: int) -> dict | None:
+    """A tenant's relays row, or None."""
+    conn = get_db()
+    try:
+        if not _has_tenancy(conn):
+            return None
+        row = conn.execute("SELECT * FROM relays WHERE tenant_id = ?", (tenant_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def relay_compose_path(relay: dict | None) -> Path:
+    return Path(relay["compose_path"]) if relay and relay.get("compose_path") else COMPOSE_DST
+
+
+_CONTAINER_NAME_RE = re.compile(r"^\s*container_name:\s*['\"]?([\w.-]+)", re.M)
+
+
+def relay_containers(relay: dict | None) -> list[str]:
+    """Container names in a relay's compose file (["hbbs", "hbbr"] for
+    tenant #1's)."""
+    path = relay_compose_path(relay)
+    try:
+        names = _CONTAINER_NAME_RE.findall(path.read_text())
+    except OSError:
+        names = []
+    return names or ["hbbs", "hbbr"]
 
 
 # ---------------------------------------------------------------------------
 # Server lifecycle (singleton)
 # ---------------------------------------------------------------------------
 
-def docker_compose_up() -> None:
+def docker_compose_up(compose_path: Path = COMPOSE_DST) -> None:
     result = subprocess.run(
-        ["docker", "compose", "-f", str(COMPOSE_DST), "up", "-d"],
+        ["docker", "compose", "-f", str(compose_path), "up", "-d"],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
@@ -101,11 +147,12 @@ _latest_version_cache: dict = {"version": None, "checked_at": 0.0}
 _LATEST_VERSION_TTL_S = 3600
 
 
-def get_server_version() -> str | None:
-    """Current image tag pinned in the deployed compose file."""
-    if not COMPOSE_DST.exists():
+def get_server_version(relay: dict | None) -> str | None:
+    """Current image tag pinned in a relay's deployed compose file."""
+    path = relay_compose_path(relay)
+    if not path.exists():
         return None
-    match = IMAGE_TAG_RE.search(COMPOSE_DST.read_text())
+    match = IMAGE_TAG_RE.search(path.read_text())
     return match.group(1) if match else None
 
 
@@ -134,33 +181,36 @@ def get_latest_server_version() -> str | None:
     return tag
 
 
-def update_server(version: str, user_email: str = "") -> None:
-    """Pin the compose file to `version`, pull the new image, and restart the stack."""
-    if not COMPOSE_DST.exists():
+def update_server(tenant_id: int, version: str, user_email: str = "") -> None:
+    """Pin a tenant's relay compose file to `version`, pull the new image, and
+    restart that relay."""
+    relay = get_relay(tenant_id)
+    compose = relay_compose_path(relay)
+    if relay is None or not compose.exists():
         raise ProvisioningError("Server not initialised — nothing to update.")
 
     conn = get_db()
-    current = get_server_version()
+    current = get_server_version(relay)
 
-    text = COMPOSE_DST.read_text()
+    text = compose.read_text()
     new_text = IMAGE_TAG_RE.sub(f"rustdesk/rustdesk-server:{version}", text)
-    COMPOSE_DST.write_text(new_text)
+    compose.write_text(new_text)
 
-    log_event(conn, "server_update_start", f"{current} -> {version}", user_email)
+    log_event(conn, "server_update_start", f"{current} -> {version}", user_email, tenant_id=tenant_id)
     try:
         pull = subprocess.run(
-            ["docker", "compose", "-f", str(COMPOSE_DST), "pull"],
+            ["docker", "compose", "-f", str(compose), "pull"],
             capture_output=True, text=True,
         )
         if pull.returncode != 0:
             raise ProvisioningError(f"docker compose pull failed:\n{pull.stderr}")
 
-        docker_compose_up()
-        conn.execute("UPDATE server_config SET updated_at=datetime('now') WHERE id=1")
+        docker_compose_up(compose)
+        conn.execute("UPDATE relays SET updated_at=datetime('now') WHERE tenant_id=?", (tenant_id,))
         conn.commit()
-        log_event(conn, "server_updated", f"{current} -> {version}", user_email)
+        log_event(conn, "server_updated", f"{current} -> {version}", user_email, tenant_id=tenant_id)
     except Exception as e:
-        log_event(conn, "server_update_failed", str(e)[:500], user_email)
+        log_event(conn, "server_update_failed", str(e)[:500], user_email, tenant_id=tenant_id)
         raise
 
 
@@ -180,50 +230,93 @@ def wait_for_pubkey(timeout_s: int = 30) -> str:
 
 
 def init_server(host: str, hbbs_port: int = 21115, hbbr_port: int = 21117) -> dict:
+    """Stand up tenant #1's relay and record it. Idempotent."""
     conn = get_db()
     ensure_schema(conn)
+    tenancy = _has_tenancy(conn)
+    tid = LEGACY_TENANT_ID
 
-    (FLEET_ROOT / "data").mkdir(parents=True, exist_ok=True)
+    def event(name: str, detail: str = "") -> None:
+        if tenancy:
+            log_event(conn, name, detail, tenant_id=tid)
+        else:
+            conn.execute("INSERT INTO provisioning_events (event, detail) VALUES (?, ?)", (name, detail))
+            conn.commit()
+
+    data_dir = FLEET_ROOT / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
     COMPOSE_DST.write_text(COMPOSE_SRC.read_text())
-    log_event(conn, "compose_written", str(COMPOSE_DST))
+    event("compose_written", str(COMPOSE_DST))
 
-    existing = conn.execute("SELECT * FROM server_config WHERE id = 1").fetchone()
-    if existing is None:
+    if tenancy:
+        if not conn.execute("SELECT 1 FROM relays WHERE tenant_id = ?", (tid,)).fetchone():
+            conn.execute(
+                """INSERT INTO relays (tenant_id, host, hbbs_port, hbbr_port, data_dir, compose_path,
+                                       hbbs_db_path, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'provisioning')""",
+                (tid, host, hbbs_port, hbbr_port, str(data_dir), str(COMPOSE_DST),
+                 str(data_dir / "db_v2.sqlite3")),
+            )
+        _ensure_legacy_domain(conn, host)
+    elif conn.execute("SELECT 1 FROM server_config WHERE id = 1").fetchone() is None:
+        # Brand-new database the dashboard hasn't migrated yet: the migration
+        # reads this row once to create tenant #1's relay and domain.
         conn.execute(
             """
             INSERT INTO server_config (id, host, hbbs_port, hbbr_port, data_dir, compose_path, status)
             VALUES (1, ?, ?, ?, ?, ?, 'provisioning')
             """,
-            (host, hbbs_port, hbbr_port, str(FLEET_ROOT / "data"), str(COMPOSE_DST)),
+            (host, hbbs_port, hbbr_port, str(data_dir), str(COMPOSE_DST)),
         )
-        conn.commit()
+    conn.commit()
 
-    log_event(conn, "stack_up_attempt")
+    event("stack_up_attempt")
     try:
         docker_compose_up()
-        log_event(conn, "stack_up")
+        event("stack_up")
 
         pubkey = wait_for_pubkey()
-        log_event(conn, "key_captured")
+        event("key_captured")
 
-        conn.execute(
-            "UPDATE server_config SET status='active', pubkey=?, host=?, updated_at=datetime('now') WHERE id=1",
-            (pubkey, host),
-        )
+        if tenancy:
+            conn.execute(
+                "UPDATE relays SET status='active', pubkey=?, host=?, updated_at=datetime('now') WHERE tenant_id=?",
+                (pubkey, host, tid),
+            )
+        else:
+            conn.execute(
+                "UPDATE server_config SET status='active', pubkey=?, host=?, updated_at=datetime('now') WHERE id=1",
+                (pubkey, host),
+            )
         conn.commit()
     except Exception as e:
-        log_event(conn, "provisioning_failed", str(e))
+        event("provisioning_failed", str(e))
         raise
 
-    row = conn.execute("SELECT * FROM server_config WHERE id=1").fetchone()
-    return dict(row)
+    if tenancy:
+        return dict(conn.execute("SELECT * FROM relays WHERE tenant_id = ?", (tid,)).fetchone())
+    return dict(conn.execute("SELECT * FROM server_config WHERE id = 1").fetchone())
 
 
-def get_status() -> dict | None:
-    conn = get_db()
-    ensure_schema(conn)
-    row = conn.execute("SELECT * FROM server_config WHERE id=1").fetchone()
-    return dict(row) if row else None
+def _ensure_legacy_domain(conn: sqlite3.Connection, host: str) -> None:
+    """Give tenant #1 its host as a web domain if it has none yet (a fresh
+    install where the dashboard started before the relay existed)."""
+    if conn.execute("SELECT 1 FROM tenant_domains WHERE tenant_id = ?", (LEGACY_TENANT_ID,)).fetchone():
+        return
+    hostname = host.strip().lower().split("://")[-1].split("/")[0]
+    if hostname.count(":") == 1:
+        hostname = hostname.split(":")[0]
+    if hostname:
+        conn.execute(
+            """INSERT OR IGNORE INTO tenant_domains (tenant_id, hostname, kind, verified_at, tls_status, is_primary)
+               VALUES (?, ?, 'legacy', datetime('now'), 'active', 1)""",
+            (LEGACY_TENANT_ID, hostname),
+        )
+
+
+def get_status(tenant_id: int = LEGACY_TENANT_ID) -> dict | None:
+    """A tenant's relay (host, ports, pubkey, status), or None."""
+    return get_relay(tenant_id)
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +324,7 @@ def get_status() -> dict | None:
 # ---------------------------------------------------------------------------
 
 def create_group(
-    slug: str, display_name: str, unattended_password: str | None = None, user_email: str = ""
+    tenant_id: int, slug: str, display_name: str, unattended_password: str | None = None, user_email: str = ""
 ) -> dict:
     if not SLUG_RE.match(slug):
         raise ProvisioningError(f"Invalid slug '{slug}'. Use lowercase letters, digits, hyphens; 3-50 chars.")
@@ -242,23 +335,24 @@ def create_group(
     conn = get_db()
     ensure_schema(conn)
 
-    if conn.execute("SELECT 1 FROM client_groups WHERE slug = ?", (slug,)).fetchone():
+    if conn.execute("SELECT 1 FROM client_groups WHERE tenant_id = ? AND slug = ?", (tenant_id, slug)).fetchone():
         raise ProvisioningError(f"Client group '{slug}' already exists.")
 
     cur = conn.execute(
-        "INSERT INTO client_groups (slug, display_name, unattended_password) VALUES (?, ?, ?)",
-        (slug, display_name, unattended_password or None),
+        "INSERT INTO client_groups (tenant_id, slug, display_name, unattended_password) VALUES (?, ?, ?, ?)",
+        (tenant_id, slug, display_name, unattended_password or None),
     )
     conn.commit()
-    log_event(conn, "group_created", slug, user_email)
+    log_event(conn, "group_created", slug, user_email, tenant_id=tenant_id)
     return {"id": cur.lastrowid, "slug": slug, "display_name": display_name}
 
 
-def list_groups() -> list[sqlite3.Row]:
+def list_groups(tenant_id: int) -> list[sqlite3.Row]:
     conn = get_db()
     ensure_schema(conn)
     return conn.execute(
-        "SELECT slug, display_name, status, created_at FROM client_groups ORDER BY created_at"
+        "SELECT slug, display_name, status, created_at FROM client_groups WHERE tenant_id = ? ORDER BY created_at",
+        (tenant_id,),
     ).fetchall()
 
 
@@ -281,10 +375,12 @@ def main():
     group_sub = p_group.add_subparsers(dest="group_cmd", required=True)
 
     p_gcreate = group_sub.add_parser("create")
+    p_gcreate.add_argument("--tenant", type=int, default=LEGACY_TENANT_ID, help="Tenant id (default: 1)")
     p_gcreate.add_argument("--slug", required=True)
     p_gcreate.add_argument("--display-name", required=True)
 
-    group_sub.add_parser("list")
+    p_glist = group_sub.add_parser("list")
+    p_glist.add_argument("--tenant", type=int, default=LEGACY_TENANT_ID, help="Tenant id (default: 1)")
 
     args = parser.parse_args()
 
@@ -306,6 +402,13 @@ def main():
     elif args.cmd == "status":
         row = get_status()
         if row is None:
+            conn = get_db()
+            ensure_schema(conn)
+            if not _has_tenancy(conn):
+                legacy = conn.execute("SELECT * FROM server_config WHERE id = 1").fetchone()
+                row = dict(legacy) if legacy else None
+            conn.close()
+        if row is None:
             print("Server not yet initialized. Run `init` first.")
         else:
             for k, v in row.items():
@@ -314,12 +417,12 @@ def main():
     elif args.cmd == "group":
         if args.group_cmd == "create":
             try:
-                result = create_group(args.slug, args.display_name)
+                result = create_group(args.tenant, args.slug, args.display_name)
             except ProvisioningError as e:
                 sys.exit(f"Failed: {e}")
             print(f"Group '{result['slug']}' created.")
         elif args.group_cmd == "list":
-            rows = list_groups()
+            rows = list_groups(args.tenant)
             if not rows:
                 print("No client groups yet.")
             for r in rows:

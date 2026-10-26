@@ -6,6 +6,7 @@ from app.deps import get_db
 from app.notifications import EVENT_LABELS, get_log
 from app.permissions import user_can
 from app.routes.sessions import _LIST_SQL, _row
+from app.tenancy import Tenant, get_tenant, is_provider_home
 from app.templates_config import templates
 
 router = APIRouter()
@@ -74,19 +75,31 @@ _ALL_LIMIT = 200
 _STATUS_EVENTS = ("device_online", "device_offline")
 
 
-def _all_activity(conn, include_deliveries: bool, hide_status: bool) -> list[dict]:
+def _events_scope(tenant: Tenant) -> str:
+    """WHERE fragment for this tenant's audit events. The provider home
+    (tenant #1) also sees provider events (tenant_id NULL: backups,
+    signing), as it always has; no other tenant ever does. Pair it with the
+    (tenant.id,) parameter."""
+    if is_provider_home(tenant):
+        return "(tenant_id = ? OR tenant_id IS NULL)"
+    return "tenant_id = ?"
+
+
+def _all_activity(conn, tenant: Tenant, include_deliveries: bool, hide_status: bool) -> list[dict]:
     """The All activity tab: the event log merged with remote sessions, file
     transfers and (if the viewer may see them) notification emails — the
     other activity that lives in its own tables — newest first."""
     from app.notifications import EVENT_LABELS
 
-    where = "WHERE event NOT IN ('device_online', 'device_offline')" if hide_status else ""
+    tid = tenant.id
+    where = "AND event NOT IN ('device_online', 'device_offline')" if hide_status else ""
     rows = conn.execute(
-        f"SELECT * FROM provisioning_events {where} ORDER BY created_at DESC LIMIT ?", (_ALL_LIMIT,)
+        f"SELECT * FROM provisioning_events WHERE {_events_scope(tenant)} {where}"
+        " ORDER BY created_at DESC LIMIT ?", (tid, _ALL_LIMIT)
     ).fetchall()
     items = [dict(r, category=category_of(r["event"])) for r in rows]
 
-    for s in map(_row, conn.execute(_LIST_SQL.format(where=""), (_ALL_LIMIT,)).fetchall()):
+    for s in map(_row, conn.execute(_LIST_SQL.format(where=""), (tid, _ALL_LIMIT)).fetchall()):
         device = s["device_name"] or s["rustdesk_id"]
         parts = [f"{device} ({s['rustdesk_id']})"]
         if s["peer_id"] and s["peer_name"]:
@@ -104,10 +117,11 @@ def _all_activity(conn, include_deliveries: bool, hide_status: bool) -> list[dic
     for f in conn.execute(
         """SELECT f.*, COALESCE(d.label, di.hostname) AS device_name
            FROM device_file_transfers f
-           LEFT JOIN devices d      ON d.rustdesk_id  = f.rustdesk_id
-           LEFT JOIN device_info di ON di.rustdesk_id = f.rustdesk_id
+           LEFT JOIN devices d      ON d.rustdesk_id  = f.rustdesk_id AND d.tenant_id  = f.tenant_id
+           LEFT JOIN device_info di ON di.rustdesk_id = f.rustdesk_id AND di.tenant_id = f.tenant_id
+           WHERE f.tenant_id = ?
            ORDER BY f.created_at DESC LIMIT ?""",
-        (_ALL_LIMIT,),
+        (tid, _ALL_LIMIT),
     ):
         n = f["file_count"]
         where = f["path"] or "clipboard paste"
@@ -122,7 +136,7 @@ def _all_activity(conn, include_deliveries: bool, hide_status: bool) -> list[dic
 
     if include_deliveries:
         for d in conn.execute(
-            "SELECT * FROM notification_log ORDER BY created_at DESC LIMIT ?", (_ALL_LIMIT,)
+            "SELECT * FROM notification_log WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?", (tid, _ALL_LIMIT)
         ):
             items.append({
                 "created_at": d["created_at"], "category": "deliveries",
@@ -163,8 +177,11 @@ async def audit(
     rid: str = "",
     onoff: int = 0,
     current_user: dict = Depends(require_auth),
+    tenant: Tenant = Depends(get_tenant),
 ):
     hide_status = not onoff
+    tid = tenant.id
+    scope = _events_scope(tenant)
     can_see_deliveries = user_can(current_user, "manage_notifications")
     tabs = [t for t in TABS if t[0] != "deliveries" or can_see_deliveries]
     if cat not in TAB_LABELS or (cat == "deliveries" and not can_see_deliveries):
@@ -174,14 +191,17 @@ async def audit(
 
     # Per-category counts for the tab badges.
     counts: dict[str, int] = {}
-    for row in conn.execute("SELECT event, COUNT(*) AS n FROM provisioning_events GROUP BY event"):
+    for row in conn.execute(f"SELECT event, COUNT(*) AS n FROM provisioning_events WHERE {scope} GROUP BY event",
+                            (tid,)):
         counts[category_of(row["event"])] = counts.get(category_of(row["event"]), 0) + row["n"]
-    counts["sessions"] = conn.execute("SELECT COUNT(*) FROM device_sessions").fetchone()[0]
-    active_count = conn.execute("SELECT COUNT(*) FROM device_sessions WHERE ended_at IS NULL").fetchone()[0]
+    counts["sessions"] = conn.execute("SELECT COUNT(*) FROM device_sessions WHERE tenant_id = ?", (tid,)).fetchone()[0]
+    active_count = conn.execute("SELECT COUNT(*) FROM device_sessions WHERE tenant_id = ? AND ended_at IS NULL",
+                                (tid,)).fetchone()[0]
     if can_see_deliveries:
-        counts["deliveries"] = conn.execute("SELECT COUNT(*) FROM notification_log").fetchone()[0]
+        counts["deliveries"] = conn.execute("SELECT COUNT(*) FROM notification_log WHERE tenant_id = ?",
+                                            (tid,)).fetchone()[0]
     counts["all"] = sum(counts.values()) + conn.execute(
-        "SELECT COUNT(*) FROM device_file_transfers").fetchone()[0]
+        "SELECT COUNT(*) FROM device_file_transfers WHERE tenant_id = ?", (tid,)).fetchone()[0]
 
     events = None
     sessions = None
@@ -189,20 +209,20 @@ async def audit(
 
     if cat == "sessions":
         if rid:
-            rows = conn.execute(_LIST_SQL.format(where="WHERE s.rustdesk_id = ?"), (rid, 300)).fetchall()
+            rows = conn.execute(_LIST_SQL.format(where="AND s.rustdesk_id = ?"), (tid, rid, 300)).fetchall()
         else:
-            rows = conn.execute(_LIST_SQL.format(where=""), (300,)).fetchall()
+            rows = conn.execute(_LIST_SQL.format(where=""), (tid, 300)).fetchall()
         sessions = [_row(r) for r in rows]
     elif cat == "deliveries":
-        deliveries = get_log(200)
+        deliveries = get_log(tid, 200)
     elif cat == "all":
-        events = _all_activity(conn, can_see_deliveries, hide_status)
+        events = _all_activity(conn, tenant, can_see_deliveries, hide_status)
     elif cat == "other":
         ph = ",".join("?" * len(_KNOWN_EVENTS))
         rows = conn.execute(
-            f"SELECT * FROM provisioning_events WHERE event NOT IN ({ph})"
+            f"SELECT * FROM provisioning_events WHERE {scope} AND event NOT IN ({ph})"
             " ORDER BY created_at DESC LIMIT 200",
-            _KNOWN_EVENTS,
+            (tid, *_KNOWN_EVENTS),
         ).fetchall()
         events = [dict(r, category="other") for r in rows]
     else:
@@ -211,9 +231,9 @@ async def audit(
             evs = [e for e in evs if e not in _STATUS_EVENTS]
         ph = ",".join("?" * len(evs)) or "''"
         rows = conn.execute(
-            f"SELECT * FROM provisioning_events WHERE event IN ({ph})"
+            f"SELECT * FROM provisioning_events WHERE {scope} AND event IN ({ph})"
             " ORDER BY created_at DESC LIMIT 200",
-            evs,
+            (tid, *evs),
         ).fetchall()
         events = [dict(r, category=cat) for r in rows]
 

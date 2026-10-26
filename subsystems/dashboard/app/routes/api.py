@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import os
 import shutil
@@ -12,11 +13,9 @@ from fastapi.responses import JSONResponse
 
 from app import paths
 from app.auth import require_auth
-from app.deps import get_db, get_devices, get_hbbs_peers, log_event
+from app.deps import device_known, get_db, get_devices, get_hbbs_peers, log_event
 from app.notifications import fire_notification
-
-HBBS_DB_PATH = paths.HBBS_DB
-HBBS_PORTS = {"21115", "21116", "21117", "21118", "21119"}
+from app.tenancy import Tenant, active_tenants, get_tenant, is_provider_home
 
 # How long to keep a device marked online after its IP was last seen in an
 # established TCP connection.  RustDesk reconnects every ~12-30 s; 90 s
@@ -34,14 +33,39 @@ _HEARTBEAT_REPORTING_S = 86400
 # rather than marking every device offline at once.
 _HEARTBEAT_CHANNEL_S = 120
 
-# {ip: last_seen monotonic timestamp} — written by background thread,
-# read by the API handler.  Lock guards concurrent access.
-_ip_last_seen: dict[str, float] = {}
+# {(local port, remote ip): last_seen monotonic timestamp} — written by the
+# background thread, read by the API handler. Keyed by port so each tenant's
+# relay (its own ports) only sees its own connections. Lock guards access.
+_ip_last_seen: dict[tuple[int, str], float] = {}
 _lock = threading.Lock()
+
+# Relay ports to watch: every active tenant's, refreshed now and then.
+_PORTS_REFRESH_S = 30
+_watched_ports: frozenset[int] = frozenset()
+_watched_at = 0.0
+
+
+def _relay_ports() -> frozenset[int]:
+    global _watched_ports, _watched_at
+    now = time.monotonic()
+    if now - _watched_at >= _PORTS_REFRESH_S or not _watched_ports:
+        try:
+            ports: set[int] = set()
+            for t in active_tenants():
+                if t.relay:
+                    ports |= t.relay.ports
+            _watched_ports = frozenset(ports)
+        except Exception:
+            pass
+        _watched_at = now
+    return _watched_ports
 
 
 def _poll_once() -> None:
-    """Run ss and update _ip_last_seen for every hbbs-connected remote IP."""
+    """Run ss and update _ip_last_seen for every relay-connected remote IP."""
+    ports = _relay_ports()
+    if not ports:
+        return
     try:
         result = subprocess.run(
             ["ss", "-tn", "state", "established"],
@@ -54,14 +78,17 @@ def _poll_once() -> None:
         parts = line.split()
         if len(parts) < 4:
             continue
-        local_port = parts[2].rsplit(":", 1)[-1]
-        if local_port not in HBBS_PORTS:
+        try:
+            local_port = int(parts[2].rsplit(":", 1)[-1])
+        except ValueError:
+            continue
+        if local_port not in ports:
             continue
         remote_addr = parts[3].rsplit(":", 1)[0].strip("[]")
         if remote_addr.startswith("::ffff:"):
             remote_addr = remote_addr[7:]
         with _lock:
-            _ip_last_seen[remote_addr] = now
+            _ip_last_seen[(local_port, remote_addr)] = now
 
 
 def _bg_poll_loop() -> None:
@@ -78,22 +105,27 @@ threading.Thread(target=_bg_poll_loop, daemon=True, name="hbbs-ss-poll").start()
 router = APIRouter(prefix="/api")
 
 
-def _online_ips() -> set[str]:
-    """Return IPs seen connected to an hbbs port within the grace period."""
+def _online_ips(tenant: Tenant) -> set[str]:
+    """IPs seen connected to one of the tenant's relay ports within the grace period."""
+    if tenant.relay is None:
+        return set()
+    ports = tenant.relay.ports
     cutoff = time.monotonic() - _ONLINE_GRACE_S
     with _lock:
-        return {ip for ip, ts in _ip_last_seen.items() if ts >= cutoff}
+        return {ip for (port, ip), ts in _ip_last_seen.items() if ts >= cutoff and port in ports}
 
 
-def _heartbeat_ages() -> dict[str, tuple[float, int]]:
-    """{rustdesk_id: (seconds since last heartbeat, active conns)} for reporting
-    devices — or {} when the reporting channel looks down as a whole."""
+def _heartbeat_ages(tenant_id: int) -> dict[str, tuple[float, int]]:
+    """{rustdesk_id: (seconds since last heartbeat, active conns)} for the
+    tenant's reporting devices — or {} when its reporting channel looks down
+    as a whole."""
     try:
         conn = get_db()
         rows = conn.execute(
             """SELECT rustdesk_id, active_conns,
                       (julianday('now') - julianday(heartbeat_at)) * 86400 AS age
-               FROM device_info WHERE heartbeat_at IS NOT NULL"""
+               FROM device_info WHERE tenant_id = ? AND heartbeat_at IS NOT NULL""",
+            (tenant_id,),
         ).fetchall()
         conn.close()
     except Exception:
@@ -105,8 +137,9 @@ def _heartbeat_ages() -> dict[str, tuple[float, int]]:
     return ages
 
 
-def _compute_status() -> dict[str, str]:
-    """Return {rustdesk_id: "online"|"in session"|"offline"} for every known peer.
+def _compute_status(tenant: Tenant) -> dict[str, str]:
+    """Return {rustdesk_id: "online"|"in session"|"offline"} for every peer
+    registered with the tenant's relay.
 
     Two signals are combined:
     1. Live TCP connection to an hbbs port seen within the grace period.
@@ -119,12 +152,13 @@ def _compute_status() -> dict[str, str]:
     Shared by the /devices/status endpoint and the offline-notification
     background watcher below, so both agree on what "online" means.
     """
-    online_ips = _online_ips()
+    online_ips = _online_ips(tenant)
     status: dict[str, str] = {}
-    heartbeats = _heartbeat_ages()
+    heartbeats = _heartbeat_ages(tenant.id)
 
-    if HBBS_DB_PATH.exists():
-        conn = sqlite3.connect(HBBS_DB_PATH)
+    hbbs_db = tenant.hbbs_db
+    if hbbs_db is not None and hbbs_db.exists():
+        conn = sqlite3.connect(f"file:{hbbs_db}?mode=ro", uri=True, timeout=2)
         conn.row_factory = sqlite3.Row
         now_utc = datetime.now(timezone.utc)
 
@@ -160,32 +194,32 @@ def _compute_status() -> dict[str, str]:
 
 
 @router.get("/devices/status")
-async def devices_status(_: dict = Depends(require_auth)):
-    return JSONResponse({"devices": _compute_status()})
+async def devices_status(_: dict = Depends(require_auth), tenant: Tenant = Depends(get_tenant)):
+    return JSONResponse({"devices": _compute_status(tenant)})
 
 
 # ── Offline-transition watcher ──────────────────────────────────────────────
 # Fires a "device_offline" notification the first time a device that was
 # online drops to offline. Runs on its own, coarser interval (separate from
 # the 1s ss-poll above) so a brief blip doesn't fire a notification, and so
-# it's decoupled from the per-request /devices/status calls.
+# it's decoupled from the per-request /devices/status calls. Each tenant has
+# its own baseline, events and recipients.
 
 _OFFLINE_WATCH_INTERVAL_S = 30
 
-_prev_status: dict[str, str] | None = None
+_prev_status: dict[int, dict[str, str]] = {}
 _status_lock = threading.Lock()
 
 
-def _check_offline_transitions() -> None:
-    global _prev_status
-    current = _compute_status()
+def _check_offline_transitions(tenant: Tenant) -> None:
+    current = _compute_status(tenant)
 
     with _status_lock:
-        previous = _prev_status
-        _prev_status = current
+        previous = _prev_status.get(tenant.id)
+        _prev_status[tenant.id] = current
 
     if previous is None:
-        return  # first run — nothing to compare against yet
+        return  # first run for this tenant — nothing to compare against yet
 
     newly_offline = [
         rid for rid, state in current.items()
@@ -200,7 +234,7 @@ def _check_offline_transitions() -> None:
     if not newly_offline and not newly_online:
         return
 
-    devices, _ = get_devices()
+    devices, _ = get_devices(tenant)
     by_id = {d["rustdesk_id"]: d for d in devices}
 
     conn = get_db()
@@ -208,8 +242,8 @@ def _check_offline_transitions() -> None:
         info = by_id.get(rid)
         if info is None:
             continue  # hidden/unregistered — nothing useful to notify about
-        log_event(conn, "device_offline", rid, "")
-        fire_notification("device_offline", {
+        log_event(conn, "device_offline", rid, "", tenant_id=tenant.id)
+        fire_notification(tenant.id, "device_offline", {
             "rustdesk_id": rid,
             "label": info.get("label") or "",
             "group_name": info.get("group_name") or "",
@@ -219,8 +253,8 @@ def _check_offline_transitions() -> None:
         info = by_id.get(rid)
         if info is None:
             continue
-        log_event(conn, "device_online", rid, "")
-        fire_notification("device_online", {
+        log_event(conn, "device_online", rid, "", tenant_id=tenant.id)
+        fire_notification(tenant.id, "device_online", {
             "rustdesk_id": rid,
             "name": info.get("label") or info.get("hostname") or rid,
             "label": info.get("label") or "",
@@ -241,32 +275,36 @@ def _check_offline_transitions() -> None:
 # update it rather than re-notifying, and deleted (hidden) devices keep their
 # row so they don't re-announce either.
 
-def _check_new_devices() -> None:
-    peers = get_hbbs_peers()
+def _check_new_devices(tenant: Tenant) -> None:
+    peers = get_hbbs_peers(tenant)
     if not peers:
         return
+    tid = tenant.id
     conn = get_db()
-    known = {r[0] for r in conn.execute("SELECT rustdesk_id FROM devices WHERE rustdesk_id IS NOT NULL")}
+    known = {r[0] for r in conn.execute(
+        "SELECT rustdesk_id FROM devices WHERE tenant_id = ? AND rustdesk_id IS NOT NULL", (tid,))}
     new = [rid for rid in peers if rid not in known]
     announced = []
     for rid in new:
         # OR IGNORE: a tech may have just created the row from the UI.
         if conn.execute(
-            "INSERT OR IGNORE INTO devices (rustdesk_id, status, last_seen) VALUES (?, 'registered', datetime('now'))",
-            (rid,),
+            "INSERT OR IGNORE INTO devices (tenant_id, rustdesk_id, status, last_seen)"
+            " VALUES (?, ?, 'registered', datetime('now'))",
+            (tid, rid),
         ).rowcount:
-            log_event(conn, "device_registered", rid, "")
+            log_event(conn, "device_registered", rid, "", tenant_id=tid)
             announced.append(rid)
     conn.commit()
     info = {}
     if announced:
         marks = ",".join("?" * len(announced))
         info = {r["rustdesk_id"]: r for r in conn.execute(
-            f"SELECT rustdesk_id, hostname FROM device_info WHERE rustdesk_id IN ({marks})", announced)}
+            f"SELECT rustdesk_id, hostname FROM device_info WHERE tenant_id = ? AND rustdesk_id IN ({marks})",
+            (tid, *announced))}
     conn.close()
     for rid in announced:
         peer = peers[rid]
-        fire_notification("device_registered", {
+        fire_notification(tid, "device_registered", {
             "rustdesk_id": rid,
             "label": "",
             "group_name": "",
@@ -276,21 +314,24 @@ def _check_new_devices() -> None:
         })
 
 
-def _bg_offline_watch_loop() -> None:
+def watch_tenant_devices(tenant: Tenant) -> None:
+    """One pass of the device watcher for one tenant."""
     from app.routes.client_api import sweep_stale_sessions
+    for step in (_check_new_devices, _check_offline_transitions, sweep_stale_sessions):
+        try:
+            step(tenant)   # sweep: close sessions for devices that vanished mid-session
+        except Exception:
+            pass
+
+
+def _bg_offline_watch_loop() -> None:
     while True:
         try:
-            _check_new_devices()
+            tenants = active_tenants()
         except Exception:
-            pass
-        try:
-            _check_offline_transitions()
-        except Exception:
-            pass
-        try:
-            sweep_stale_sessions()   # close sessions for devices that vanished mid-session
-        except Exception:
-            pass
+            tenants = []
+        for tenant in tenants:
+            watch_tenant_devices(tenant)
         time.sleep(_OFFLINE_WATCH_INTERVAL_S)
 
 
@@ -301,20 +342,25 @@ threading.Thread(target=_bg_offline_watch_loop, daemon=True, name="device-offlin
 async def api_devices_list(
     group: str = "",
     _: dict = Depends(require_auth),
+    tenant: Tenant = Depends(get_tenant),
 ):
     """Return the full device list as JSON for dynamic table updates."""
-    devices, peer_count = get_devices(group)
+    devices, peer_count = get_devices(tenant, group)
     return JSONResponse({"devices": devices, "peer_count": peer_count})
 
 
 @router.post("/devices/{rid}/connect")
-async def api_device_connect(rid: str, current_user: dict = Depends(require_auth)):
+async def api_device_connect(rid: str, current_user: dict = Depends(require_auth),
+                             tenant: Tenant = Depends(get_tenant)):
     """Record that this dashboard user clicked Connect/Terminal on a device,
     so the session that follows can be credited to them."""
     conn = get_db()
+    if not device_known(conn, tenant, rid):
+        conn.close()
+        return JSONResponse({"ok": False, "error": "Device not found."}, status_code=404)
     conn.execute(
-        "INSERT INTO connect_clicks (rustdesk_id, user_email) VALUES (?, ?)",
-        (rid, current_user["email"]),
+        "INSERT INTO connect_clicks (tenant_id, rustdesk_id, user_email) VALUES (?, ?, ?)",
+        (tenant.id, rid, current_user["email"]),
     )
     conn.commit()
     conn.close()
@@ -322,11 +368,13 @@ async def api_device_connect(rid: str, current_user: dict = Depends(require_auth
 
 
 @router.get("/devices/{rid}/sessions")
-async def api_device_sessions(rid: str, _: dict = Depends(require_auth)):
-    """Recent remote-access sessions for one device (for the detail modal)."""
+async def api_device_sessions(rid: str, current_user: dict = Depends(require_auth)):
+    """Recent remote-access sessions for one device (for the detail modal).
+    Another tenant's id just has no sessions here."""
     from app.routes.sessions import _LIST_SQL, _row
     conn = get_db()
-    rows = conn.execute(_LIST_SQL.format(where="WHERE s.rustdesk_id = ?"), (rid, 20)).fetchall()
+    rows = conn.execute(_LIST_SQL.format(where="AND s.rustdesk_id = ?"),
+                        (current_user["tenant_id"], rid, 20)).fetchall()
     conn.close()
     return JSONResponse({"sessions": [
         {k: s[k] for k in ("started_at", "ended_at", "active", "duration_str",
@@ -386,21 +434,24 @@ def _uptime_s() -> float | None:
         return None
 
 
-def _container_states() -> dict[str, dict]:
-    """{'hbbs': {running, status}, 'hbbr': {...}} from `docker ps`."""
-    names = ("hbbs", "hbbr")
-    states = {n: {"running": False, "status": "not running"} for n in names}
+def _container_states(tenant: Tenant) -> dict[str, dict]:
+    """{'hbbs': {running, status}, 'hbbr': {...}} for the tenant's relay
+    containers (named in its compose file), from `docker ps`."""
+    from setup_server import relay_containers
+    relay = dataclasses.asdict(tenant.relay) if tenant.relay else None
+    by_role = {("hbbr" if "hbbr" in n else "hbbs"): n for n in relay_containers(relay)}
+    states = {role: {"running": False, "status": "not running"} for role in ("hbbs", "hbbr")}
     try:
         result = subprocess.run(
             ["docker", "ps", "--format", "{{.Names}}\t{{.Status}}"],
             capture_output=True, text=True, timeout=3,
         )
     except Exception:
-        return {n: {"running": None, "status": "unknown"} for n in names}
-    for line in result.stdout.splitlines():
-        name, _, status = line.partition("\t")
-        if name in states:
-            states[name] = {"running": True, "status": status or "running"}
+        return {role: {"running": None, "status": "unknown"} for role in states}
+    running = dict(line.partition("\t")[::2] for line in result.stdout.splitlines())
+    for role, name in by_role.items():
+        if name in running:
+            states[role] = {"running": True, "status": running[name] or "running"}
     return states
 
 
@@ -408,7 +459,21 @@ def _pct(used: float, total: float) -> float | None:
     return round(used / total * 100, 1) if total else None
 
 
-def _server_health() -> dict:
+def _server_health(tenant: Tenant) -> dict:
+    """The tenant's relay containers and devices online. Host metrics (CPU,
+    memory, disk) are about our server, so only the provider home gets them."""
+    status = _compute_status(tenant)
+    online = sum(1 for s in status.values() if s in ("online", "in session"))
+    tenant_part = {
+        "containers": _container_states(tenant),
+        "devices": {"online": online, "total": len(status)},
+    }
+    if not is_provider_home(tenant):
+        return tenant_part
+    return {**_host_health(tenant.id), **tenant_part}
+
+
+def _host_health(tenant_id: int) -> dict:
     mem = _meminfo()
     mem_total = mem.get("MemTotal", 0)
     mem_used = mem_total - mem.get("MemAvailable", 0) if mem_total else 0
@@ -425,12 +490,9 @@ def _server_health() -> dict:
     except Exception:
         load1 = load5 = load15 = None
 
-    status = _compute_status()
-    online = sum(1 for s in status.values() if s in ("online", "in session"))
-
     try:
         from app.notifications import get_settings
-        s = get_settings()
+        s = get_settings(tenant_id)
         mem_thr = int(s.get("mem_threshold") or 90)
         disk_thr = int(s.get("disk_threshold") or 90)
     except Exception:
@@ -449,8 +511,6 @@ def _server_health() -> dict:
         "disk": ({"used_b": du.used, "total_b": du.total, "pct": _pct(du.used, du.total)}
                  if du else {"used_b": 0, "total_b": 0, "pct": None}),
         "uptime_s": _uptime_s(),
-        "containers": _container_states(),
-        "devices": {"online": online, "total": len(status)},
         "thresholds": {"mem": mem_thr, "disk": disk_thr},
     }
 
@@ -460,15 +520,16 @@ _cpu_percent()
 
 
 @router.get("/server/health")
-async def server_health(_: dict = Depends(require_auth)):
-    return JSONResponse(_server_health())
+async def server_health(_: dict = Depends(require_auth), tenant: Tenant = Depends(get_tenant)):
+    return JSONResponse(_server_health(tenant))
 
 
 # ── Server-health threshold alerts ───────────────────────────────────────────
 # Periodically evaluates memory/disk against the thresholds configured on the
 # Notifications page and fires the memory_high / disk_high email alerts. Edge-
 # triggered with a short debounce and hysteresis so a crossing emails once, not
-# every cycle, and a brief spike doesn't alert.
+# every cycle, and a brief spike doesn't alert. This is about our server, so
+# it uses (and alerts) the provider home tenant only (TENANCY.md).
 
 _HEALTH_ALERT_INTERVAL_S = 60
 _HEALTH_ALERT_DEBOUNCE = 2     # consecutive readings above threshold before firing
@@ -490,27 +551,21 @@ def _fmt_b(b: int) -> str:
     return f"{gb:.1f} GB" if gb >= 1 else f"{round(b / 1e6)} MB"
 
 
-def _server_host() -> str:
-    try:
-        conn = get_db()
-        row = conn.execute("SELECT host FROM server_config WHERE id = 1").fetchone()
-        conn.close()
-        return row["host"] if row else ""
-    except Exception:
-        return ""
-
-
 def _check_health_thresholds() -> None:
     from app.notifications import get_settings, fire_notification
+    from app.tenancy import LEGACY_TENANT_ID, load_tenant
 
-    settings = get_settings()
+    home = load_tenant(LEGACY_TENANT_ID)
+    if home is None:
+        return
+    settings = get_settings(home.id)
     if not settings.get("enabled"):
         for st in _health_alert_state.values():   # don't fire a stale crossing on re-enable
             st["count"] = 0
         return
 
-    health = _server_health()
-    host = _server_host() or "—"
+    health = _host_health(home.id)
+    host = (home.relay.host if home.relay else "") or "—"
     mem = health.get("mem") or {}
     disk = health.get("disk") or {}
 
@@ -528,7 +583,7 @@ def _check_health_thresholds() -> None:
         if not st["high"] and st["count"] >= _HEALTH_ALERT_DEBOUNCE:
             st["high"] = True
             # fire_notification also honours the per-event on/off toggle and SMTP config.
-            fire_notification(event, {
+            fire_notification(home.id, event, {
                 "pct": pct, "pct_str": f"{pct}%", "threshold": threshold,
                 "usage": usage, "host": host,
             })

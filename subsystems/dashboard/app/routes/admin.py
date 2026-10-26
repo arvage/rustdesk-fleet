@@ -12,9 +12,16 @@ from app.permissions import (
     require_perm, user_can, all_roles, CAPABILITIES, CAP_KEYS, slugify_role_key, invalidate_cache,
 )
 import json
+from app.routes.home import require_provider_home
+from app.tenancy import Tenant, get_tenant, is_provider_home
 from app.templates_config import templates
 
 router = APIRouter()
+
+# Backups and code signing are provider-level (TENANCY.md): their routes
+# exist only on the provider home tenant and 404 everywhere else. Their
+# audit events have no tenant (tenant_id NULL).
+_PROVIDER = [Depends(require_provider_home)]
 
 
 def _set_flash(request: Request, type_: str, msg: str) -> None:
@@ -40,12 +47,13 @@ def _backup_cfg() -> dict:
     return dict(row)
 
 
-def _restart_relay() -> tuple[bool, str]:
-    """Restart the hbbs/hbbr containers. Returns (ok, message)."""
+def _restart_relay(tenant: Tenant) -> tuple[bool, str]:
+    """Restart the tenant's hbbs/hbbr containers. Returns (ok, message)."""
+    if tenant.relay is None:
+        return False, "This account has no relay yet."
     try:
-        from setup_server import COMPOSE_DST
         r = subprocess.run(
-            ["docker", "compose", "-f", str(COMPOSE_DST), "restart"],
+            ["docker", "compose", "-f", tenant.relay.compose_path, "restart"],
             capture_output=True, text=True, timeout=120,
         )
         if r.returncode != 0:
@@ -58,24 +66,29 @@ def _restart_relay() -> tuple[bool, str]:
 # ── Admin landing ────────────────────────────────────────────────────────────
 
 @router.get("/admin", response_class=HTMLResponse)
-async def admin_home(request: Request, current_user: dict = Depends(require_auth)):
+async def admin_home(request: Request, current_user: dict = Depends(require_auth),
+                     tenant: Tenant = Depends(get_tenant)):
     _require_admin(current_user)
+    tid = tenant.id
     conn = get_db()
-    device_count = conn.execute("SELECT COUNT(*) FROM devices WHERE hidden = 0").fetchone()[0]
-    active_sessions = conn.execute("SELECT COUNT(*) FROM device_sessions WHERE ended_at IS NULL").fetchone()[0]
-    log_count = conn.execute("SELECT COUNT(*) FROM provisioning_events").fetchone()[0]
-    user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    device_count = conn.execute("SELECT COUNT(*) FROM devices WHERE tenant_id = ? AND hidden = 0", (tid,)).fetchone()[0]
+    active_sessions = conn.execute(
+        "SELECT COUNT(*) FROM device_sessions WHERE tenant_id = ? AND ended_at IS NULL", (tid,)).fetchone()[0]
+    log_count = conn.execute("SELECT COUNT(*) FROM provisioning_events WHERE tenant_id = ?", (tid,)).fetchone()[0]
+    user_count = conn.execute("SELECT COUNT(*) FROM users WHERE tenant_id = ?", (tid,)).fetchone()[0]
     conn.close()
-    try:
-        import backup
-        backup_status = backup.status()
-    except Exception:
-        backup_status = None
-    try:
-        import backup_remote
-        offsite = backup_remote.offsite_summary()
-    except Exception:
-        offsite = None
+    backup_status = offsite = None
+    if is_provider_home(tenant):
+        try:
+            import backup
+            backup_status = backup.status()
+        except Exception:
+            backup_status = None
+        try:
+            import backup_remote
+            offsite = backup_remote.offsite_summary()
+        except Exception:
+            offsite = None
     return templates.TemplateResponse(
         request, "admin.html",
         {
@@ -86,6 +99,7 @@ async def admin_home(request: Request, current_user: dict = Depends(require_auth
             "user_count": user_count,
             "backup_status": backup_status,
             "offsite": offsite,
+            "provider_home": is_provider_home(tenant),
         },
     )
 
@@ -119,13 +133,14 @@ def _save_signing_form(form, current_user: dict) -> dict:
     # Secret: blank submission preserves the stored value.
     if f("azure_client_secret"):
         conn.execute("UPDATE signing_config SET azure_client_secret=? WHERE id=1", (f("azure_client_secret"),))
-    log_event(conn, "signing_config_updated", f"enabled={enabled} auto_sign={auto_sign}", current_user["email"])
+    log_event(conn, "signing_config_updated", f"enabled={enabled} auto_sign={auto_sign}", current_user["email"],
+              tenant_id=None)
     conn.commit()
     conn.close()
     return _signing_cfg()
 
 
-@router.get("/admin/signing", response_class=HTMLResponse)
+@router.get("/admin/signing", response_class=HTMLResponse, dependencies=_PROVIDER)
 async def admin_signing(request: Request, current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_system")
     cfg = _signing_cfg()
@@ -143,7 +158,7 @@ async def admin_signing(request: Request, current_user: dict = Depends(require_a
     )
 
 
-@router.post("/admin/signing/save")
+@router.post("/admin/signing/save", dependencies=_PROVIDER)
 async def admin_signing_save(request: Request, current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_system")
     cfg = _save_signing_form(await request.form(), current_user)
@@ -153,7 +168,7 @@ async def admin_signing_save(request: Request, current_user: dict = Depends(requ
     return RedirectResponse("/admin/signing", status_code=303)
 
 
-@router.post("/admin/signing/test")
+@router.post("/admin/signing/test", dependencies=_PROVIDER)
 async def admin_signing_test(request: Request, current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_system")
     cfg = _save_signing_form(await request.form(), current_user)
@@ -169,7 +184,7 @@ async def admin_signing_test(request: Request, current_user: dict = Depends(requ
     return RedirectResponse("/admin/signing", status_code=303)
 
 
-@router.get("/admin/backup", response_class=HTMLResponse)
+@router.get("/admin/backup", response_class=HTMLResponse, dependencies=_PROVIDER)
 async def admin_backup(request: Request, current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_backups")
     cfg = _backup_cfg()
@@ -238,13 +253,14 @@ def _save_backup_form(form, current_user: dict) -> dict:
         conn.execute("UPDATE backup_config SET s3_secret_key=? WHERE id=1", (f("s3_secret_key"),))
     if f("passphrase"):
         conn.execute("UPDATE backup_config SET passphrase=? WHERE id=1", (f("passphrase"),))
-    log_event(conn, "backup_config_updated", f"provider={provider} enabled={is_enabled}", current_user["email"])
+    log_event(conn, "backup_config_updated", f"provider={provider} enabled={is_enabled}", current_user["email"],
+              tenant_id=None)
     conn.commit()
     conn.close()
     return _backup_cfg()
 
 
-@router.post("/admin/backup/save")
+@router.post("/admin/backup/save", dependencies=_PROVIDER)
 async def admin_backup_save(request: Request, current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_backups")
     cfg = _save_backup_form(await request.form(), current_user)
@@ -263,7 +279,7 @@ async def admin_backup_save(request: Request, current_user: dict = Depends(requi
     return RedirectResponse("/admin/backup", status_code=303)
 
 
-@router.post("/admin/backup/test")
+@router.post("/admin/backup/test", dependencies=_PROVIDER)
 async def admin_backup_test(request: Request, current_user: dict = Depends(require_auth)):
     """Save what's on screen, then test it — so the test matches the form and nothing is lost."""
     require_perm(current_user, "manage_backups")
@@ -282,7 +298,7 @@ async def admin_backup_test(request: Request, current_user: dict = Depends(requi
     return RedirectResponse("/admin/backup", status_code=303)
 
 
-@router.post("/admin/backup/run")
+@router.post("/admin/backup/run", dependencies=_PROVIDER)
 def admin_backup_run(request: Request, current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_backups")
     import backup
@@ -304,6 +320,7 @@ def admin_backup_restore(
     archive: str = Form(""),
     confirm: str = Form(""),
     current_user: dict = Depends(require_auth),
+    tenant: Tenant = Depends(require_provider_home),
 ):
     require_perm(current_user, "manage_backups")
     import backup
@@ -317,18 +334,19 @@ def admin_backup_restore(
         return RedirectResponse("/admin/backup", status_code=303)
 
     res = backup.restore(backup.BACKUP_DIR / archive)
-    return _finish_restore(request, res, archive, current_user)
+    return _finish_restore(request, tenant, res, archive, current_user)
 
 
-def _finish_restore(request: Request, res: dict, label: str, current_user: dict) -> RedirectResponse:
+def _finish_restore(request: Request, tenant: Tenant, res: dict, label: str, current_user: dict) -> RedirectResponse:
     """Shared tail of local + off-site restore: restart relay, audit, flash."""
     if not res["ok"]:
         _set_flash(request, "error", f"Restore failed: {res['error']} (a safety snapshot was taken: {res.get('safety')})")
         return RedirectResponse("/admin/backup", status_code=303)
 
-    ok, relay_msg = _restart_relay()
+    ok, relay_msg = _restart_relay(tenant)
     log_event_conn = get_db()
-    log_event(log_event_conn, "backup_restored", f"{label} -> {', '.join(res['applied'])}", current_user["email"])
+    log_event(log_event_conn, "backup_restored", f"{label} -> {', '.join(res['applied'])}", current_user["email"],
+              tenant_id=None)
     log_event_conn.commit()
     log_event_conn.close()
     msg = (f"Restored {', '.join(res['applied'])} from {label}. "
@@ -345,6 +363,7 @@ def admin_backup_offsite_restore(
     archive: str = Form(""),
     confirm: str = Form(""),
     current_user: dict = Depends(require_auth),
+    tenant: Tenant = Depends(require_provider_home),
 ):
     """Download an off-site archive to a temp dir and restore from it."""
     require_perm(current_user, "manage_backups")
@@ -370,10 +389,10 @@ def admin_backup_offsite_restore(
         res = backup.restore(path)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    return _finish_restore(request, res, f"off-site {archive}", current_user)
+    return _finish_restore(request, tenant, res, f"off-site {archive}", current_user)
 
 
-@router.post("/admin/backup/offsite/delete")
+@router.post("/admin/backup/offsite/delete", dependencies=_PROVIDER)
 def admin_backup_offsite_delete(
     request: Request,
     archive: str = Form(""),
@@ -396,14 +415,14 @@ def admin_backup_offsite_delete(
         _set_flash(request, "error", f"Could not delete {archive}: {type(e).__name__}: {str(e)[:250]}.{hint}")
         return RedirectResponse("/admin/backup", status_code=303)
     conn = get_db()
-    log_event(conn, "backup_offsite_deleted", archive, current_user["email"])
+    log_event(conn, "backup_offsite_deleted", archive, current_user["email"], tenant_id=None)
     conn.commit()
     conn.close()
     _set_flash(request, "success", f"Deleted {archive} from the off-site destination. Local copies are unchanged.")
     return RedirectResponse("/admin/backup", status_code=303)
 
 
-@router.post("/admin/backup/delete")
+@router.post("/admin/backup/delete", dependencies=_PROVIDER)
 def admin_backup_delete(
     request: Request,
     archive: str = Form(""),
@@ -427,7 +446,7 @@ def admin_backup_delete(
         _set_flash(request, "error", f"Could not delete {archive}: {e.strerror or e}")
         return RedirectResponse("/admin/backup", status_code=303)
     conn = get_db()
-    log_event(conn, "backup_deleted", archive, current_user["email"])
+    log_event(conn, "backup_deleted", archive, current_user["email"], tenant_id=None)
     conn.commit()
     conn.close()
     left = len(names) - 1
@@ -438,7 +457,7 @@ def admin_backup_delete(
     return RedirectResponse("/admin/backup", status_code=303)
 
 
-@router.get("/admin/backup/download")
+@router.get("/admin/backup/download", dependencies=_PROVIDER)
 def admin_backup_download(archive: str = "", current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_backups")
     import backup
@@ -452,9 +471,10 @@ def admin_backup_download(archive: str = "", current_user: dict = Depends(requir
 # ── Maintenance tools ────────────────────────────────────────────────────────
 
 @router.get("/admin/export/devices.csv")
-async def admin_export_devices(current_user: dict = Depends(require_auth)):
+async def admin_export_devices(current_user: dict = Depends(require_auth),
+                               tenant: Tenant = Depends(get_tenant)):
     require_perm(current_user, "manage_devices")
-    devices, _ = get_devices()
+    devices, _ = get_devices(tenant)
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["rustdesk_id", "label", "group", "hostname", "user", "os", "os_build",
@@ -474,14 +494,16 @@ async def admin_export_devices(current_user: dict = Depends(require_auth)):
 
 
 @router.post("/admin/restart-relay")
-def admin_restart_relay(request: Request, confirm: str = Form(""), current_user: dict = Depends(require_auth)):
+def admin_restart_relay(request: Request, confirm: str = Form(""), current_user: dict = Depends(require_auth),
+                        tenant: Tenant = Depends(get_tenant)):
     require_perm(current_user, "manage_system")
     if confirm != "yes":
         _set_flash(request, "error", "Restart not confirmed.")
         return RedirectResponse("/admin", status_code=303)
-    ok, msg = _restart_relay()
+    ok, msg = _restart_relay(tenant)
     conn = get_db()
-    log_event(conn, "relay_restarted" if ok else "relay_restart_failed", msg, current_user["email"])
+    log_event(conn, "relay_restarted" if ok else "relay_restart_failed", msg, current_user["email"],
+              tenant_id=tenant.id)
     conn.commit()
     conn.close()
     _set_flash(request, "success" if ok else "error", msg if ok else f"Restart failed: {msg}")
@@ -495,12 +517,14 @@ def admin_logs_prune(request: Request, days: str = Form("90"), current_user: dic
         d = max(1, min(3650, int(days)))
     except (TypeError, ValueError):
         d = 90
+    tid = current_user["tenant_id"]
     conn = get_db()
     cur = conn.execute(
-        "DELETE FROM provisioning_events WHERE created_at < datetime('now', ?)", (f"-{d} days",)
+        "DELETE FROM provisioning_events WHERE tenant_id = ? AND created_at < datetime('now', ?)",
+        (tid, f"-{d} days"),
     )
     removed = cur.rowcount or 0
-    log_event(conn, "logs_pruned", f"removed={removed} older_than_days={d}", current_user["email"])
+    log_event(conn, "logs_pruned", f"removed={removed} older_than_days={d}", current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
     _set_flash(request, "success", f"Pruned {removed} log entr{'y' if removed == 1 else 'ies'} older than {d} days.")
@@ -509,9 +533,10 @@ def admin_logs_prune(request: Request, days: str = Form("90"), current_user: dic
 
 # ── Roles & permissions ──────────────────────────────────────────────────────
 
-def _role_usage() -> dict:
+def _role_usage(tenant_id: int) -> dict:
     conn = get_db()
-    rows = conn.execute("SELECT role, COUNT(*) AS n FROM users GROUP BY role").fetchall()
+    rows = conn.execute("SELECT role, COUNT(*) AS n FROM users WHERE tenant_id = ? GROUP BY role",
+                        (tenant_id,)).fetchall()
     conn.close()
     return {r["role"]: r["n"] for r in rows}
 
@@ -519,8 +544,8 @@ def _role_usage() -> dict:
 @router.get("/admin/roles", response_class=HTMLResponse)
 async def admin_roles(request: Request, current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_roles")
-    roles = all_roles()
-    usage = _role_usage()
+    roles = all_roles(current_user["tenant_id"])
+    usage = _role_usage(current_user["tenant_id"])
     # Stable display order: system roles first (admin, tech, viewer), then custom.
     order = ["admin", "tech", "viewer"]
     keys = [k for k in order if k in roles] + sorted(k for k in roles if k not in order)
@@ -559,16 +584,17 @@ def admin_role_create(
         _set_flash(request, "error", "Enter a role name.")
         return RedirectResponse("/admin/roles", status_code=303)
     chosen = [p for p in perms if p in CAP_KEYS]
+    tid = current_user["tenant_id"]
     conn = get_db()
-    if conn.execute("SELECT 1 FROM roles WHERE key = ?", (key,)).fetchone():
+    if conn.execute("SELECT 1 FROM roles WHERE tenant_id = ? AND key = ?", (tid, key)).fetchone():
         conn.close()
         _set_flash(request, "error", f"A role with key '{key}' already exists.")
         return RedirectResponse("/admin/roles", status_code=303)
     conn.execute(
-        "INSERT INTO roles (key, name, description, permissions, is_system) VALUES (?, ?, ?, ?, 0)",
-        (key, name, description.strip(), json.dumps(chosen)),
+        "INSERT INTO roles (tenant_id, key, name, description, permissions, is_system) VALUES (?, ?, ?, ?, ?, 0)",
+        (tid, key, name, description.strip(), json.dumps(chosen)),
     )
-    log_event(conn, "role_created", f"{key} perms={chosen}", current_user["email"])
+    log_event(conn, "role_created", f"{key} perms={chosen}", current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
     invalidate_cache()
@@ -586,21 +612,23 @@ def admin_role_update(
     current_user: dict = Depends(require_auth),
 ):
     require_perm(current_user, "manage_roles")
-    if key == "admin":
-        _set_flash(request, "error", "The Administrator role always has every permission and can't be edited.")
-        return RedirectResponse("/admin/roles", status_code=303)
+    tid = current_user["tenant_id"]
     conn = get_db()
-    row = conn.execute("SELECT key FROM roles WHERE key = ?", (key,)).fetchone()
+    row = conn.execute("SELECT key FROM roles WHERE tenant_id = ? AND key = ?", (tid, key)).fetchone()
     if not row:
         conn.close()
         _set_flash(request, "error", "Role not found.")
         return RedirectResponse("/admin/roles", status_code=303)
+    if key == "admin":
+        conn.close()
+        _set_flash(request, "error", "The Administrator role always has every permission and can't be edited.")
+        return RedirectResponse("/admin/roles", status_code=303)
     chosen = [p for p in perms if p in CAP_KEYS]
     conn.execute(
-        "UPDATE roles SET name = ?, description = ?, permissions = ? WHERE key = ?",
-        (name.strip() or key, description.strip(), json.dumps(chosen), key),
+        "UPDATE roles SET name = ?, description = ?, permissions = ? WHERE tenant_id = ? AND key = ?",
+        (name.strip() or key, description.strip(), json.dumps(chosen), tid, key),
     )
-    log_event(conn, "role_updated", f"{key} perms={chosen}", current_user["email"])
+    log_event(conn, "role_updated", f"{key} perms={chosen}", current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
     invalidate_cache()
@@ -611,8 +639,9 @@ def admin_role_update(
 @router.post("/admin/roles/{key}/delete")
 def admin_role_delete(request: Request, key: str, current_user: dict = Depends(require_auth)):
     require_perm(current_user, "manage_roles")
+    tid = current_user["tenant_id"]
     conn = get_db()
-    row = conn.execute("SELECT is_system FROM roles WHERE key = ?", (key,)).fetchone()
+    row = conn.execute("SELECT is_system FROM roles WHERE tenant_id = ? AND key = ?", (tid, key)).fetchone()
     if not row:
         conn.close()
         _set_flash(request, "error", "Role not found.")
@@ -621,13 +650,13 @@ def admin_role_delete(request: Request, key: str, current_user: dict = Depends(r
         conn.close()
         _set_flash(request, "error", "Built-in roles can't be deleted.")
         return RedirectResponse("/admin/roles", status_code=303)
-    in_use = conn.execute("SELECT COUNT(*) FROM users WHERE role = ?", (key,)).fetchone()[0]
+    in_use = conn.execute("SELECT COUNT(*) FROM users WHERE tenant_id = ? AND role = ?", (tid, key)).fetchone()[0]
     if in_use:
         conn.close()
         _set_flash(request, "error", f"{in_use} user(s) still have this role — reassign them first.")
         return RedirectResponse("/admin/roles", status_code=303)
-    conn.execute("DELETE FROM roles WHERE key = ?", (key,))
-    log_event(conn, "role_deleted", key, current_user["email"])
+    conn.execute("DELETE FROM roles WHERE tenant_id = ? AND key = ?", (tid, key))
+    log_event(conn, "role_deleted", key, current_user["email"], tenant_id=tid)
     conn.commit()
     conn.close()
     invalidate_cache()

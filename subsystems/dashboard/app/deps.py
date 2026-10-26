@@ -15,13 +15,14 @@ def get_db(path=None) -> sqlite3.Connection:
     return conn
 
 
-def get_hbbs_peers() -> dict[str, dict]:
-    """Return {rustdesk_id: {ip, registered_at}} from the hbbs peer DB.
-    Returns an empty dict if the DB doesn't exist or can't be read."""
-    if not HBBS_DB_PATH.exists():
+def get_hbbs_peers(tenant) -> dict[str, dict]:
+    """Return {rustdesk_id: {ip, registered_at}} from the tenant's hbbs peer
+    DB. Returns an empty dict if the DB doesn't exist or can't be read."""
+    path = tenant.hbbs_db
+    if path is None or not path.exists():
         return {}
     try:
-        conn = sqlite3.connect(HBBS_DB_PATH)
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
         conn.row_factory = sqlite3.Row
         result: dict[str, dict] = {}
         for r in conn.execute("SELECT id, info, created_at FROM peer"):
@@ -81,8 +82,8 @@ def _pretty_hw(cpu: str, memory: str) -> dict:
     return {"cpu_name": cpu_name, "cores": cores, "ram": ram}
 
 
-def get_device_info() -> dict[str, dict]:
-    """Return {rustdesk_id: display-ready details} for devices that report in."""
+def get_device_info(tenant_id: int) -> dict[str, dict]:
+    """Return {rustdesk_id: display-ready details} for the tenant's devices that report in."""
     try:
         from generate_installer import get_pinned_version
         pinned = _version_tuple(get_pinned_version())
@@ -92,7 +93,8 @@ def get_device_info() -> dict[str, dict]:
     conn = get_db()
     rows = conn.execute(
         """SELECT *, (julianday('now') - julianday(heartbeat_at)) * 86400 AS hb_age
-           FROM device_info"""
+           FROM device_info WHERE tenant_id = ?""",
+        (tenant_id,),
     ).fetchall()
     conn.close()
 
@@ -136,19 +138,22 @@ def label_sort_key(device: dict) -> tuple:
     return (not label, label, device.get("rustdesk_id") or "")
 
 
-def get_devices(group: str = "") -> tuple[list[dict], int]:
-    """Return (devices_list, peer_count), optionally filtered by group slug.
+def get_devices(tenant, group: str = "") -> tuple[list[dict], int]:
+    """Return (devices_list, peer_count) for one tenant, optionally filtered
+    by group slug.
 
-    Merges hbbs peer registry with fleet DB.  Devices marked hidden=1 in
-    the fleet DB are suppressed even if they still appear in the peer table.
+    Merges the tenant's hbbs peer registry with its fleet rows. Devices
+    marked hidden=1 are suppressed even if they still appear in the peer table.
     """
-    peers = get_hbbs_peers()
+    peers = get_hbbs_peers(tenant)
 
     conn = get_db()
     fleet_rows = conn.execute(
         """SELECT d.*, cg.display_name AS group_name, cg.slug AS group_slug
            FROM devices d
-           LEFT JOIN client_groups cg ON cg.id = d.group_id"""
+           LEFT JOIN client_groups cg ON cg.id = d.group_id AND cg.tenant_id = d.tenant_id
+           WHERE d.tenant_id = ?""",
+        (tenant.id,),
     ).fetchall()
     conn.close()
 
@@ -179,7 +184,7 @@ def get_devices(group: str = "") -> tuple[list[dict], int]:
     if group:
         devices = [d for d in devices if d["group_slug"] == group]
 
-    info = get_device_info()
+    info = get_device_info(tenant.id)
     for d in devices:
         merge_device_info(d, info)
 
@@ -187,12 +192,25 @@ def get_devices(group: str = "") -> tuple[list[dict], int]:
     return devices, len(peers)
 
 
-def log_event(conn, event: str, detail: str = "", user_email: str = "") -> None:
+def log_event(conn, event: str, detail: str = "", user_email: str = "", *, tenant_id: int | None) -> None:
+    """Append to the audit log. tenant_id is required; None marks a provider
+    event that belongs to no tenant (backups, signing). Commits."""
     conn.execute(
-        "INSERT INTO provisioning_events (event, detail, user_email) VALUES (?, ?, ?)",
-        (event, detail or None, user_email or None),
+        "INSERT INTO provisioning_events (tenant_id, event, detail, user_email) VALUES (?, ?, ?, ?)",
+        (tenant_id, event, detail or None, user_email or None),
     )
     conn.commit()
+
+
+def device_known(conn, tenant, rustdesk_id: str) -> bool:
+    """Whether a RustDesk id belongs to this tenant: it has a fleet row, or
+    it is registered with the tenant's own relay. Anything else is treated
+    exactly like a device that doesn't exist."""
+    if conn.execute(
+        "SELECT 1 FROM devices WHERE tenant_id = ? AND rustdesk_id = ?", (tenant.id, rustdesk_id)
+    ).fetchone():
+        return True
+    return rustdesk_id in get_hbbs_peers(tenant)
 
 
 def run_migrations(db_path=None) -> None:
@@ -468,18 +486,8 @@ def run_migrations(db_path=None) -> None:
             created_at   TEXT NOT NULL DEFAULT (datetime('now'))
         );
     """)
-    # Seed the built-in roles once (idempotent). Imported lazily to avoid a
-    # circular import at module load.
-    import json as _json
-    from app.permissions import SYSTEM_ROLES
-    for key, spec in SYSTEM_ROLES.items():
-        perms = "*" if spec["perms"] == "*" else _json.dumps(spec["perms"])
-        conn.execute(
-            "INSERT OR IGNORE INTO roles (key, name, description, permissions, is_system)"
-            " VALUES (?, ?, ?, ?, 1)",
-            (key, spec["name"], spec["description"], perms),
-        )
     conn.commit()
+    # Built-in roles are seeded per tenant after the tenancy migration below.
 
     # Public installer download links sent to clients (idempotent)
     conn.executescript("""
@@ -572,9 +580,12 @@ def run_migrations(db_path=None) -> None:
     """)
     conn.commit()
 
-    # Tenancy: tenants, their relays and their web domains (TENANCY.md). The
-    # current deployment is tenant #1.
-    from app.tenant_migration import seed_legacy_tenant
-    seed_legacy_tenant(conn, str(HBBS_DB_PATH))
+    # Tenancy (TENANCY.md): the current deployment becomes tenant #1 and every
+    # tenant-owned table gets a tenant_id. One transaction; a no-op once done.
+    from app.tenant_migration import migrate, seed_tenant
+    migrate(conn, str(HBBS_DB_PATH))
+    for (tenant_id,) in conn.execute("SELECT id FROM tenants").fetchall():
+        seed_tenant(conn, tenant_id)
+    conn.commit()
 
     conn.close()

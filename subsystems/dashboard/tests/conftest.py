@@ -31,7 +31,7 @@ sys.path[:0] = [str(DASH_DIR), str(SINGLE_TENANT_DIR)]
 import bcrypt  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import auth, ratelimit, tenancy  # noqa: E402
+from app import auth, permissions, ratelimit, tenancy  # noqa: E402
 from app.deps import get_db, run_migrations  # noqa: E402
 from app.main import app  # noqa: E402
 from app.routes import client_api  # noqa: E402
@@ -67,7 +67,8 @@ def fresh_state():
 
     ratelimit.reset()
     tenancy.invalidate_cache()
-    auth._setup_done = False
+    permissions.invalidate_cache()
+    auth._setup_done.clear()
     client_api._peer_cache = {}
     client_api._peer_cache_at = 0.0
     client_api._peer_read_at = 0.0
@@ -84,17 +85,17 @@ def client() -> TestClient:
     return new_client()
 
 
-def create_user(email: str, role: str, password: str = PASSWORD) -> dict:
+def create_user(email: str, role: str, password: str = PASSWORD, tenant_id: int = 1) -> dict:
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=4)).decode()
     conn = get_db()
     cur = conn.execute(
-        "INSERT INTO users (email, display_name, role, password_hash) VALUES (?, ?, ?, ?)",
-        (email, email.split("@")[0], role, pw_hash),
+        "INSERT INTO users (tenant_id, email, display_name, role, password_hash) VALUES (?, ?, ?, ?, ?)",
+        (tenant_id, email, email.split("@")[0], role, pw_hash),
     )
     conn.commit()
     user_id = cur.lastrowid
     conn.close()
-    return {"id": user_id, "email": email, "password": password}
+    return {"id": user_id, "email": email, "password": password, "tenant_id": tenant_id}
 
 
 @pytest.fixture
@@ -150,3 +151,137 @@ def db_rows(sql: str, *params) -> list:
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     return rows
+
+
+# ── Two tenants (tests for tenant isolation) ─────────────────────────────────
+
+HOST_B = "b.rds.example.com"
+
+
+def _hbbs_db(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.unlink(missing_ok=True)
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE peer (id TEXT PRIMARY KEY, uuid BLOB, info TEXT, created_at TEXT)")
+    conn.commit()
+    conn.close()
+
+
+def add_tenant(tenant_id: int, slug: str, host: str, status: str = "active") -> Path:
+    """A tenant with a relay (own hbbs database) and one web domain. Returns
+    the hbbs database path."""
+    from app.tenant_migration import seed_tenant
+    hbbs = DATA_DIR / "tenants" / str(tenant_id) / "data" / "db_v2.sqlite3"
+    _hbbs_db(hbbs)
+    conn = get_db()
+    conn.execute("INSERT INTO tenants (id, slug, display_name, status) VALUES (?, ?, ?, ?)",
+                 (tenant_id, slug, slug.title(), status))
+    conn.execute(
+        "INSERT INTO relays (tenant_id, host, hbbs_port, hbbr_port, pubkey, data_dir, compose_path, hbbs_db_path, status)"
+        " VALUES (?, ?, 21125, 21127, ?, ?, ?, ?, 'active')",
+        (tenant_id, f"relay-{slug}.example.com", f"PUBKEY{tenant_id}", str(hbbs.parent),
+         str(hbbs.parent.parent / "docker-compose.yml"), str(hbbs)),
+    )
+    conn.execute("INSERT INTO tenant_domains (tenant_id, hostname, kind, is_primary) VALUES (?, ?, 'provider_subdomain', 1)",
+                 (tenant_id, host))
+    seed_tenant(conn, tenant_id)
+    conn.commit()
+    conn.close()
+    tenancy.invalidate_cache()
+    return hbbs
+
+
+def add_peer_to(hbbs: Path, rustdesk_id: str, uuid: bytes) -> None:
+    conn = sqlite3.connect(hbbs)
+    conn.execute("INSERT INTO peer (id, uuid, info, created_at) VALUES (?, ?, '{\"ip\": \"198.51.100.7\"}', datetime('now'))",
+                 (rustdesk_id, uuid))
+    conn.commit()
+    conn.close()
+
+
+def populate(tenant_id: int, hbbs: Path, tag: str) -> dict:
+    """One of everything for a tenant, each row marked with `tag` so a test
+    can tell whose data a response shows. Returns the ids."""
+    rid = {"a": "100000001", "b": "200000002"}.get(tag, "300000003")
+    uuid = f"uuid-{tag}".encode()
+    add_peer_to(hbbs, rid, uuid)
+    admin_user = create_user(f"admin@{tag}.example.com", "admin", tenant_id=tenant_id)
+    tech_user = create_user(f"tech@{tag}.example.com", "tech", tenant_id=tenant_id)
+    conn = get_db()
+    gid = conn.execute(
+        "INSERT INTO client_groups (tenant_id, slug, display_name, unattended_password, brand_app_name)"
+        " VALUES (?, ?, ?, 'pw', ?)",
+        (tenant_id, f"group-{tag}", f"Group-{tag.upper()}-secret", f"App {tag}"),
+    ).lastrowid
+    conn.execute("INSERT INTO devices (tenant_id, rustdesk_id, group_id, label, status) VALUES (?, ?, ?, ?, 'registered')",
+                 (tenant_id, rid, gid, f"Device-{tag.upper()}-secret"))
+    conn.execute("INSERT INTO device_info (tenant_id, rustdesk_id, hostname, heartbeat_at, sysinfo_at)"
+                 " VALUES (?, ?, ?, datetime('now'), datetime('now'))",
+                 (tenant_id, rid, f"HOST-{tag.upper()}-secret"))
+    sid = conn.execute("INSERT INTO device_sessions (tenant_id, rustdesk_id, conn_ref, peer_id, peer_name)"
+                       " VALUES (?, ?, 'c1', '555', ?)", (tenant_id, rid, f"Peer-{tag.upper()}-secret")).lastrowid
+    conn.execute("INSERT INTO device_file_transfers (tenant_id, rustdesk_id, session_id, direction, file_count, nonce, path)"
+                 " VALUES (?, ?, ?, 0, 1, 'n1', ?)", (tenant_id, rid, sid, f"C:/Files-{tag.upper()}-secret"))
+    out_dir = tenancy.tenant_files_dir(tenant_id) / "installers"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    inst_file = out_dir / f"RemoteSupport-group-{tag}-1.4.9-linux.sh"
+    inst_file.write_text(f"#!/bin/sh\n# installer {tag}\n")
+    iid = conn.execute(
+        "INSERT INTO installers (tenant_id, group_id, platform, rustdesk_version, status, unsigned_path, sha256_unsigned)"
+        " VALUES (?, ?, 'linux', '1.4.9', 'built', ?, 'abc')", (tenant_id, gid, str(inst_file))).lastrowid
+    token = f"token-{tag}-" + "x" * 20
+    lid = conn.execute("INSERT INTO download_links (tenant_id, token, group_id, note) VALUES (?, ?, ?, ?)",
+                       (tenant_id, token, gid, f"Note-{tag.upper()}-secret")).lastrowid
+    dgid = conn.execute("INSERT INTO dynamic_groups (tenant_id, name, rules) VALUES (?, ?, ?)",
+                        (tenant_id, f"Dyn-{tag.upper()}-secret",
+                         json.dumps([{"field": "hostname", "op": "contains", "value": "HOST"}]))).lastrowid
+    conn.execute("INSERT INTO roles (tenant_id, key, name, permissions) VALUES (?, ?, ?, '[]')",
+                 (tenant_id, f"role_{tag}", f"Role-{tag.upper()}-secret"))
+    cred = conn.execute("INSERT INTO webauthn_credentials (tenant_id, user_id, credential_id, public_key, nickname)"
+                        " VALUES (?, ?, ?, x'00', ?)",
+                        (tenant_id, tech_user["id"], f"Y3JlZC0{tag}", f"Key-{tag.upper()}-secret")).lastrowid
+    conn.execute("INSERT INTO user_group_access (tenant_id, user_id, group_id) VALUES (?, ?, ?)",
+                 (tenant_id, tech_user["id"], gid))
+    conn.execute("INSERT INTO email_templates (tenant_id, key, subject) VALUES (?, 'device_offline', ?)",
+                 (tenant_id, f"Subject-{tag.upper()}-secret"))
+    conn.execute("INSERT INTO notification_settings (tenant_id, enabled, smtp_host, to_addrs) VALUES (?, 0, ?, ?)",
+                 (tenant_id, f"smtp-{tag}.example.com", f"ops@{tag}.example.com"))
+    conn.execute("INSERT INTO provisioning_events (tenant_id, event, detail) VALUES (?, 'group_created', ?)",
+                 (tenant_id, f"Event-{tag.upper()}-secret"))
+    conn.commit()
+    conn.close()
+    return {"tenant_id": tenant_id, "admin": admin_user, "tech": tech_user, "group_id": gid,
+            "group_slug": f"group-{tag}", "rid": rid, "uuid": uuid, "installer_id": iid,
+            "installer_file": inst_file.name, "link_id": lid, "token": token, "dynamic_group_id": dgid,
+            "role_key": f"role_{tag}", "cred_id": cred, "user_id": tech_user["id"], "session_id": sid,
+            "hbbs": hbbs, "secret": f"{tag.upper()}-secret"}
+
+
+@pytest.fixture
+def two_tenants() -> dict:
+    """Tenant A = #1 on HOST (the migrated deployment), tenant B = #2 on HOST_B,
+    each with its own relay, users, groups, devices and everything else."""
+    a = populate(1, HBBS_DB, "a")
+    hbbs_b = add_tenant(2, "globex", HOST_B)
+    b = populate(2, hbbs_b, "b")
+    return {"a": a, "b": b}
+
+
+def signed_in_at(user: dict, host: str) -> TestClient:
+    c = new_client(host)
+    r = login(c, user)
+    assert r.status_code == 303 and r.headers["location"] == "/", r.text[:300]
+    return c
+
+
+def all_routes() -> list[tuple[str, str]]:
+    """[(method, path)] for every API route in the app, however the routers
+    are nested (FastAPI 0.138 wraps included routers, so app.routes alone
+    doesn't list them)."""
+    from fastapi.routing import APIRoute, iter_route_contexts
+    out = []
+    for ctx in iter_route_contexts(app.routes):
+        if isinstance(ctx.route, APIRoute):
+            for method in sorted(ctx.methods or ()):
+                out.append((method, ctx.path))
+    return out

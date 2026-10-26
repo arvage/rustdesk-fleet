@@ -18,16 +18,19 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from app import paths
 from app.auth import require_auth
 from app.deps import get_db, log_event
 from app.notifications import fire_notification, send_download_link_email
 from app.permissions import require_perm
+from app.tenancy import Tenant, get_tenant, tenant_files_dir
 from app.templates_config import _localtime, templates
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-OUTPUT_DIR = paths.INSTALLERS_DIR
+
+def installers_dir(tenant_id: int) -> Path:
+    """A tenant's built installers (tenant #1: <data dir>/installers)."""
+    return tenant_files_dir(tenant_id) / "installers"
 
 # Expiry choices offered in the UI → hours (None = never expires)
 EXPIRY_OPTIONS: dict[str, int | None] = {
@@ -93,20 +96,20 @@ def link_state(link) -> str:
     return "active"
 
 
-def latest_installers(conn, group_id: int) -> list[dict]:
-    """Latest successfully built installer per platform for a group."""
+def latest_installers(conn, tenant_id: int, group_id: int) -> list[dict]:
+    """Latest successfully built installer per platform for one of the tenant's groups."""
     rows = conn.execute(
         """SELECT * FROM installers
-           WHERE id IN (
+           WHERE tenant_id = ? AND id IN (
                SELECT MAX(id) FROM installers
-               WHERE group_id = ? AND status IN ('built', 'signed')
+               WHERE tenant_id = ? AND group_id = ? AND status IN ('built', 'signed')
                GROUP BY platform
            )""",
-        (group_id,),
+        (tenant_id, tenant_id, group_id),
     ).fetchall()
     result = []
     for r in rows:
-        path = _installer_file(r)
+        path = _installer_file(tenant_id, r)
         if path is None:
             continue
         info = PLATFORM_INFO.get(r["platform"], {"label": r["platform"], "os": "", "order": 9})
@@ -115,12 +118,14 @@ def latest_installers(conn, group_id: int) -> list[dict]:
     return result
 
 
-def _installer_file(row) -> Path | None:
-    """Resolve the file to serve for an installer row (signed preferred), or None."""
+def _installer_file(tenant_id: int, row) -> Path | None:
+    """Resolve the file to serve for an installer row (signed preferred), or
+    None. Only files inside the tenant's own installers directory count."""
+    out_dir = installers_dir(tenant_id).resolve()
     for col in ("signed_path", "unsigned_path"):
         if row[col]:
             candidate = Path(row[col]).resolve()
-            if candidate.parent == OUTPUT_DIR.resolve() and candidate.exists():
+            if candidate.parent == out_dir and candidate.exists():
                 return candidate
     return None
 
@@ -128,17 +133,19 @@ def _installer_file(row) -> Path | None:
 def _email_link(request: Request, conn, link_id: int, to_email: str, recipient_name: str,
                 message: str, current_user: dict) -> tuple[bool, str]:
     """Email an active link to a client and record who it went to."""
+    tid = current_user["tenant_id"]
     link = conn.execute(
         """SELECT dl.*, cg.display_name AS group_name, cg.slug AS group_slug
-           FROM download_links dl JOIN client_groups cg ON cg.id = dl.group_id
-           WHERE dl.id = ?""",
-        (link_id,),
+           FROM download_links dl JOIN client_groups cg ON cg.id = dl.group_id AND cg.tenant_id = dl.tenant_id
+           WHERE dl.id = ? AND dl.tenant_id = ?""",
+        (link_id, tid),
     ).fetchone()
     if link is None or link_state(link) != "active":
         return False, "That link is no longer active."
 
     url = f"{str(request.base_url).rstrip('/')}/d/{link['token']}"
     ok, err = send_download_link_email(
+        tid,
         to_email=to_email,
         recipient_name=recipient_name,
         group_name=link["group_name"],
@@ -150,11 +157,12 @@ def _email_link(request: Request, conn, link_id: int, to_email: str, recipient_n
     )
     if ok:
         conn.execute(
-            "UPDATE download_links SET emailed_to = ?, emailed_at = datetime('now') WHERE id = ?",
-            (to_email, link_id),
+            "UPDATE download_links SET emailed_to = ?, emailed_at = datetime('now') WHERE id = ? AND tenant_id = ?",
+            (to_email, link_id, tid),
         )
         log_event(conn, "download_link_emailed",
-                  f"group={link['group_slug']} link_id={link_id} to={to_email}", current_user["email"])
+                  f"group={link['group_slug']} link_id={link_id} to={to_email}", current_user["email"],
+                  tenant_id=tid)
     return ok, err
 
 
@@ -173,6 +181,13 @@ async def link_create(
     current_user: dict = Depends(require_auth),
 ):
     require_perm(current_user, "manage_groups")
+    tid = current_user["tenant_id"]
+    conn = get_db()
+    group = conn.execute("SELECT id FROM client_groups WHERE tenant_id = ? AND slug = ?", (tid, slug)).fetchone()
+    conn.close()
+    if group is None:
+        _set_flash(request, "error", "Group not found.")
+        return RedirectResponse("/groups", status_code=303)
     email_to = email_to.strip()
     if email_to and not EMAIL_RE.match(email_to):
         _set_flash(request, "error", f"'{email_to}' doesn't look like a valid email address.")
@@ -193,20 +208,15 @@ async def link_create(
             return RedirectResponse(f"/groups/{slug}#download-links", status_code=303)
 
     conn = get_db()
-    group = conn.execute("SELECT id FROM client_groups WHERE slug = ?", (slug,)).fetchone()
-    if group is None:
-        conn.close()
-        _set_flash(request, "error", "Group not found.")
-        return RedirectResponse("/groups", status_code=303)
-
     token = secrets.token_urlsafe(24)
     cur = conn.execute(
-        """INSERT INTO download_links (token, group_id, note, expires_at, max_uses, created_by)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (token, group["id"], note.strip() or None, expires_at, uses, current_user["email"]),
+        """INSERT INTO download_links (tenant_id, token, group_id, note, expires_at, max_uses, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (tid, token, group["id"], note.strip() or None, expires_at, uses, current_user["email"]),
     )
     link_id = cur.lastrowid
-    log_event(conn, "download_link_created", f"group={slug} expiry={expiry} max_uses={uses or '∞'}", current_user["email"])
+    log_event(conn, "download_link_created", f"group={slug} expiry={expiry} max_uses={uses or '∞'}",
+              current_user["email"], tenant_id=tid)
 
     request.session["new_link_token"] = token
     if email_to:
@@ -232,20 +242,22 @@ async def link_email(
     current_user: dict = Depends(require_auth),
 ):
     require_perm(current_user, "manage_groups")
-    email_to = email_to.strip()
-    if not EMAIL_RE.match(email_to):
-        _set_flash(request, "error", f"'{email_to}' doesn't look like a valid email address.")
-        return RedirectResponse(f"/groups/{slug}#download-links", status_code=303)
-
+    tid = current_user["tenant_id"]
     conn = get_db()
     owned = conn.execute(
         """SELECT 1 FROM download_links
-           WHERE id = ? AND group_id = (SELECT id FROM client_groups WHERE slug = ?)""",
-        (link_id, slug),
+           WHERE id = ? AND tenant_id = ?
+             AND group_id = (SELECT id FROM client_groups WHERE tenant_id = ? AND slug = ?)""",
+        (link_id, tid, tid, slug),
     ).fetchone()
     if owned is None:
         conn.close()
         _set_flash(request, "error", "Link not found.")
+        return RedirectResponse(f"/groups/{slug}#download-links", status_code=303)
+    email_to = email_to.strip()
+    if not EMAIL_RE.match(email_to):
+        conn.close()
+        _set_flash(request, "error", f"'{email_to}' doesn't look like a valid email address.")
         return RedirectResponse(f"/groups/{slug}#download-links", status_code=303)
 
     ok, err = _email_link(request, conn, link_id, email_to, recipient_name.strip(), message.strip(), current_user)
@@ -265,14 +277,17 @@ async def link_revoke(
     current_user: dict = Depends(require_auth),
 ):
     require_perm(current_user, "manage_groups")
+    tid = current_user["tenant_id"]
     conn = get_db()
     cur = conn.execute(
         """UPDATE download_links SET revoked = 1
-           WHERE id = ? AND group_id = (SELECT id FROM client_groups WHERE slug = ?)""",
-        (link_id, slug),
+           WHERE id = ? AND tenant_id = ?
+             AND group_id = (SELECT id FROM client_groups WHERE tenant_id = ? AND slug = ?)""",
+        (link_id, tid, tid, slug),
     )
     if cur.rowcount:
-        log_event(conn, "download_link_revoked", f"group={slug} link_id={link_id}", current_user["email"])
+        log_event(conn, "download_link_revoked", f"group={slug} link_id={link_id}", current_user["email"],
+                  tenant_id=tid)
         _set_flash(request, "success", "Link revoked — it can no longer be used.")
     else:
         conn.close()
@@ -284,13 +299,15 @@ async def link_revoke(
 
 # ── Public: client-facing download page (no login) ───────────────────────────
 
-def _load_public_link(conn, token: str):
+def _load_public_link(conn, tenant: Tenant, token: str):
+    """A download link by token, on its own tenant's host only: another
+    tenant's token is "not found" here."""
     return conn.execute(
         """SELECT dl.*, cg.display_name AS group_name, cg.slug AS group_slug, cg.status AS group_status
            FROM download_links dl
-           JOIN client_groups cg ON cg.id = dl.group_id
-           WHERE dl.token = ?""",
-        (token,),
+           JOIN client_groups cg ON cg.id = dl.group_id AND cg.tenant_id = dl.tenant_id
+           WHERE dl.token = ? AND dl.tenant_id = ?""",
+        (token, tenant.id),
     ).fetchone()
 
 
@@ -305,9 +322,9 @@ def _unavailable(request: Request, reason: str) -> HTMLResponse:
 
 
 @router.get("/d/{token}", response_class=HTMLResponse)
-async def public_download_page(request: Request, token: str):
+async def public_download_page(request: Request, token: str, tenant: Tenant = Depends(get_tenant)):
     conn = get_db()
-    link = _load_public_link(conn, token)
+    link = _load_public_link(conn, tenant, token)
     if link is None:
         conn.close()
         return _unavailable(request, "not_found")
@@ -316,7 +333,7 @@ async def public_download_page(request: Request, token: str):
         conn.close()
         return _unavailable(request, state if state != "active" else "revoked")
 
-    installers = latest_installers(conn, link["group_id"])
+    installers = latest_installers(conn, tenant.id, link["group_id"])
     conn.close()
 
     resp = templates.TemplateResponse(
@@ -336,14 +353,16 @@ async def public_download_page(request: Request, token: str):
 
 
 @router.get("/d/{token}/{platform}")
-async def public_download_file(request: Request, token: str, platform: str):
+async def public_download_file(request: Request, token: str, platform: str,
+                               tenant: Tenant = Depends(get_tenant)):
     conn = get_db()
-    link = _load_public_link(conn, token)
+    link = _load_public_link(conn, tenant, token)
     if link is None or link["group_status"] != "active":
         conn.close()
         return _unavailable(request, "not_found" if link is None else "revoked")
 
-    installer = next((i for i in latest_installers(conn, link["group_id"]) if i["platform"] == platform), None)
+    installer = next((i for i in latest_installers(conn, tenant.id, link["group_id"])
+                      if i["platform"] == platform), None)
     if installer is None:
         conn.close()
         return RedirectResponse(f"/d/{token}", status_code=303)
@@ -353,10 +372,10 @@ async def public_download_file(request: Request, token: str, platform: str):
     cur = conn.execute(
         """UPDATE download_links
            SET use_count = use_count + 1, last_used_at = datetime('now')
-           WHERE id = ? AND revoked = 0
+           WHERE id = ? AND tenant_id = ? AND revoked = 0
              AND (expires_at IS NULL OR expires_at > datetime('now'))
              AND (max_uses IS NULL OR use_count < max_uses)""",
-        (link["id"],),
+        (link["id"], tenant.id),
     )
     conn.commit()
     if not cur.rowcount:
@@ -367,10 +386,11 @@ async def public_download_file(request: Request, token: str, platform: str):
     log_event(
         conn, "installer_downloaded",
         f"group={link['group_slug']} platform={platform} link_id={link['id']} ip={client_ip}", "",
+        tenant_id=tenant.id,
     )
     conn.close()
 
-    fire_notification("installer_downloaded", {
+    fire_notification(tenant.id, "installer_downloaded", {
         "group_name": link["group_name"],
         "platform": installer["label"],
         "version": installer["rustdesk_version"],
@@ -380,7 +400,7 @@ async def public_download_file(request: Request, token: str, platform: str):
     })
 
     resp = FileResponse(
-        path=str(OUTPUT_DIR / installer["filename"]),
+        path=str(installers_dir(tenant.id) / installer["filename"]),
         filename=installer["filename"],
         media_type="application/octet-stream",
     )

@@ -27,6 +27,7 @@ INACTIVE_THRESHOLDS = [(30, "30 days"), (90, "90 days"), (180, "6 months"), (365
 
 @dataclass
 class ReportContext:
+    tenant: object      # app.tenancy.Tenant: every report is about one tenant
     group: str = ""     # client group slug, "__none__" = unassigned, "" = all
     days: int = 30
     _devices: list | None = field(default=None, repr=False)
@@ -35,7 +36,7 @@ class ReportContext:
     @property
     def devices(self) -> list[dict]:
         if self._devices is None:
-            devs = fleet_snapshot()
+            devs = fleet_snapshot(self.tenant)
             if self.group == "__none__":
                 devs = [d for d in devs if not d.get("group_id")]
             elif self.group:
@@ -49,7 +50,7 @@ class ReportContext:
         if self.group == "":
             return self.devices
         if self._all is None:
-            self._all = fleet_snapshot()
+            self._all = fleet_snapshot(self.tenant)
         return self._all
 
     @property
@@ -397,8 +398,8 @@ def _sessions(ctx: ReportContext) -> list[dict]:
     rows = conn.execute(
         """SELECT rustdesk_id, started_at, ended_at,
                   CAST((julianday(COALESCE(ended_at, 'now')) - julianday(started_at)) * 86400 AS INTEGER) AS secs
-           FROM device_sessions WHERE started_at >= datetime('now', ?)""",
-        (ctx.since,),
+           FROM device_sessions WHERE tenant_id = ? AND started_at >= datetime('now', ?)""",
+        (ctx.tenant.id, ctx.since),
     ).fetchall()
     conn.close()
     ids = ctx.device_ids
@@ -409,11 +410,14 @@ def r_client_groups(ctx: ReportContext) -> dict:
     devs = ctx.devices
     sessions = _sessions(ctx)
     by_rid = {d["rustdesk_id"]: d for d in devs}
+    tid = ctx.tenant.id
     conn = get_db()
-    groups = conn.execute("SELECT id, slug, display_name, created_at FROM client_groups ORDER BY display_name").fetchall()
+    groups = conn.execute("SELECT id, slug, display_name, created_at FROM client_groups WHERE tenant_id = ?"
+                          " ORDER BY display_name", (tid,)).fetchall()
     installers = Counter(r["group_id"] for r in conn.execute(
-        "SELECT group_id FROM installers WHERE status IN ('built','signed')").fetchall())
-    links = conn.execute("SELECT group_id, revoked, expires_at, max_uses, use_count FROM download_links").fetchall()
+        "SELECT group_id FROM installers WHERE tenant_id = ? AND status IN ('built','signed')", (tid,)).fetchall())
+    links = conn.execute("SELECT group_id, revoked, expires_at, max_uses, use_count FROM download_links"
+                         " WHERE tenant_id = ?", (tid,)).fetchall()
     conn.close()
     from app.routes.links import link_state
     active_links = Counter(r["group_id"] for r in links if link_state(r) == "active")
@@ -529,16 +533,21 @@ def r_installers(ctx: ReportContext) -> dict:
         pinned = get_pinned_version()
     except Exception:
         pinned = ""
+    tid = ctx.tenant.id
     conn = get_db()
     rows = conn.execute(
         """SELECT cg.display_name, cg.slug, i.platform, i.rustdesk_version, i.status, i.created_at, i.signed_at
-           FROM installers i JOIN client_groups cg ON cg.id = i.group_id
-           WHERE i.id IN (SELECT MAX(id) FROM installers GROUP BY group_id, platform)
-           ORDER BY cg.display_name, i.platform"""
+           FROM installers i JOIN client_groups cg ON cg.id = i.group_id AND cg.tenant_id = i.tenant_id
+           WHERE i.tenant_id = ?
+             AND i.id IN (SELECT MAX(id) FROM installers WHERE tenant_id = ? GROUP BY group_id, platform)
+           ORDER BY cg.display_name, i.platform""",
+        (tid, tid),
     ).fetchall()
     links = conn.execute(
         """SELECT l.*, cg.display_name, cg.slug FROM download_links l
-           JOIN client_groups cg ON cg.id = l.group_id ORDER BY l.created_at DESC"""
+           JOIN client_groups cg ON cg.id = l.group_id AND cg.tenant_id = l.tenant_id
+           WHERE l.tenant_id = ? ORDER BY l.created_at DESC""",
+        (tid,),
     ).fetchall()
     conn.close()
     from app.routes.links import link_state
@@ -572,15 +581,19 @@ def r_installers(ctx: ReportContext) -> dict:
 
 
 def r_user_activity(ctx: ReportContext) -> dict:
+    tid = ctx.tenant.id
     conn = get_db()
     rows = conn.execute(
         """SELECT event, detail, user_email, created_at FROM provisioning_events
-           WHERE created_at >= datetime('now', ?) ORDER BY created_at DESC""",
-        (ctx.since,),
+           WHERE tenant_id = ? AND created_at >= datetime('now', ?) ORDER BY created_at DESC""",
+        (tid, ctx.since),
     ).fetchall()
-    users = conn.execute("SELECT email, display_name, role, auth_method, created_at FROM users ORDER BY email").fetchall()
-    passkeys = Counter(r["user_id"] for r in conn.execute("SELECT user_id FROM webauthn_credentials").fetchall())
-    user_ids = {r["email"]: r["id"] for r in conn.execute("SELECT id, email FROM users").fetchall()}
+    users = conn.execute("SELECT email, display_name, role, auth_method, created_at FROM users"
+                         " WHERE tenant_id = ? ORDER BY email", (tid,)).fetchall()
+    passkeys = Counter(r["user_id"] for r in conn.execute(
+        "SELECT user_id FROM webauthn_credentials WHERE tenant_id = ?", (tid,)).fetchall())
+    user_ids = {r["email"]: r["id"] for r in conn.execute(
+        "SELECT id, email FROM users WHERE tenant_id = ?", (tid,)).fetchall()}
     conn.close()
     by_user = defaultdict(lambda: {"n": 0, "last": ""})
     for r in rows:
