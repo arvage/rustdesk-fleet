@@ -175,7 +175,7 @@ map $request_method $rdf_auth_key {
     POST    $binary_remote_addr;
     default "";
 }
-limit_req_zone $rdf_auth_key zone=rdf_auth:10m rate=30r/m;
+limit_req_zone $rdf_auth_key zone=rdf_signin:10m rate=30r/m;
 
 server {
     listen 80;
@@ -199,7 +199,7 @@ server {
     # slash, or nginx and the app redirect each other in a loop) and
     # `location = /setup`. Don't limit the device API (/api/heartbeat etc.).
     location = /login {
-        limit_req        zone=rdf_auth burst=20 nodelay;
+        limit_req        zone=rdf_signin burst=20 nodelay;
         limit_req_status 429;
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host              $host;
@@ -285,6 +285,10 @@ token, rate limits):
 - The nginx rate limit is not applied by a `git pull`. Add the
   `map` and `limit_req_zone` lines and the three sign-in `location` blocks
   shown in Section 4 to your vhost, then `sudo nginx -t && sudo systemctl reload nginx`.
+  If your vhost already has a `rdf_auth` zone keyed on `$binary_remote_addr`,
+  replace it with the `rdf_signin` one rather than re-keying it: nginx won't
+  change an existing zone's key on reload. It keeps running the old config
+  and only logs an `[emerg]` line in `/var/log/nginx/error.log`.
 
 ## 5. First-run setup
 

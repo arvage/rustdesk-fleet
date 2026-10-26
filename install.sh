@@ -384,7 +384,7 @@ NGX
 dash_locations() {
   cat <<'NGX'
     location = /login {
-        limit_req        zone=rdf_auth burst=20 nodelay;
+        limit_req        zone=rdf_signin burst=20 nodelay;
         limit_req_status 429;
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host              $host;
@@ -396,7 +396,7 @@ dash_locations() {
     # No trailing slash: a proxied prefix ending in / makes nginx 301
     # /login/webauthn -> /login/webauthn/, and the app redirects back (loop).
     location ^~ /login/webauthn {
-        limit_req        zone=rdf_auth burst=20 nodelay;
+        limit_req        zone=rdf_signin burst=20 nodelay;
         limit_req_status 429;
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host              $host;
@@ -406,7 +406,7 @@ dash_locations() {
         proxy_read_timeout 60s;
     }
     location = /setup {
-        limit_req        zone=rdf_auth burst=20 nodelay;
+        limit_req        zone=rdf_signin burst=20 nodelay;
         limit_req_status 429;
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host              $host;
@@ -428,12 +428,15 @@ NGX
 
 # Only POSTs get a key, so only POSTs count: an empty key isn't limited.
 # Sized for a whole office signing in from one NAT IP at shift start (one
-# passkey sign-in is about 5 requests).
+# passkey sign-in is about 5 requests). The zone is "rdf_signin" because an
+# older vhost used "rdf_auth" keyed on the IP, and nginx refuses a reload
+# that changes an existing zone's key (it logs an [emerg] and keeps the old
+# config, even though nginx -t passes).
 AUTH_LIMIT_ZONE='map $request_method $rdf_auth_key {
     POST    $binary_remote_addr;
     default "";
 }
-limit_req_zone $rdf_auth_key zone=rdf_auth:10m rate=30r/m;'
+limit_req_zone $rdf_auth_key zone=rdf_signin:10m rate=30r/m;'
 
 write_http_vhost() {   # used as the base; certbot rewrites it for LE
   sudo tee "$VHOST" >/dev/null <<EOF

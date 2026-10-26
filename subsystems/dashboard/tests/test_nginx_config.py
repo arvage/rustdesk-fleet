@@ -40,8 +40,8 @@ def test_only_posts_are_keyed(tmp_path):
     assert "map $request_method $rdf_auth_key {" in conf
     assert "POST    $binary_remote_addr;" in conf
     assert 'default "";' in conf
-    assert "limit_req_zone $rdf_auth_key zone=rdf_auth:10m rate=30r/m;" in conf
-    assert conf.count("limit_req        zone=rdf_auth burst=20 nodelay;") == 3
+    assert "limit_req_zone $rdf_auth_key zone=rdf_signin:10m rate=30r/m;" in conf
+    assert conf.count("limit_req        zone=rdf_signin burst=20 nodelay;") == 3
     for loc in ("location = /login {", "location ^~ /login/webauthn {", "location = /setup {"):
         assert loc in conf
     # A trailing slash here makes nginx and the app redirect each other.
