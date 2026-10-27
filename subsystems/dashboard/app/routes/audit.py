@@ -80,9 +80,11 @@ def _events_scope(tenant: Tenant) -> str:
     (tenant #1) also sees provider events (tenant_id NULL: backups,
     signing), as it always has; no other tenant ever does. Pair it with the
     (tenant.id,) parameter."""
+    # Provider console actions about this tenant (source 'provider') are the
+    # provider's record, not the tenant's: they stay out of its Logs page.
     if is_provider_home(tenant):
-        return "(tenant_id = ? OR tenant_id IS NULL)"
-    return "tenant_id = ?"
+        return "(tenant_id = ? OR tenant_id IS NULL) AND source IS NOT 'provider'"
+    return "tenant_id = ? AND source IS NOT 'provider'"
 
 
 def _all_activity(conn, tenant: Tenant, include_deliveries: bool, hide_status: bool) -> list[dict]:

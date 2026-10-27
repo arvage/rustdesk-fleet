@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}RustDesk Fleet{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <script>
+  // Theme: 'light' | 'dark' | 'system' (follows the OS), saved per browser.
+  // Runs before the page paints so dark mode doesn't flash white.
+  (function () {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    function apply() {
+      var t = localStorage.getItem('rdf-theme') || 'system';
+      document.documentElement.dataset.theme = (t === 'dark' || (t === 'system' && mq.matches)) ? 'dark' : 'light';
+    }
+    apply();
+    mq.addEventListener('change', apply);
+    window.rdfApplyTheme = apply;
+  })();
+  </script>
+  <link rel="stylesheet" href="/static/style.css?v=5">
+</head>
+<body>
+<div class="shell">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <a class="sidebar-brand" href="/">
+      <div class="brand-icon">R</div>
+      <div>
+        <span class="brand-name">RustDesk Fleet</span>
+        <span class="brand-sub">Provider console</span>
+      </div>
+    </a>
+    <nav class="sidebar-nav">
+      {% macro item(href, label, active) %}<a href="{{ href }}" class="nav-item {% if active %}active{% endif %}">{{ label }}</a>{% endmacro %}
+      <div class="nav-section">
+        <div class="nav-label">Provider</div>
+        {{ item('/', 'Tenants', request.url.path == '/' or request.url.path.startswith('/tenants')) }}
+        {{ item('/relays', 'Relays', request.url.path.startswith('/relays')) }}
+        {{ item('/jobs', 'Jobs', request.url.path.startswith('/jobs')) }}
+        {{ item('/audit', 'Audit log', request.url.path == '/audit') }}
+      </div>
+      <div class="nav-section">
+        <div class="nav-label">Server</div>
+        {{ item('/health', 'Host health', request.url.path == '/health') }}
+        {{ item('/backup', 'Backups', request.url.path.startswith('/backup')) }}
+        {{ item('/signing', 'Code signing', request.url.path.startswith('/signing')) }}
+        {{ item('/client-version', 'Client version', request.url.path.startswith('/client-version')) }}
+        {{ item('/settings', 'Settings', request.url.path.startswith('/settings')) }}
+      </div>
+      <div class="nav-section" style="margin-bottom:0">
+        <div class="nav-label">Access</div>
+        {{ item('/admins', 'Provider admins', request.url.path.startswith('/admins')) }}
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="theme-switch" role="group" aria-label="Theme">
+        <button type="button" data-theme-choice="light" title="Light theme">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>Light
+        </button>
+        <button type="button" data-theme-choice="dark" title="Dark theme">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>Dark
+        </button>
+        <button type="button" data-theme-choice="system" title="Match your device's setting">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>Auto
+        </button>
+      </div>
+      {% if current_user %}
+      <div style="padding:10px 12px 8px;border-bottom:1px solid #1E293B;margin-bottom:4px">
+        <div style="font-size:12px;font-weight:600;color:#CBD5E1;line-height:1.3">{{ current_user.name }}</div>
+        <div style="font-size:10px;color:#475569;margin-top:2px;text-transform:uppercase;letter-spacing:.05em">Provider admin</div>
+      </div>
+      {% endif %}
+      <form method="post" action="/logout" style="margin:0">
+        <button type="submit" class="nav-item" style="color:#EF4444">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Sign out
+        </button>
+      </form>
+    </div>
+  </aside>
+
+  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
+
+  <!-- Main -->
+  <div class="main">
+    <header class="topbar">
+      <button class="sidebar-toggle" onclick="toggleSidebar()" aria-label="Open menu">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <span class="topbar-title">{% block page_title %}{% endblock %}</span>
+      <div class="topbar-right">{% block topbar_actions %}{% endblock %}</div>
+    </header>
+    <div class="content {% block content_class %}{% endblock %}">
+      {% set flash = get_flash(request) %}
+      {% if flash %}<div class="flash {{ flash.type }}">{{ flash.msg }}</div>{% endif %}
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+
+</div>
+<script>
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-backdrop').classList.toggle('open');
+}
+// ── Theme switcher ──────────────────────────────────────────────────────────
+(function () {
+  const buttons = document.querySelectorAll('[data-theme-choice]');
+  const mark = () => {
+    const t = localStorage.getItem('rdf-theme') || 'system';
+    buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeChoice === t)));
+  };
+  buttons.forEach(b => b.addEventListener('click', () => {
+    localStorage.setItem('rdf-theme', b.dataset.themeChoice);
+    window.rdfApplyTheme();
+    mark();
+  }));
+  mark();
+})();
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('open');
+}
+function copyText(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    const prev = btn.innerHTML;
+    btn.innerHTML = 'Copied!';
+    btn.style.color = '#10B981';
+    setTimeout(() => { btn.innerHTML = prev; btn.style.color = ''; }, 1500);
+  });
+}
+
+// ── Generic column sorting ───────────────────────────────────────────────────
+// Any <table class="js-sort"> gets every column header clickable to sort, except
+// empty headers (e.g. action columns) or ones marked data-nosort. A cell's sort
+// key is its data-val when present, else its text — parsed as a duration, a
+// number (with commas/units), or compared case-insensitively as text.
+// Pages with their own bespoke sorter (Devices, Client Groups list) don't use
+// this class, so they're left untouched.
+function rdfSortKey(raw) {
+  const s = String(raw).trim();
+  const dm = s.match(/^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?$/i);
+  if (dm && (dm[1] || dm[2] || dm[3])) {
+    return { n: (+dm[1] || 0) * 3600 + (+dm[2] || 0) * 60 + (+dm[3] || 0) };
+  }
+  const t = s.replace(/[,\s]/g, '').replace(/(gb|mb|kb|tb|%|cores?|devices?)$/i, '');
+  if (/^-?\d*\.?\d+$/.test(t) && t !== '') return { n: parseFloat(t) };
+  return { s: s.toLowerCase() };
+}
+function rdfCellVal(row, idx) {
+  const td = row.cells[idx];
+  if (!td) return '';
+  return (td.dataset && td.dataset.val != null) ? td.dataset.val : td.textContent.trim();
+}
+function rdfSortTable(table, idx) {
+  const body = table.tBodies[0];
+  if (!body) return;
+  const asc = !(String(table.dataset.sortCol) === String(idx) && table.dataset.sortAsc === '1');
+  table.dataset.sortCol = idx;
+  table.dataset.sortAsc = asc ? '1' : '0';
+  Array.from(table.tHead.rows[0].cells).forEach((h, i) => {
+    const ic = h.querySelector('.sort-icon');
+    if (!ic) return;
+    if (i === idx) { ic.textContent = asc ? '↑' : '↓'; h.style.color = 'var(--text-1)'; }
+    else { ic.textContent = '↕'; h.style.color = ''; }
+  });
+  const rows = Array.from(body.rows);
+  rows.sort((a, b) => {
+    const va = rdfSortKey(rdfCellVal(a, idx)), vb = rdfSortKey(rdfCellVal(b, idx));
+    let r;
+    if ('n' in va && 'n' in vb) r = va.n - vb.n;
+    else if ('n' in va) r = -1;            // numbers before text
+    else if ('n' in vb) r = 1;
+    else r = va.s.localeCompare(vb.s);
+    return asc ? r : -r;
+  });
+  rows.forEach(r => body.appendChild(r));
+}
+function rdfInitSortableTables() {
+  document.querySelectorAll('table.js-sort').forEach(table => {
+    const headRow = table.tHead && table.tHead.rows[0];
+    if (!headRow || !table.tBodies[0]) return;
+    Array.from(headRow.cells).forEach((th, idx) => {
+      if (th.hasAttribute('data-nosort') || th.textContent.trim() === '') return;
+      th.classList.add('sortable');
+      if (!th.querySelector('.sort-icon')) {
+        const ic = document.createElement('span');
+        ic.className = 'sort-icon';
+        ic.textContent = '↕';
+        th.appendChild(document.createTextNode(' '));
+        th.appendChild(ic);
+      }
+      th.addEventListener('click', () => rdfSortTable(table, idx));
+    });
+  });
+}
+document.addEventListener('DOMContentLoaded', rdfInitSortableTables);
+</script>
+</body>
+</html>

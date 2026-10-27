@@ -76,8 +76,9 @@ async def admin_home(request: Request, current_user: dict = Depends(require_auth
         "SELECT COUNT(*) FROM device_sessions WHERE tenant_id = ? AND ended_at IS NULL", (tid,)).fetchone()[0]
     # Same events the Logs page shows (the provider home also sees provider events).
     log_count = conn.execute(
-        "SELECT COUNT(*) FROM provisioning_events WHERE tenant_id = ?"
-        + (" OR tenant_id IS NULL" if is_provider_home(tenant) else ""), (tid,)).fetchone()[0]
+        "SELECT COUNT(*) FROM provisioning_events WHERE (tenant_id = ?"
+        + (" OR tenant_id IS NULL" if is_provider_home(tenant) else "") + ") AND source IS NOT 'provider'",
+        (tid,)).fetchone()[0]
     user_count = conn.execute("SELECT COUNT(*) FROM users WHERE tenant_id = ?", (tid,)).fetchone()[0]
     conn.close()
     backup_status = offsite = None

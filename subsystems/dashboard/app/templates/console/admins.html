@@ -1,0 +1,45 @@
+{% extends "console/base.html" %}
+{% block title %}Provider admins — Provider console{% endblock %}
+{% block page_title %}Provider admins{% endblock %}
+{% block content %}
+{% if new_link %}
+<div class="flash success" style="word-break:break-all">
+  One-time passkey enrollment link for {{ new_link.email }} (valid for 1 hour{% if new_link.emailed %}, also emailed{% endif %}):<br>
+  <code>{{ new_link.link }}</code>
+  <button class="btn-copy" onclick="copyText('{{ new_link.link }}', this)">Copy</button>
+</div>
+{% endif %}
+<div class="section">
+  <div class="table-wrap"><table>
+    <thead><tr><th>Name</th><th>Email</th><th>Passkeys</th><th>Last sign-in</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for a in admins %}
+      <tr>
+        <td>{{ a.display_name }}</td><td>{{ a.email }}</td><td>{{ a.passkeys }}</td>
+        <td>{{ a.last_sign_in_at | localtime if a.last_sign_in_at else "never" }}</td>
+        <td>{{ "disabled" if a.disabled_at else "active" }}</td>
+        <td style="white-space:nowrap">
+          {% if not a.disabled_at %}
+          <form method="post" action="/admins/{{ a.id }}/enroll-link" style="display:inline"><button class="btn btn-ghost btn-sm">New enrollment link</button></form>
+          {% if a.id != current_user.id %}
+          <form method="post" action="/admins/{{ a.id }}/disable" style="display:inline" onsubmit="return confirm('Disable {{ a.email }}?')"><button class="btn btn-ghost btn-sm" style="color:var(--danger)">Disable</button></form>
+          {% endif %}
+          {% else %}
+          <form method="post" action="/admins/{{ a.id }}/enable" style="display:inline"><button class="btn btn-ghost btn-sm">Enable</button></form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+<div class="section">
+  <h2>Invite a provider admin</h2>
+  <form method="post" action="/admins" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+    <label>Email<br><input type="email" name="email" required></label>
+    <label>Name<br><input name="display_name"></label>
+    <button class="btn btn-primary btn-sm">Send invitation</button>
+  </form>
+  <p class="text-muted text-sm">They get a one-time link (valid 1 hour) to create a passkey. Provider admins sign in with passkeys only.</p>
+</div>
+{% endblock %}

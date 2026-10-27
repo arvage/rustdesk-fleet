@@ -192,14 +192,22 @@ def get_devices(tenant, group: str = "") -> tuple[list[dict], int]:
     return devices, len(peers)
 
 
-def log_event(conn, event: str, detail: str = "", user_email: str = "", *, tenant_id: int | None) -> None:
+def log_event(conn, event: str, detail: str = "", user_email: str = "", *, tenant_id: int | None,
+              source: str | None = None) -> None:
     """Append to the audit log. tenant_id is required; None marks a provider
-    event that belongs to no tenant (backups, signing). Commits."""
+    event that belongs to no tenant (backups, signing). source='provider'
+    marks a provider console action (see provider_log). Commits."""
     conn.execute(
-        "INSERT INTO provisioning_events (tenant_id, event, detail, user_email) VALUES (?, ?, ?, ?)",
-        (tenant_id, event, detail or None, user_email or None),
+        "INSERT INTO provisioning_events (tenant_id, event, detail, user_email, source) VALUES (?, ?, ?, ?, ?)",
+        (tenant_id, event, detail or None, user_email or None, source),
     )
     conn.commit()
+
+
+def provider_log(conn, event: str, detail: str, provider_email: str, tenant_id: int | None = None) -> None:
+    """Record a provider console action: tenant_id is the tenant acted on, or
+    None. Tenants' own Logs pages never show these."""
+    log_event(conn, event, detail, provider_email, tenant_id=tenant_id, source="provider")
 
 
 def device_known(conn, tenant, rustdesk_id: str) -> bool:
@@ -587,5 +595,9 @@ def run_migrations(db_path=None) -> None:
     for (tenant_id,) in conn.execute("SELECT id FROM tenants").fetchall():
         seed_tenant(conn, tenant_id)
     conn.commit()
+
+    # Provider console: provider accounts, enrollments, settings (provider_schema.py).
+    from app.provider_schema import ensure_provider_tables
+    ensure_provider_tables(conn)
 
     conn.close()

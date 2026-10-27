@@ -26,7 +26,8 @@ PASSWORD = "correct-password-1"
 os.environ["FLEET_DATA_DIR"] = str(DATA_DIR)
 os.environ["SESSION_SECRET"] = SESSION_SECRET
 os.environ["SETUP_TOKEN"] = SETUP_TOKEN
-os.environ["FLEET_DISABLE_WATCHERS"] = "1"   # no background threads on the test DB
+os.environ["FLEET_DISABLE_WATCHERS"] = "1"
+os.environ["PROVIDER_DOMAIN"] = "rds.example.com"   # console at admin.rds.example.com   # no background threads on the test DB
 sys.path[:0] = [str(DASH_DIR), str(SINGLE_TENANT_DIR)]
 
 import bcrypt  # noqa: E402
@@ -40,6 +41,7 @@ from app.routes import client_api  # noqa: E402
 HBBS_DB = DATA_DIR / "data" / "db_v2.sqlite3"
 # Tenant #1's host: the single-tenant server_config.host before the migration.
 HOST = "rds.example.com"
+CONSOLE_HOST = "admin.rds.example.com"
 
 
 @pytest.fixture(autouse=True)

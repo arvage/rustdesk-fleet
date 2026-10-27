@@ -17,8 +17,12 @@ from app.tenant_migration import TENANT_TABLES
 
 ROOT = Path(__file__).resolve().parents[2]          # subsystems/
 SOURCES = sorted([*(ROOT / "dashboard" / "app").rglob("*.py"), *(ROOT / "single-tenant").glob("*.py")])
-# The migration copies every row of the pre-tenancy tables by design.
-SKIP_FILES = {ROOT / "dashboard" / "app" / "tenant_migration.py"}
+# The migration copies every row of the pre-tenancy tables by design, and the
+# provider console (app/console/) works across tenants on purpose: it lists,
+# provisions and purges them. It is only reachable on the console host
+# (test_console_separation.py), never through a tenant's request.
+SKIP_FILES = {ROOT / "dashboard" / "app" / "tenant_migration.py",
+              *(ROOT / "dashboard" / "app" / "console").rglob("*.py")}
 
 TABLES = set(TENANT_TABLES)
 _DML = re.compile(r"\b(SELECT|INSERT|UPDATE|DELETE)\b", re.I)

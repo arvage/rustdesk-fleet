@@ -1,0 +1,27 @@
+{% extends "console/base.html" %}
+{% block title %}Audit log — Provider console{% endblock %}
+{% block page_title %}Provider audit log{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+{% block content %}
+<form method="get" class="section" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+  <label>Event<br><select name="event"><option value="">All</option>{% for e in events %}<option {% if f.event == e %}selected{% endif %}>{{ e }}</option>{% endfor %}</select></label>
+  <label>Tenant<br><select name="tenant"><option value="">All</option>{% for t in tenants %}<option {% if f.tenant == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+  <label>By<br><select name="actor"><option value="">Anyone</option>{% for a in actors %}<option {% if f.actor == a %}selected{% endif %}>{{ a }}</option>{% endfor %}</select></label>
+  <label>Search<br><input name="q" value="{{ f.q }}"></label>
+  <button class="btn btn-primary btn-sm">Filter</button>
+  <a href="/audit" class="btn btn-ghost btn-sm">Clear</a>
+</form>
+<div class="section">
+  <div class="table-wrap"><table>
+    <thead><tr><th>When</th><th>Event</th><th>Tenant</th><th>By</th><th>Detail</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr><td style="white-space:nowrap">{{ r.created_at | localtime }}</td><td><code>{{ r.event }}</code></td>
+          <td>{{ r.tenant_slug or "—" }}</td><td>{{ r.user_email or "" }}</td><td>{{ r.detail or "" }}</td></tr>
+    {% else %}
+      <tr><td colspan="5" class="text-muted">Nothing matches.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "console/_card.html" %}
+{% block card %}
+  {% if user %}
+    <h2>Set up your passkey</h2>
+    <p>Hi {{ user.display_name or user.email }}. Register a passkey for <strong>{{ user.email }}</strong>; you'll use it to sign in to the provider console. This link works once and expires an hour after it was made.</p>
+    <div id="error-box" class="flash error" style="margin-bottom:16px;display:none"></div>
+    <div class="login-field">
+      <label for="nickname">Name this passkey (optional)</label>
+      <input id="nickname" maxlength="100" placeholder="e.g. Work laptop">
+    </div>
+    <button id="go" class="btn btn-primary" style="width:100%">Create passkey</button>
+  {% else %}
+    <h2>Link not valid</h2>
+    <p>This enrollment link is invalid, has already been used, or has expired. Ask another provider admin for a new one.</p>
+  {% endif %}
+{% endblock %}
+{% block script %}
+{% if user %}
+<script>
+document.getElementById('go').addEventListener('click', async () => {
+  const box = document.getElementById('error-box');
+  box.style.display = 'none';
+  try {
+    await rdfPasskeyCreate('/enroll/{{ token }}/begin', '/enroll/{{ token }}/complete',
+                           document.getElementById('nickname').value);
+    window.location.href = '/';
+  } catch (e) { box.textContent = e.message || 'Could not create the passkey.'; box.style.display = 'block'; }
+});
+</script>
+{% endif %}
+{% endblock %}

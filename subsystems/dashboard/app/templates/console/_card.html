@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Provider console — RustDesk Fleet{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <script>
+  // Theme: 'light' | 'dark' | 'system' (follows the OS), saved per browser.
+  // Runs before the page paints so dark mode doesn't flash white.
+  (function () {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    function apply() {
+      var t = localStorage.getItem('rdf-theme') || 'system';
+      document.documentElement.dataset.theme = (t === 'dark' || (t === 'system' && mq.matches)) ? 'dark' : 'light';
+    }
+    apply();
+    mq.addEventListener('change', apply);
+    window.rdfApplyTheme = apply;
+  })();
+  </script>
+  <link rel="stylesheet" href="/static/style.css?v=5">
+</head>
+<body>
+<div class="login-shell">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="brand-icon">R</div>
+      <div>
+        <span class="brand-name">RustDesk Fleet</span>
+        <span class="brand-sub">Provider console</span>
+      </div>
+    </div>
+    {% block card %}{% endblock %}
+  </div>
+</div>
+<script src="/static/passkey.js?v=1"></script>
+{% block script %}{% endblock %}
+</body>
+</html>

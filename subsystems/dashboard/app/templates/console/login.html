@@ -1,0 +1,19 @@
+{% extends "console/_card.html" %}
+{% block card %}
+    <h2>Sign in</h2>
+    <p>Provider staff only. Use your passkey for this console.</p>
+    <div id="error-box" class="flash error" style="margin-bottom:16px;display:none"></div>
+    <button id="go" class="btn btn-primary" style="width:100%">Sign in with a passkey</button>
+{% endblock %}
+{% block script %}
+<script>
+document.getElementById('go').addEventListener('click', async () => {
+  const box = document.getElementById('error-box');
+  box.style.display = 'none';
+  try {
+    await rdfPasskeyGet('/login/webauthn/begin', '/login/webauthn/complete');
+    window.location.href = '/';
+  } catch (e) { box.textContent = e.message || 'Passkey sign-in failed.'; box.style.display = 'block'; }
+});
+</script>
+{% endblock %}

@@ -585,7 +585,8 @@ def r_user_activity(ctx: ReportContext) -> dict:
     conn = get_db()
     rows = conn.execute(
         """SELECT event, detail, user_email, created_at FROM provisioning_events
-           WHERE tenant_id = ? AND created_at >= datetime('now', ?) ORDER BY created_at DESC""",
+           WHERE tenant_id = ? AND source IS NOT 'provider' AND created_at >= datetime('now', ?)
+           ORDER BY created_at DESC""",
         (tid, ctx.since),
     ).fetchall()
     users = conn.execute("SELECT email, display_name, role, auth_method, created_at FROM users"

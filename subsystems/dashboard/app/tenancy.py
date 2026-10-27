@@ -214,10 +214,27 @@ def resolve_relay_host(raw_host: str) -> Tenant | None:
     return tenant
 
 
-def tenant_for_request(host: str, path: str, listener: str) -> Tenant | None:
-    """Host -> tenant. Device API requests may also match a relay host, and
-    on the legacy port-21114 listener an unknown host means tenant #1.
-    Nothing else ever falls back to tenant #1."""
+class _Console:
+    """tenant_for_request()'s answer for the provider console host: not a
+    tenant. Requests there go to the console app (app/console), never to a
+    tenant route."""
+
+    def __repr__(self) -> str:
+        return "CONSOLE"
+
+
+CONSOLE = _Console()
+
+
+def tenant_for_request(host: str, path: str, listener: str) -> "Tenant | _Console | None":
+    """Host -> tenant, or CONSOLE for admin.<PROVIDER_DOMAIN>. Device API
+    requests may also match a relay host, and on the legacy port-21114
+    listener an unknown host means tenant #1. Nothing else ever falls back
+    to tenant #1."""
+    from app import settings
+    console = settings.console_host()
+    if console and normalize_host(host) == console:
+        return CONSOLE
     tenant = resolve_host(host)
     if tenant is None and path in DEVICE_API_PATHS:
         tenant = resolve_relay_host(host)
@@ -263,6 +280,11 @@ padding:2rem;text-align:center}p{color:#64748b}</style></head><body><main>
 If you think this is a mistake, contact your IT provider.</p></main></body></html>"""
 
 
+_FORBIDDEN_HTML = b"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Forbidden</title>
+<meta name="robots" content="noindex"></head><body style="font-family:system-ui,sans-serif;text-align:center;
+padding:4rem"><h1>Not allowed from here</h1></body></html>"""
+
+
 class TenantMiddleware:
     """Pure ASGI middleware: resolve the tenant from Host for every HTTP
     request and store it in scope["state"]["tenant"].
@@ -282,6 +304,15 @@ class TenantMiddleware:
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers") or []}
         path = scope.get("path", "")
         tenant = tenant_for_request(headers.get("host", ""), path, headers.get(LISTENER_HEADER, ""))
+        if tenant is CONSOLE:
+            # The provider console is a separate app with its own routes and
+            # session cookie: no tenant route is reachable on its host.
+            from app import settings
+            client = scope.get("client") or ("", 0)
+            if not settings.ip_allowed(headers.get("x-real-ip") or client[0]):
+                return await _plain(send, 403, _FORBIDDEN_HTML)
+            from app.console.main import console_app
+            return await console_app(scope, receive, send)
         is_device_api = path in DEVICE_API_PATHS
         if tenant is None and not is_device_api:
             return await _plain(send, 404, _NOT_FOUND_HTML)
