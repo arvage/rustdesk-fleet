@@ -239,6 +239,43 @@ def log_event(conn: sqlite3.Connection, event: str, detail: str = "", user_email
     conn.commit()
 
 
+DEFAULT_RENDEZVOUS_PORT = 21116   # hbbs -p default; clients assume it when no port is given
+DEFAULT_RELAY_PORT = 21117        # hbbr -p default
+_SERVER_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?(:[0-9]{1,5})?$")
+
+
+def server_settings(conn: sqlite3.Connection, relay: sqlite3.Row) -> dict[str, str]:
+    """What an installer points RustDesk at, from the tenant's relays row
+    (TENANCY.md, Port layout):
+
+    - ID server and relay: the relay host, with the tenant's ports (left out
+      when they are RustDesk's defaults, so tenant #1's installers are
+      unchanged);
+    - API server: the tenant's provider web domain (https://<slug>.<provider
+      domain>), never a custom domain; tenant #1, which has none, keeps its
+      relay host.
+    """
+    host = _strip_port(relay["host"]).lower()
+    id_server = host if relay["hbbs_port"] == DEFAULT_RENDEZVOUS_PORT else f"{host}:{relay['hbbs_port']}"
+    relay_server = host if relay["hbbr_port"] == DEFAULT_RELAY_PORT else f"{host}:{relay['hbbr_port']}"
+    web = conn.execute(
+        "SELECT hostname FROM tenant_domains WHERE tenant_id = ? AND kind = 'provider_subdomain'"
+        " ORDER BY is_primary DESC, id LIMIT 1", (relay["tenant_id"],)).fetchone()
+    api_host = web["hostname"] if web else host
+    for v in (id_server, relay_server, api_host):
+        if not _SERVER_RE.match(v):
+            raise InstallerError(f"Refusing to build with an unexpected server name {v!r}.")
+    return {
+        "@@ID_SERVER@@": id_server,
+        "@@RELAY_SERVER@@": relay_server,
+        "@@API_HOST@@": api_host,
+        # Shell installers set HOST="<id server>" and reuse "$HOST" wherever
+        # the value is the same, which keeps tenant #1's scripts as they were.
+        "@@RELAY_SERVER_SH@@": "$HOST" if relay_server == id_server else relay_server,
+        "@@API_HOST_SH@@": "$HOST" if api_host == id_server else api_host,
+    }
+
+
 def output_dir(tenant_id: int) -> Path:
     """Where a tenant's built installers go (tenant #1: <data dir>/installers)."""
     from tenant_paths import installers_dir
@@ -446,7 +483,7 @@ def _build_nsis(
         "@@OUTPUT_PATH@@":              str(output_path),
         "@@RUSTDESK_EXE_SRC@@":         str(rustdesk_exe_src),
         "@@RUSTDESK_EXE_NAME@@":        exe_name,
-        "@@HOST@@":                     _strip_port(server["host"]),
+        **server_settings(conn, server),
         "@@PUBKEY@@":                   server["pubkey"],
         "@@PASSWORD_PRE_WRITE_BLOCK@@": password_pre_write_block,
         "@@PASSWORD_CLI_NSIS@@":        password_cli_nsis,
@@ -504,7 +541,7 @@ def _build_script(
         "@@DISPLAY_NAME@@":    group["display_name"],
         "@@GROUP_SLUG@@":      group["slug"],
         "@@RUSTDESK_VERSION@@": version,
-        "@@HOST@@":            _strip_port(server["host"]),
+        **server_settings(conn, server),
         "@@PUBKEY@@":          server["pubkey"],
         "@@AUTO_UPDATE@@":     _group_option_value(group, "auto_update"),
         "@@REMOTE_CONFIG@@":   _group_option_value(group, "remote_config"),

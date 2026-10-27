@@ -183,10 +183,14 @@ What this means here:
 - Tenant #1's **current installers** set `api-server = "https://<host>"`
   (`installer.nsi.tmpl`, the macOS and Linux templates) and report over 443
   with that `Host`.
-- **Phase 1b:** set `api-server` to `https://<the tenant's relay host>` in
-  every new tenant's installers, never to a custom domain, for the same
-  reason the ID server is the relay host: a tenant changing domains must not
-  strand devices. There will be no per-tenant port-21114 listener.
+- **Tenants created in the provider console (phase 1b)** get installers with
+  the ID server `<slug>.relay.<PROVIDER_DOMAIN>:<hbbs port>`, the relay
+  `<slug>.relay.<PROVIDER_DOMAIN>:<hbbr port>`, their own key and
+  `api-server = "https://<slug>.<PROVIDER_DOMAIN>"`: the provider web domain,
+  which has a certificate, and never a custom domain (phase 1d), so a tenant
+  changing or losing a custom domain never strands devices. (This replaces
+  the earlier plan of pointing `api-server` at the relay host, which has no
+  certificate.) There is no per-tenant port-21114 listener.
 
 ## How a device request finds its tenant
 
@@ -195,8 +199,9 @@ What this means here:
 1. The `Host` (lowercased, port stripped) is looked up in `tenant_domains`.
 2. Device API paths only (`/api/heartbeat`, `/api/sysinfo`,
    `/api/sysinfo_ver`, `/api/audit/conn`, `/api/audit/file`): a host that is
-   a tenant's relay host (`relays.host`) selects that tenant, since installers
-   point devices there.
+   a tenant's relay host (`relays.host`) selects that tenant: a fallback for
+   clients configured by hand with the relay host as their API server
+   (installers use the web domain).
 3. Device API paths only: if nginx tagged the request `X-Fleet-Listener:
    legacy-api` (set on the port-21114 vhost, stripped on every vhost), an
    unknown host means tenant #1.

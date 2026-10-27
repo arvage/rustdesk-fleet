@@ -8,7 +8,7 @@
 #           Architectures: x86_64, aarch64
 set -euo pipefail
 
-HOST="@@HOST@@"
+HOST="@@ID_SERVER@@"
 KEY="@@PUBKEY@@"
 RDVER="@@RUSTDESK_VERSION@@"
 @@PASSWORD_VAR@@
@@ -37,8 +37,8 @@ write_config() {
     printf 'rendezvous_server = "%s"\n' "$HOST"
     printf '\n[options]\n'
     printf 'custom-rendezvous-server = "%s"\n' "$HOST"
-    printf 'relay-server = "%s"\n' "$HOST"
-    printf 'api-server = "https://%s"\n' "$HOST"
+    printf 'relay-server = "%s"\n' "@@RELAY_SERVER_SH@@"
+    printf 'api-server = "https://%s"\n' "@@API_HOST_SH@@"
     printf 'allow-auto-update = "@@AUTO_UPDATE@@"\n'
     printf 'allow-remote-config-modification = "@@REMOTE_CONFIG@@"\n'
     printf 'key = "%s"\n' "$KEY"
@@ -46,8 +46,8 @@ write_config() {
   {
     printf '[options]\n'
     printf 'custom-rendezvous-server = "%s"\n' "$HOST"
-    printf 'relay-server = "%s"\n' "$HOST"
-    printf 'api-server = "https://%s"\n' "$HOST"
+    printf 'relay-server = "%s"\n' "@@RELAY_SERVER_SH@@"
+    printf 'api-server = "https://%s"\n' "@@API_HOST_SH@@"
     printf 'key = "%s"\n' "$KEY"
   } > "$1/_local.toml"
   echo "  Config → $1/RustDesk2.toml + _local.toml"

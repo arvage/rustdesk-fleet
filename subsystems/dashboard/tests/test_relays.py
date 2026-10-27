@@ -17,7 +17,9 @@ def test_installers_use_the_tenants_own_relay(two_tenants):
     text_b = open(ib["unsigned_path"]).read()
     assert HOST in text_a and "PUBKEY1" in text_a
     assert "relay-globex.example.com" in text_b and "PUBKEY2" in text_b
-    assert "PUBKEY1" not in text_b and HOST not in text_b.replace("relay-globex.example.com", "")
+    # Tenant B's API server is its own web domain (b.rds.example.com), never tenant A's host.
+    assert "PUBKEY1" not in text_b
+    assert f'"{HOST}"' not in text_b and 'api-server = "https://%s"\\n\' "b.rds.example.com"' in text_b
     # Each tenant's files stay in its own directory.
     assert ia["unsigned_path"].startswith(str(DATA_DIR / "installers"))
     assert ib["unsigned_path"].startswith(str(DATA_DIR / "tenants" / "2" / "installers"))

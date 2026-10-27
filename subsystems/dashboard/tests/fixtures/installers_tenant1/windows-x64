@@ -1,0 +1,283 @@
+; RustDesk pre-configured installer — built by generate_installer.py.
+; @@PLACEHOLDER@@ markers are substituted at build time; do not edit them here.
+;
+; Install sequence:
+;   1. Pre-write RustDesk2.toml (server settings) and RustDesk.toml (password) to all
+;      config locations BEFORE launching the RustDesk installer.  The service reads
+;      the password at startup and generates its stable identity (id, key_pair) around it.
+;   2. Run the official RustDesk installer with --silent-install and wait.
+;      The binary spawns a background script and exits early, so we poll until
+;      the registry shows the new version and the service is running again —
+;      on an upgrade the old EXE already exists, so its presence proves nothing.
+;   3. Stop the service and tray app, re-write the per-user config in every profile.
+;      We deliberately do NOT re-write RustDesk.toml here — the service already
+;      wrote its identity (id, key_pair, salt) around our password; overwriting
+;      would destroy those fields and force another key regeneration.
+;   4. Restart the service, push every server option into it over IPC with
+;      `rustdesk --option`, then `--password` to hash the password.  This is the
+;      authoritative step: the service holds the config and every user's UI
+;      reads it from there, regardless of which account ran this installer.
+;
+; Who runs this: on a domain PC a standard user gets a UAC credential prompt and
+;   an ADMIN account runs the installer — "current user" is that admin, not the
+;   person at the desk.  So per-user files go to every profile on the machine
+;   (ProfileList) plus the Default profile (new users), never just $APPDATA,
+;   and the tray app is launched de-elevated as the desktop user.
+;
+; Paths: the service runs as SYSTEM, and RustDesk maps the SYSTEM profile to
+;   %WINDIR%\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config.
+;   File names are RustDesk2.toml (Config2), RustDesk.toml (Config) and
+;   RustDesk_local.toml (LocalConfig).
+;
+; WOW64 note: this is a 32-bit NSIS installer running on 64-bit Windows.
+;   Writing $WINDIR\System32 from a 32-bit process is silently redirected
+;   to SysWOW64.  We disable that redirection around the System32 write so
+;   the file lands where the 64-bit RustDesk service actually reads it.
+;   ProgramData ($APPDATA with SetShellVarContext all) has no such redirection.
+;   The service profile now lives under ServiceProfiles (not System32), so no
+;   redirection toggling is needed for config writes.
+
+Unicode True
+RequestExecutionLevel admin
+SetCompressor /SOLID lzma
+ShowInstDetails nevershow
+AutoCloseWindow true
+
+!include "x64.nsh"
+!include "LogicLib.nsh"
+
+Name "Acme Corp Remote Support"
+OutFile "<DATA>/installers/RemoteSupport-acme-1.4.9-x64.exe"
+
+; Branding of this installer file (icon, Properties → Details).
+
+VIProductVersion "1.4.9.0"
+VIAddVersionKey "ProductName" "Acme Corp Remote Support"
+VIAddVersionKey "CompanyName" "Acme Corp"
+VIAddVersionKey "FileDescription" "Acme Corp Remote Support Setup"
+VIAddVersionKey "FileVersion" "1.4.9"
+VIAddVersionKey "ProductVersion" "1.4.9"
+
+; RustDesk2.toml (Config2) — server options used for connections.
+!macro WriteConfig2 path
+  CreateDirectory "${path}"
+  FileOpen $0 "${path}\RustDesk2.toml" w
+  FileWrite $0 'rendezvous_server = "rds.example.com"$\r$\n'
+  FileWrite $0 '$\r$\n'
+  FileWrite $0 '[options]$\r$\n'
+  FileWrite $0 'custom-rendezvous-server = "rds.example.com"$\r$\n'
+  FileWrite $0 'relay-server = "rds.example.com"$\r$\n'
+  FileWrite $0 'api-server = "https://rds.example.com"$\r$\n'
+  FileWrite $0 'allow-auto-update = "N"$\r$\n'
+  FileWrite $0 'allow-remote-config-modification = "Y"$\r$\n'
+  FileWrite $0 'key = "PUBKEY1"$\r$\n'
+  FileClose $0
+!macroend
+
+; RustDesk_local.toml (LocalConfig) — what the UI's Network settings show.
+; Only created when missing: it also holds the user's UI preferences, and the
+; UI pulls the live server options from the service anyway.
+!macro WriteLocalConfigIfMissing path
+  CreateDirectory "${path}"
+  ${IfNot} ${FileExists} "${path}\RustDesk_local.toml"
+    FileOpen $0 "${path}\RustDesk_local.toml" w
+    FileWrite $0 '[options]$\r$\n'
+    FileWrite $0 'custom-rendezvous-server = "rds.example.com"$\r$\n'
+    FileWrite $0 'relay-server = "rds.example.com"$\r$\n'
+    FileWrite $0 'api-server = "https://rds.example.com"$\r$\n'
+    FileWrite $0 'key = "PUBKEY1"$\r$\n'
+    FileClose $0
+  ${EndIf}
+!macroend
+
+; Per-user config for one profile directory.
+!macro WriteUserConfig profile
+  !insertmacro WriteConfig2 "${profile}\AppData\Roaming\RustDesk\config"
+  !insertmacro WriteLocalConfigIfMissing "${profile}\AppData\Roaming\RustDesk\config"
+!macroend
+
+; Every real user profile on the machine (local + domain accounts, S-1-5-21-*),
+; plus the Default profile so users who first sign in later get it too.
+Function WriteAllUserProfiles
+  SetRegView 64
+  StrCpy $R1 0
+  profiles_loop:
+    EnumRegKey $R2 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" $R1
+    StrCmp $R2 "" profiles_default
+    IntOp $R1 $R1 + 1
+    StrCpy $R3 $R2 9
+    StrCmp $R3 "S-1-5-21-" 0 profiles_loop
+    ReadRegStr $R4 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$R2" "ProfileImagePath"
+    StrCmp $R4 "" profiles_loop
+    ExpandEnvStrings $R4 $R4
+    IfFileExists "$R4\*.*" 0 profiles_loop
+    !insertmacro WriteUserConfig "$R4"
+    Goto profiles_loop
+  profiles_default:
+    ReadRegStr $R4 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" "Default"
+    StrCmp $R4 "" profiles_done
+    ExpandEnvStrings $R4 $R4
+    IfFileExists "$R4\*.*" 0 profiles_done
+    !insertmacro WriteUserConfig "$R4"
+  profiles_done:
+  SetRegView 32
+FunctionEnd
+
+; Service (SYSTEM → LocalService) config: only seeded on a fresh install.
+; On an upgrade it may hold options changed later (e.g. from the dashboard);
+; the `--option` calls after the service starts merge ours in instead.
+!define SVC_CONFIG "$WINDIR\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config"
+!macro SeedServiceConfig
+  ${IfNot} ${FileExists} "${SVC_CONFIG}\RustDesk2.toml"
+    !insertmacro WriteConfig2 "${SVC_CONFIG}"
+  ${EndIf}
+  !insertmacro WriteLocalConfigIfMissing "${SVC_CONFIG}"
+!macroend
+
+Section "Install"
+
+  ; ── Step 1: pre-write config ───────────────────────────────────────────────
+
+  ; Every user profile + Default (not just the elevating admin's $APPDATA).
+  Call WriteAllUserProfiles
+
+  ; Service profile (LocalService) — seeded on fresh installs only.
+  !insertmacro SeedServiceConfig
+
+  ; Seed RustDesk.toml with the permanent password. The service copy is only
+  ; written on a fresh install — on an upgrade it holds the device's id and
+  ; key_pair, which must survive. The --password call in step 4 sets the
+  ; password in both cases. Post-write skips this file — see sequence note.
+  SetShellVarContext current
+  CreateDirectory "$APPDATA\RustDesk\config"
+  FileOpen $R0 "$APPDATA\RustDesk\config\RustDesk.toml" w
+  FileWrite $R0 'password = "Secret pw 1"$\r$\n'
+  FileClose $R0
+  SetShellVarContext all
+  CreateDirectory "$APPDATA\RustDesk\config"
+  FileOpen $R0 "$APPDATA\RustDesk\config\RustDesk.toml" w
+  FileWrite $R0 'password = "Secret pw 1"$\r$\n'
+  FileClose $R0
+  SetShellVarContext current
+  ${IfNot} ${FileExists} "${SVC_CONFIG}\RustDesk.toml"
+    CreateDirectory "${SVC_CONFIG}"
+    FileOpen $R0 "${SVC_CONFIG}\RustDesk.toml" w
+    FileWrite $R0 'password = "Secret pw 1"$\r$\n'
+    FileClose $R0
+  ${EndIf}
+
+  ; ── Step 2: run the RustDesk installer ────────────────────────────────────
+  SetOutPath "$TEMP"
+  File "<DATA>/installer-assets/rustdesk-1.4.9-x86_64.exe"
+  ExecWait '"$TEMP\rustdesk-1.4.9-x86_64.exe" --silent-install'
+
+  ; The installer spawns a background script that does the real work and
+  ; exits immediately. That script first UNINSTALLS any existing version, then
+  ; copies the new files, writes the registry (incl. DisplayVersion), and only
+  ; at the end recreates and starts the service.
+  ;
+  ; So "rustdesk.exe exists" is not a usable signal — on an upgrade the old
+  ; EXE is already there, and touching the service mid-script aborts the
+  ; upgrade (the device stays on the old version). Wait until the registry
+  ; shows the version we're installing AND the service is running again.
+  ; The Uninstall key is in the 64-bit registry view; this is a 32-bit NSIS.
+  ;
+  ; First wait (up to 20 s) for the existing service to stop — the script's
+  ; uninstall step always stops it. Without this, reinstalling the SAME
+  ; version would match the registry immediately and race the script again.
+  ; A fresh install has no service, so this falls through at once.
+  SetRegView 64
+  StrCpy $1 0
+  poll_stopped:
+    nsExec::ExecToStack 'cmd /c sc query RustDesk | find "RUNNING"'
+    Pop $3
+    Pop $4
+    StrCmp $3 "0" 0 poll_version_start
+    IntCmp $1 20 poll_version_start
+    Sleep 1000
+    IntOp $1 $1 + 1
+    Goto poll_stopped
+
+  poll_version_start:
+  StrCpy $1 0
+  poll_version:
+    ReadRegStr $2 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\RustDesk" "DisplayVersion"
+    StrCmp $2 "1.4.9" poll_service
+    IntCmp $1 120 install_failed
+    Sleep 1000
+    IntOp $1 $1 + 1
+    Goto poll_version
+
+  poll_service:
+    nsExec::ExecToStack 'cmd /c sc query RustDesk | find "RUNNING"'
+    Pop $3   ; exit code ("0" = RUNNING found)
+    Pop $4   ; command output (unused)
+    StrCmp $3 "0" poll_done
+    IntCmp $1 120 install_failed
+    Sleep 1000
+    IntOp $1 $1 + 1
+    Goto poll_service
+
+  poll_done:
+  SetRegView 32
+  ; Let the installer script finish its last steps (shortcuts, printer).
+  Sleep 3000
+  IfFileExists "$PROGRAMFILES64\RustDesk\rustdesk.exe" install_ok
+
+  install_failed:
+    SetRegView 32
+    MessageBox MB_OK|MB_ICONSTOP \
+      "RustDesk did not install correctly.$\n$\nPlease make sure you are running this installer as Administrator and try again."
+    Delete "$TEMP\rustdesk-1.4.9-x86_64.exe"
+    Abort
+
+  install_ok:
+
+  ; ── Step 3: stop, re-write config, restart ────────────────────────────────
+  ; The RustDesk installer may have started the service with defaults and
+  ; written its own config.  Kill processes, overwrite with ours, then restart.
+  nsExec::ExecToLog 'taskkill /F /IM rustdesk.exe'
+  Pop $0
+  nsExec::ExecToLog 'net stop RustDesk'
+  Pop $0
+
+  Call WriteAllUserProfiles
+  !insertmacro SeedServiceConfig
+
+  ; Restart the service then launch the tray app
+  nsExec::ExecToLog 'net start RustDesk'
+  Pop $0
+
+  ; Wait for the service to fully initialize its IPC pipe.
+  Sleep 3000
+
+  ; ── Step 4: push config into the service (authoritative) ─────────────────
+  ; `--option` goes over IPC to the running service, which persists it in its
+  ; own config and serves it to every user's UI. Needs admin (we are).
+  !define RD '"$PROGRAMFILES64\RustDesk\rustdesk.exe"'
+  nsExec::ExecToLog '${RD} --option custom-rendezvous-server "rds.example.com"'
+  Pop $0
+  nsExec::ExecToLog '${RD} --option relay-server "rds.example.com"'
+  Pop $0
+  nsExec::ExecToLog '${RD} --option api-server "https://rds.example.com"'
+  Pop $0
+  nsExec::ExecToLog '${RD} --option key "PUBKEY1"'
+  Pop $0
+  nsExec::ExecToLog '${RD} --option allow-auto-update "N"'
+  Pop $0
+  nsExec::ExecToLog '${RD} --option allow-remote-config-modification "Y"'
+  Pop $0
+
+  ; Upgrade the plaintext RustDesk.toml password to the proper hash format.
+  nsExec::ExecToLog '"$PROGRAMFILES64\RustDesk\rustdesk.exe" --password "Secret pw 1"'
+  Pop $0
+
+
+
+  ; Launch the tray app as the desktop user, not the elevated admin: explorer
+  ; is the signed-in user's shell, so it starts the app de-elevated in their
+  ; session (and their own profile/config).
+  Exec '"$WINDIR\explorer.exe" "$PROGRAMFILES64\RustDesk\rustdesk.exe"'
+
+  Delete "$TEMP\rustdesk-1.4.9-x86_64.exe"
+SectionEnd
