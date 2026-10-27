@@ -99,6 +99,9 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 @app.on_event("startup")
 async def startup():
     run_migrations()
+    # Provider console jobs (tenant creation, relay operations, purges).
+    from app.console import jobs, relays  # noqa: F401  (registers job handlers)
+    jobs.start_worker()
 
 
 @app.exception_handler(_AuthRedirect)

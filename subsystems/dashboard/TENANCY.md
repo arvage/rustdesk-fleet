@@ -212,3 +212,70 @@ rejected exactly like an unknown id. Each relay has its own peer cache.
 Suspended and cancelled tenants: their devices' reports are still accepted
 and recorded (it costs nothing and keeps the history intact), but the
 heartbeat reply never pushes config to them.
+
+## Port layout
+
+Read from `rustdesk-server` 1.1.16 (`src/main.rs`, `src/hbbr.rs`,
+`src/rendezvous_server.rs` `RendezvousServer::start`, `src/relay_server.rs`
+`start`) and the RustDesk client (`src/common.rs` `test_nat_type_`,
+`src/rendezvous_mediator.rs` `get_relay_server`, `src/client.rs`
+`create_relay`, `hbb_common/src/websocket.rs` `check_ws`; defaults in
+`hbb_common/src/config.rs`: `RENDEZVOUS_PORT = 21116`, `RELAY_PORT = 21117`).
+
+**What each process listens on**, for `hbbs -p P` (default `P = 21116`) and
+`hbbr -p R` (default `R = 21117`):
+
+| Port | Proto | Process | Purpose |
+|---|---|---|---|
+| `P − 1` | TCP | hbbs | NAT-type test (and online-status queries) |
+| `P` | TCP + UDP | hbbs | rendezvous: registration, heartbeats (UDP), punch-hole, ID lookups |
+| `P + 2` | TCP | hbbs | websocket rendezvous (web client / websocket mode) |
+| `R` | TCP | hbbr | relay |
+| `R + 2` | TCP | hbbr | websocket relay |
+
+With the defaults that is TCP 21115–21119 and UDP 21116: the familiar range.
+
+**What a client contacts**, given `custom-rendezvous-server = host[:P]` and
+`relay-server = host[:R]` (a missing port means the default):
+
+- `host:P` (TCP and UDP) for everything rendezvous;
+- `host:(P − 1)` for the NAT test (`increase_port(server, -1)`);
+- the relay: its own `relay-server` option, else the relay hbbs hands out
+  (`hbbs -r host:R`), else `rendezvous host:(P + 1)` (`increase_port(host, 1)`);
+  then `check_port(relay, 21117)`, so a relay given without a port means 21117;
+- in websocket mode: `P + 2` for rendezvous and `R + 2` for the relay
+  (`check_ws`), and `P + 2` for online queries (`(P − 1) + 3`).
+- reports go to the API server over HTTPS (see above), never to these ports.
+
+**Key enforcement.** `hbbs` with no `-k` (or `-k _`/`-k -`) loads or creates
+the keypair in its working directory and *enforces* it: clients with another
+key are refused. `hbbr` with no `-k` enforces nothing (any client may use the
+relay); `-k _` would make it check the same key. Tenant #1's compose runs
+plain `hbbs` / `hbbr`, so new relays do the same (see "Looked wrong" in the
+phase 1b summary).
+
+**Port blocks.** Each relay gets a block of 10 ports starting at `B`
+(`RELAY_PORT_BASE` = 21200, then 21210, … up to `RELAY_PORT_MAX` = 21999,
+so 80 tenants), laid out exactly like the defaults:
+
+| Port | Use |
+|---|---|
+| `B` | NAT test (`P − 1`) |
+| `B + 1` | hbbs `-p`: rendezvous `P`, TCP + UDP |
+| `B + 2` | hbbr `-p`: relay `R` (= `P + 1`, so even the client's last-resort relay guess is right) |
+| `B + 3` | websocket rendezvous (`P + 2`) |
+| `B + 4` | websocket relay (`R + 2`) |
+| `B + 5`–`B + 9` | unused, left for future needs |
+
+`relays.hbbs_port` is `P` and `relays.hbbr_port` is `R`. (Tenant #1's row
+said 21115 for hbbs before phase 1b: the NAT-test port, not the one clients
+register on. The phase 1b migration corrects it to 21116; tenant #1's relay
+and installers don't change.) Blocks are recorded in `relay_port_blocks` and
+**never reused**, even after a tenant is purged: old installers may still be
+out there knocking on those ports. Tenant #1 holds the default block
+(21115–21119).
+
+The relays run with `network_mode: host`, like tenant #1's, binding their
+ports directly (no Docker port mapping, which matters for UDP). The cloud
+firewall must allow TCP and UDP on the whole `RELAY_PORT_BASE`–`RELAY_PORT_MAX`
+range once, up front; the console shows that range.

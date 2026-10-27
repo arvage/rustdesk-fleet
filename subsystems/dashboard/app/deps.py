@@ -599,5 +599,8 @@ def run_migrations(db_path=None) -> None:
     # Provider console: provider accounts, enrollments, settings (provider_schema.py).
     from app.provider_schema import ensure_provider_tables
     ensure_provider_tables(conn)
+    from app.console import jobs as _jobs, relays as _relays
+    _jobs.ensure_table(conn)
+    _relays.ensure_tables(conn)
 
     conn.close()

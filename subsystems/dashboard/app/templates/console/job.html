@@ -1,0 +1,30 @@
+{% extends "console/base.html" %}
+{% block title %}Job {{ job.id }} — Provider console{% endblock %}
+{% block page_title %}Job {{ job.id }}: {{ job.kind }}{% endblock %}
+{% block content %}
+<div class="section"><div class="card"><div class="card-body">
+  <p style="margin:0 0 12px">Status: <strong id="job-status">{{ job.status }}</strong></p>
+  <ol id="job-steps" style="margin:0;padding-left:20px;line-height:1.8"></ol>
+  <div id="job-error" class="flash error" style="margin-top:12px;display:none;white-space:pre-wrap"></div>
+  {% if job.tenant_id %}<p style="margin-top:12px"><a href="/tenants/{{ job.tenant_id }}">Tenant details</a></p>{% endif %}
+</div></div></div>
+<script>
+const ICON = { running: '⏳', done: '✓', failed: '✗' };
+function render(j) {
+  document.getElementById('job-status').textContent = j.status;
+  document.getElementById('job-steps').innerHTML = j.steps.map(s =>
+    `<li><span>${ICON[s.status] || '·'}</span> ${s.name}${s.detail ? ` <span class="text-muted">— ${s.detail.replace(/</g, '&lt;')}</span>` : ''}</li>`).join('');
+  const e = document.getElementById('job-error');
+  if (j.error) { e.textContent = j.error; e.style.display = 'block'; }
+  return j.status === 'queued' || j.status === 'running';
+}
+async function poll() {
+  try {
+    const r = await fetch('/jobs/{{ job.id }}.json');
+    if (r.ok && render(await r.json())) setTimeout(poll, 1000);
+  } catch (_) { setTimeout(poll, 3000); }
+}
+render({{ {"status": job.status, "steps": job.steps, "error": job.error} | tojson }});
+poll();
+</script>
+{% endblock %}

@@ -53,10 +53,11 @@ class Relay:
 
     @property
     def ports(self) -> frozenset[int]:
-        """TCP ports hbbs and hbbr listen on: hbbs NAT test, rendezvous and
-        websocket (hbbs_port, +1, +3); relay and its websocket (hbbr_port, +2).
-        For the defaults that's 21115-21119."""
-        return frozenset({self.hbbs_port, self.hbbs_port + 1, self.hbbs_port + 3,
+        """TCP ports hbbs and hbbr listen on (TENANCY.md, Port layout): for
+        hbbs_port P, the NAT test P-1, rendezvous P and websocket P+2; for
+        hbbr_port R, the relay R and its websocket R+2. For the defaults
+        (21116, 21117) that's 21115-21119."""
+        return frozenset({self.hbbs_port - 1, self.hbbs_port, self.hbbs_port + 2,
                           self.hbbr_port, self.hbbr_port + 2})
 
 

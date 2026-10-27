@@ -229,7 +229,7 @@ def wait_for_pubkey(timeout_s: int = 30) -> str:
     )
 
 
-def init_server(host: str, hbbs_port: int = 21115, hbbr_port: int = 21117) -> dict:
+def init_server(host: str, hbbs_port: int = 21116, hbbr_port: int = 21117) -> dict:
     """Stand up tenant #1's relay and record it. Idempotent."""
     conn = get_db()
     ensure_schema(conn)
@@ -366,7 +366,7 @@ def main():
 
     p_init = sub.add_parser("init", help="Stand up the single hbbs/hbbr server (idempotent)")
     p_init.add_argument("--host", required=True, help="Public host/IP clients will connect to")
-    p_init.add_argument("--hbbs-port", type=int, default=21115)
+    p_init.add_argument("--hbbs-port", type=int, default=21116)
     p_init.add_argument("--hbbr-port", type=int, default=21117)
 
     sub.add_parser("status", help="Show current server config/status")
@@ -396,7 +396,7 @@ def main():
         print(f"  pubkey:    {result['pubkey']}")
         print()
         print("Open these ports in the Lightsail networking tab if not already open:")
-        print(f"  TCP+UDP {result['hbbs_port']}-{result['hbbs_port']+4}, TCP {result['hbbr_port']}, {result['hbbr_port']+2}")
+        print(f"  TCP {result['hbbs_port']-1}-{result['hbbr_port']+2}, UDP {result['hbbs_port']}")
         print("  (network_mode: host is used, so the container binds RustDesk's own default port range)")
 
     elif args.cmd == "status":

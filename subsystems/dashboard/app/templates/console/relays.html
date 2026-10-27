@@ -1,0 +1,42 @@
+{% extends "console/base.html" %}
+{% block title %}Relays — Provider console{% endblock %}
+{% block page_title %}Relays{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+{% block content %}
+<div class="section"><div class="card"><div class="card-body" style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center">
+  <div>
+    <p style="margin:0">New relays get <strong>rustdesk-server {{ current or "unknown" }}</strong>. Latest release: <strong>{{ latest or "unknown" }}</strong>.</p>
+    <p class="text-sm text-muted" style="margin:4px 0 0">Relay ports {{ port_range[0] }}–{{ port_range[1] }} (TCP and UDP) must be open in the cloud firewall. Tenant #1 uses the default 21115–21119.</p>
+  </div>
+  <form method="post" action="/relays/upgrade-all" style="display:flex;gap:8px;align-items:center"
+        onsubmit="return confirm('Upgrade every relay, one at a time? Each restart drops that tenant\'s active sessions briefly.')">
+    <input name="version" placeholder="{{ latest or 'version' }}" style="width:110px">
+    <button class="btn btn-primary btn-sm">Upgrade all relays</button>
+  </form>
+</div></div></div>
+<div class="section"><div class="table-wrap"><table class="js-sort">
+  <thead><tr><th>Tenant</th><th>Relay host</th><th>Ports</th><th>Version</th><th>hbbs</th><th>hbbr</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for r in relays %}
+    <tr>
+      <td><a href="/tenants/{{ r.tenant_id }}">{{ r.display_name }}</a> <span class="text-muted">({{ r.tenant_status }})</span></td>
+      <td><code>{{ r.host }}</code></td>
+      <td>{% if r.block %}{{ r.block.nat }}–{{ r.block.ws_relay }}{% endif %}</td>
+      <td>{{ r.version or "?" }}</td>
+      {% for role in ["hbbs", "hbbr"] %}{% set c = r.containers.get(role, {}) %}
+      <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ '#10B981' if c.running else ('#EF4444' if c.running == false else '#94A3B8') }}"></span> {{ c.status or "?" }}</td>
+      {% endfor %}
+      <td>{{ r.status }}{% if r.busy %} · job running{% endif %}</td>
+      <td style="white-space:nowrap">
+        {% for a in ["restart", "stop", "start"] %}
+        <form method="post" action="/relays/{{ r.tenant_id }}/{{ a }}" style="display:inline"
+              onsubmit="return confirm('{{ a|capitalize }} {{ r.slug }}\'s relay?')"><button class="btn btn-ghost btn-sm">{{ a|capitalize }}</button></form>
+        {% endfor %}
+        <form method="post" action="/relays/{{ r.tenant_id }}/upgrade" style="display:inline"
+              onsubmit="return confirm('Upgrade {{ r.slug }}\'s relay to {{ latest }}?')"><button class="btn btn-ghost btn-sm">Upgrade</button></form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% endblock %}

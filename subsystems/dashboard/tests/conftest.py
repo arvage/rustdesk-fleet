@@ -299,3 +299,63 @@ def all_routes() -> list[tuple[str, str]]:
             for method in sorted(ctx.methods or ()):
                 out.append((method, ctx.path))
     return out
+
+
+# ── Fake system calls for the provider console (docker, rdf-helper) ─────────
+
+class FakeSystem:
+    """Stands in for app.console.system.SYSTEM: records every command, keeps
+    track of which compose stacks are up, writes the public key hbbs would
+    write on `up`, and fails any command containing a string in `fail`."""
+
+    def __init__(self):
+        self.calls: list[list[str]] = []
+        self.fail: dict[str, str] = {}
+        self.up: dict[str, list[str]] = {}      # compose path -> container names
+
+    def _result(self, args):
+        from app.console.system import Result
+        joined = " ".join(args)
+        for needle, msg in self.fail.items():
+            if needle in joined:
+                return Result(1, "", msg)
+        return Result(0, "", "")
+
+    def run(self, args, timeout=300):
+        self.calls.append(list(args))
+        if args[:2] == ["docker", "ps"]:
+            from app.console.system import Result
+            lines = [f"{n}\tUp 5 minutes" for names in self.up.values() for n in names]
+            return Result(0, "\n".join(lines), "")
+        return self._result(args)
+
+    def compose(self, compose_path, *args, timeout=300):
+        r = self.run(["docker", "compose", "-f", compose_path, *args], timeout)
+        if r.ok and args and args[0] in ("up", "restart", "start"):
+            import re
+            names = re.findall(r"container_name:\s*(\S+)", Path(compose_path).read_text()) or ["hbbs", "hbbr"]
+            self.up[compose_path] = names
+            pub = Path(compose_path).parent / "data" / "id_ed25519.pub"
+            if not pub.exists():
+                pub.parent.mkdir(parents=True, exist_ok=True)
+                pub.write_text("PUB-" + Path(compose_path).parent.parent.name)
+        elif r.ok and args and args[0] in ("stop", "down"):
+            self.up.pop(compose_path, None)
+        return r
+
+    def helper(self, *args, timeout=300):
+        return self.run(["sudo", "-n", "/usr/local/sbin/rdf-helper", *args], timeout)
+
+    def running_containers(self):
+        return {n: "Up 5 minutes" for names in self.up.values() for n in names}
+
+    def commands(self, prefix: str) -> list[str]:
+        return [" ".join(c) for c in self.calls if " ".join(c).startswith(prefix)]
+
+
+@pytest.fixture
+def fake_system(monkeypatch):
+    from app.console import system
+    fake = FakeSystem()
+    monkeypatch.setattr(system, "SYSTEM", fake)
+    return fake

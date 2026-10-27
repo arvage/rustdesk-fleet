@@ -1,0 +1,17 @@
+{% extends "console/base.html" %}
+{% block title %}Jobs — Provider console{% endblock %}
+{% block page_title %}Jobs{% endblock %}
+{% block content %}
+<div class="section"><div class="table-wrap"><table>
+  <thead><tr><th>#</th><th>What</th><th>Tenant</th><th>Status</th><th>By</th><th>Started</th><th>Finished</th></tr></thead>
+  <tbody>
+  {% for j in jobs %}
+    <tr><td><a href="/jobs/{{ j.id }}">{{ j.id }}</a></td><td>{{ j.kind }}{% if j.params.action %} ({{ j.params.action }}){% endif %}</td>
+        <td>{{ j.slug or "—" }}</td><td>{{ j.status }}</td><td>{{ j.created_by or "" }}</td>
+        <td>{{ j.started_at | localtime if j.started_at else "" }}</td><td>{{ j.finished_at | localtime if j.finished_at else "" }}</td></tr>
+  {% else %}
+    <tr><td colspan="7" class="text-muted">No jobs yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% endblock %}
