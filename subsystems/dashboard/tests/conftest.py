@@ -269,12 +269,14 @@ def populate(tenant_id: int, hbbs: Path, tag: str) -> dict:
     conn.execute("INSERT INTO provisioning_events (tenant_id, event, detail) VALUES (?, 'group_created', ?)",
                  (tenant_id, f"Event-{tag.upper()}-secret"))
     conn.commit()
+    from app.console.tenants import create_invite
+    invite_token = create_invite(conn, tenant_id, f"t{tag}", f"new@{tag}.example.com", "New", "test").rsplit("/", 1)[1]
     conn.close()
     return {"tenant_id": tenant_id, "admin": admin_user, "tech": tech_user, "group_id": gid,
             "group_slug": f"group-{tag}", "rid": rid, "uuid": uuid, "installer_id": iid,
             "installer_file": inst_file.name, "link_id": lid, "token": token, "dynamic_group_id": dgid,
             "role_key": f"role_{tag}", "cred_id": cred, "user_id": tech_user["id"], "session_id": sid,
-            "hbbs": hbbs, "secret": f"{tag.upper()}-secret"}
+            "hbbs": hbbs, "secret": f"{tag.upper()}-secret", "invite_token": invite_token}
 
 
 @pytest.fixture
@@ -339,7 +341,8 @@ class FakeSystem:
         r = self.run(["docker", "compose", "-f", compose_path, *args], timeout)
         if r.ok and args and args[0] in ("up", "restart", "start"):
             import re
-            names = re.findall(r"container_name:\s*(\S+)", Path(compose_path).read_text()) or ["hbbs", "hbbr"]
+            text = Path(compose_path).read_text() if Path(compose_path).exists() else ""
+            names = re.findall(r"container_name:\s*(\S+)", text) or ["hbbs", "hbbr"]
             self.up[compose_path] = names
             pub = Path(compose_path).parent / "data" / "id_ed25519.pub"
             if not pub.exists():

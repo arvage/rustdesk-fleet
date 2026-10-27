@@ -1,0 +1,236 @@
+"""Tenant lifecycle: suspend, reactivate, cancel, purge (TENANCY.md).
+
+- suspend:     the dashboard and download links show "not active"; the relay
+               keeps running, so devices stay registered for reactivation.
+- reactivate:  from suspended, or from cancelled within the grace period
+               (the relay is started again with the same keys and ports).
+- cancel:      the relay stops at once (containers and data kept), and the
+               tenant's admins can sign in to a read-only export page only.
+               After GRACE_DAYS the tenant is purged.
+- purge:       relay containers, compose file, keypair and hbbs data; the
+               tenant's files; its vhosts and certificates; every tenant-owned
+               row. Kept: the tenants row (status purged, slug reserved), the
+               port block, tenant_usage_daily and the provider audit log.
+
+Tenant #1 can't be cancelled or purged.
+"""
+from __future__ import annotations
+
+import shutil
+from datetime import datetime, timedelta, timezone
+
+from app.console import jobs, mail, relays, web
+from app.deps import get_db, provider_log
+from app.tenancy import invalidate_cache, load_tenant, tenant_files_dir
+from app.tenant_migration import LEGACY_TENANT_ID
+
+GRACE_DAYS = 30
+WARN_DAYS = 7
+
+
+class LifecycleError(jobs.JobFailed):
+    pass
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def _fmt(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _row(conn, tenant_id: int):
+    return conn.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+
+
+def _set(conn, tenant_id: int, **cols) -> None:
+    sets = ", ".join(f"{k} = ?" for k in cols)
+    conn.execute(f"UPDATE tenants SET {sets}, updated_at = datetime('now') WHERE id = ?", (*cols.values(), tenant_id))
+    conn.commit()
+    invalidate_cache()
+
+
+def guard(tenant_id: int, action: str) -> None:
+    if tenant_id == LEGACY_TENANT_ID and action in ("cancel", "purge"):
+        raise LifecycleError(f"Tenant #1 can't be {'cancelled' if action == 'cancel' else 'purged'}.")
+
+
+def admin_emails(conn, tenant_id: int) -> list[str]:
+    return [r[0] for r in conn.execute("SELECT email FROM users WHERE tenant_id = ? AND role = 'admin'", (tenant_id,))]
+
+
+# ── Immediate actions (no docker work) ───────────────────────────────────────
+
+def suspend(tenant_id: int, by: str) -> None:
+    conn = get_db()
+    t = _row(conn, tenant_id)
+    if t is None or t["status"] not in ("trial", "active"):
+        conn.close()
+        raise LifecycleError("Only a trial or active tenant can be suspended.")
+    _set(conn, tenant_id, status="suspended")
+    provider_log(conn, "tenant_suspended", t["slug"], by, tenant_id)
+    conn.close()
+
+
+def extend_grace(tenant_id: int, days: int, by: str) -> str:
+    conn = get_db()
+    t = _row(conn, tenant_id)
+    if t is None or t["status"] != "cancelled" or not t["purge_after"]:
+        conn.close()
+        raise LifecycleError("Only a cancelled tenant has a grace period.")
+    days = max(1, min(365, int(days)))
+    new = datetime.strptime(t["purge_after"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc) + timedelta(days=days)
+    _set(conn, tenant_id, purge_after=_fmt(new), purge_warning_sent_at=None)
+    provider_log(conn, "tenant_grace_extended", f"{t['slug']} +{days}d → {_fmt(new)}", by, tenant_id)
+    conn.close()
+    return _fmt(new)
+
+
+def set_plan(tenant_id: int, plan: str, by: str) -> None:
+    conn = get_db()
+    t = _row(conn, tenant_id)
+    if t is None:
+        conn.close()
+        raise LifecycleError("Tenant not found.")
+    _set(conn, tenant_id, plan=plan.strip()[:200])
+    provider_log(conn, "tenant_plan_changed", f"{t['slug']}: {plan.strip()[:200]}", by, tenant_id)
+    conn.close()
+
+
+# ── Jobs (docker / helper work) ──────────────────────────────────────────────
+
+def _notify_admins(conn, tenant_id: int, subject: str, lines: list[str]) -> None:
+    to = admin_emails(conn, tenant_id)
+    if to:
+        mail.send(to, subject, mail.simple_html(subject, lines), event="tenant_lifecycle_email")
+
+
+@jobs.handler("cancel_tenant")
+def _cancel(job) -> None:
+    guard(job.tenant_id, "cancel")
+    t = load_tenant(job.tenant_id)
+    if t is None or t.status not in ("trial", "active", "suspended"):
+        raise LifecycleError("This tenant can't be cancelled from its current status.")
+    if t.relay:
+        with job.step("Stop the relay (containers and keys are kept)"):
+            try:
+                relays.stop(t)
+            except relays.RelayError as e:
+                raise LifecycleError(str(e))
+    with job.step("Mark the tenant cancelled"):
+        now = _now()
+        purge_after = now + timedelta(days=GRACE_DAYS)
+        conn = get_db()
+        _set(conn, t.id, status="cancelled", cancelled_at=_fmt(now), purge_after=_fmt(purge_after),
+             purge_warning_sent_at=None)
+        provider_log(conn, "tenant_cancelled", f"{t.slug}; purge after {_fmt(purge_after)}", job.created_by, t.id)
+        _notify_admins(conn, t.id, f"Your {t.display_name} RustDesk Fleet account was cancelled", [
+            "Remote support for this account has stopped.",
+            f"You can still sign in to download your data (devices, groups, users, session history) until "
+            f"{purge_after.strftime('%Y-%m-%d')}. After that, everything is deleted for good.",
+        ])
+        conn.close()
+
+
+@jobs.handler("reactivate_tenant")
+def _reactivate(job) -> None:
+    conn = get_db()
+    row = _row(conn, job.tenant_id)
+    conn.close()
+    if row is None or row["status"] not in ("suspended", "cancelled"):
+        raise LifecycleError("Only a suspended or cancelled tenant can be reactivated.")
+    if row["status"] == "cancelled":
+        if not row["purge_after"] or row["purge_after"] <= _fmt(_now()):
+            raise LifecycleError("The grace period is over; this tenant can't be reactivated.")
+        t = load_tenant(job.tenant_id)
+        if t.relay:
+            with job.step("Start the relay again (same keys and ports)"):
+                try:
+                    relays.start(t)
+                except relays.RelayError as e:
+                    raise LifecycleError(str(e))
+    with job.step("Mark the tenant active"):
+        conn = get_db()
+        _set(conn, job.tenant_id, status="active", cancelled_at=None, purge_after=None, purge_warning_sent_at=None)
+        provider_log(conn, "tenant_reactivated", row["slug"], job.created_by, job.tenant_id)
+        conn.close()
+
+
+def purge_now(tenant_id: int, job=None, by: str = "") -> None:
+    """Delete everything of a cancelled tenant except what TENANCY.md says to
+    keep. Idempotent: a purge that stopped half-way can simply run again."""
+    from app.console.tenants import delete_tenant_rows
+
+    guard(tenant_id, "purge")
+
+    def step(name):
+        return job.step(name) if job else _nullstep()
+
+    conn = get_db()
+    row = _row(conn, tenant_id)
+    conn.close()
+    if row is None or row["status"] not in ("cancelled", "purged"):
+        raise LifecycleError("Only a cancelled tenant can be purged.")
+    slug = row["slug"]
+    with step("Remove the relay"):
+        try:
+            relays.remove(tenant_id)
+            web.purge_relay_data(tenant_id)
+        except (relays.RelayError, web.WebError) as e:
+            raise LifecycleError(str(e))
+    conn = get_db()
+    hosts = [r[0] for r in conn.execute("SELECT hostname FROM tenant_domains WHERE tenant_id = ?", (tenant_id,))]
+    conn.close()
+    for host in hosts:
+        with step(f"Remove https://{host} (vhost and certificate)"):
+            try:
+                web.unpublish(host)
+            except web.WebError as e:
+                raise LifecycleError(str(e))
+    with step("Delete the tenant's files"):
+        shutil.rmtree(tenant_files_dir(tenant_id), ignore_errors=True)
+        if tenant_files_dir(tenant_id).exists():
+            raise LifecycleError(f"Couldn't delete {tenant_files_dir(tenant_id)}.")
+    with step("Delete the tenant's data"):
+        conn = get_db()
+        conn.execute("DELETE FROM tenant_domains WHERE tenant_id = ?", (tenant_id,))
+        conn.execute("DELETE FROM relays WHERE tenant_id = ?", (tenant_id,))
+        delete_tenant_rows(conn, tenant_id, keep_provider_events=True)
+        _set(conn, tenant_id, status="purged", purged_at=_fmt(_now()))
+        provider_log(conn, "tenant_purged", slug, by or (job.created_by if job else "scheduled"), tenant_id)
+        conn.close()
+
+
+class _nullstep:
+    def __enter__(self):
+        return {}
+
+    def __exit__(self, *exc):
+        return False
+
+
+@jobs.handler("purge_tenant")
+def _purge(job) -> None:
+    purge_now(job.tenant_id, job)
+
+
+# ── Daily: warnings and due purges ───────────────────────────────────────────
+
+def daily(now: datetime | None = None) -> None:
+    now = now or _now()
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM tenants WHERE status = 'cancelled' AND purge_after IS NOT NULL").fetchall()
+    for t in rows:
+        due = datetime.strptime(t["purge_after"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        if due <= now:
+            if not jobs.active_for(t["id"]):
+                jobs.enqueue("purge_tenant", t["id"], {"reason": "grace period over"}, "scheduled")
+        elif due - now <= timedelta(days=WARN_DAYS) and not t["purge_warning_sent_at"]:
+            _notify_admins(conn, t["id"], f"Your {t['display_name']} RustDesk Fleet data will be deleted soon", [
+                f"This cancelled account and all its data will be deleted on {due.strftime('%Y-%m-%d')}.",
+                "Sign in before then to download your data from the export page.",
+            ])
+            _set(conn, t["id"], purge_warning_sent_at=_fmt(now))
+            provider_log(conn, "tenant_purge_warning_sent", t["slug"], "scheduled", t["id"])
+    conn.close()

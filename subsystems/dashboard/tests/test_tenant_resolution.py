@@ -60,8 +60,11 @@ def test_suspended_tenant_gets_the_inactive_page(admin):
         r = c.get(path, follow_redirects=False)
         assert r.status_code == 403, path
         assert "not active" in r.text
+    # Cancelled: sign-in stays open so admins can export their data (phase 1b);
+    # everything else is closed.
     set_status(1, "cancelled")
-    assert new_client().get("/login").status_code == 403
+    assert new_client().get("/login").status_code == 200
+    assert new_client().get("/devices", follow_redirects=False).status_code == 403
 
 
 def test_suspended_tenant_still_accepts_device_reports():

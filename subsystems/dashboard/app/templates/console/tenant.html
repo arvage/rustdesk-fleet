@@ -61,7 +61,34 @@
   <p class="text-sm text-muted" style="margin:6px 0 0">Free text for now; billing will read it later.</p>
 </div></div></div>
 
-{% block lifecycle %}{% endblock %}
+<div class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 10px">Lifecycle</h2>
+  {% if t.status in ("trial", "active") %}
+  <form method="post" action="/tenants/{{ t.id }}/suspend" style="display:inline" onsubmit="return confirm('Suspend {{ t.slug }}? Its dashboard and download links stop working; its relay keeps running.')">
+    <button class="btn btn-ghost btn-sm" style="color:var(--warning)">Suspend</button></form>
+  {% endif %}
+  {% if t.status == "suspended" or (t.status == "cancelled" and t.purge_after and t.purge_after > now) %}
+  <form method="post" action="/tenants/{{ t.id }}/reactivate" style="display:inline"><button class="btn btn-primary btn-sm">Reactivate</button></form>
+  {% endif %}
+  {% if t.id != 1 and t.status in ("trial", "active", "suspended") %}
+  <form method="post" action="/tenants/{{ t.id }}/cancel" style="display:flex;gap:8px;align-items:center;margin-top:10px">
+    <input name="confirm" placeholder="type {{ t.slug }} to cancel" required>
+    <button class="btn btn-ghost btn-sm" style="color:var(--danger)">Cancel tenant</button>
+    <span class="text-sm text-muted">Stops the relay now; data is kept for 30 days for export or reactivation, then purged.</span>
+  </form>
+  {% endif %}
+  {% if t.status == "cancelled" %}
+  <p style="margin:10px 0">Cancelled {{ t.cancelled_at | localtime }}. Purge after <strong>{{ t.purge_after | localtime }}</strong>
+    {% if t.purge_warning_sent_at %}(warning emailed {{ t.purge_warning_sent_at | localtime }}){% endif %}.</p>
+  <form method="post" action="/tenants/{{ t.id }}/extend-grace" style="display:inline-flex;gap:8px;align-items:center">
+    <input name="days" value="30" size="4"> days <button class="btn btn-ghost btn-sm">Extend grace period</button></form>
+  <form method="post" action="/tenants/{{ t.id }}/purge" style="display:flex;gap:8px;align-items:center;margin-top:10px"
+        onsubmit="return confirm('Purge {{ t.slug }} now? This deletes its relay, keys, files and data for good.')">
+    <input name="confirm" placeholder="type {{ t.slug }} to purge" required>
+    <button class="btn btn-ghost btn-sm" style="color:var(--danger)">Purge now</button></form>
+  {% endif %}
+  {% if t.id == 1 %}<p class="text-sm text-muted" style="margin:10px 0 0">Tenant #1 can't be cancelled or purged.</p>{% endif %}
+</div></div></div>
 
 <div class="section"><div class="card"><div class="card-body">
   <h2 style="font-size:14px;margin:0 0 10px">Daily usage (last 31 days)</h2>

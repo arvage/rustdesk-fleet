@@ -189,3 +189,102 @@ async def tenant_plan(request: Request, tenant_id: int, plan: str = Form(""), us
     conn.close()
     _flash(request, "success", "Plan saved.")
     return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+
+
+# ── Lifecycle ────────────────────────────────────────────────────────────────
+
+def _lifecycle_target(request: Request, tenant_id: int):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+    conn.close()
+    if row is None or row["status"] == "purged":
+        _flash(request, "error", "Tenant not found.")
+        return None
+    return row
+
+
+def _queue(request: Request, kind: str, row, user: dict, params: dict | None = None):
+    if jobs.active_for(row["id"]):
+        _flash(request, "error", f"{row['slug']} already has a job running; wait for it to finish.")
+        return RedirectResponse(f"/tenants/{row['id']}", status_code=303)
+    job_id = jobs.enqueue(kind, row["id"], params or {}, user["email"])
+    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+
+@router.post("/tenants/{tenant_id}/suspend")
+async def tenant_suspend(request: Request, tenant_id: int, user: dict = Depends(require_provider)):
+    from app.console import lifecycle
+    row = _lifecycle_target(request, tenant_id)
+    if row is None:
+        return RedirectResponse("/", status_code=303)
+    try:
+        lifecycle.suspend(tenant_id, user["email"])
+        _flash(request, "success", f"{row['slug']} is suspended. Its relay keeps running.")
+    except lifecycle.LifecycleError as e:
+        _flash(request, "error", str(e))
+    return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+
+
+@router.post("/tenants/{tenant_id}/reactivate")
+async def tenant_reactivate(request: Request, tenant_id: int, user: dict = Depends(require_provider)):
+    row = _lifecycle_target(request, tenant_id)
+    if row is None:
+        return RedirectResponse("/", status_code=303)
+    if row["status"] not in ("suspended", "cancelled"):
+        _flash(request, "error", "Only a suspended or cancelled tenant can be reactivated.")
+        return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+    return _queue(request, "reactivate_tenant", row, user)
+
+
+@router.post("/tenants/{tenant_id}/cancel")
+async def tenant_cancel(request: Request, tenant_id: int, confirm: str = Form(""),
+                        user: dict = Depends(require_provider)):
+    from app.console import lifecycle
+    row = _lifecycle_target(request, tenant_id)
+    if row is None:
+        return RedirectResponse("/", status_code=303)
+    try:
+        lifecycle.guard(tenant_id, "cancel")
+    except lifecycle.LifecycleError as e:
+        _flash(request, "error", str(e))
+        return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+    if confirm != row["slug"]:
+        _flash(request, "error", "Type the tenant's slug to confirm.")
+        return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+    return _queue(request, "cancel_tenant", row, user)
+
+
+@router.post("/tenants/{tenant_id}/extend-grace")
+async def tenant_extend(request: Request, tenant_id: int, days: str = Form("30"),
+                        user: dict = Depends(require_provider)):
+    from app.console import lifecycle
+    row = _lifecycle_target(request, tenant_id)
+    if row is None:
+        return RedirectResponse("/", status_code=303)
+    try:
+        new = lifecycle.extend_grace(tenant_id, int(days) if days.strip().isdigit() else 30, user["email"])
+        _flash(request, "success", f"Grace period extended: purge after {new} UTC.")
+    except lifecycle.LifecycleError as e:
+        _flash(request, "error", str(e))
+    return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+
+
+@router.post("/tenants/{tenant_id}/purge")
+async def tenant_purge(request: Request, tenant_id: int, confirm: str = Form(""),
+                       user: dict = Depends(require_provider)):
+    from app.console import lifecycle
+    row = _lifecycle_target(request, tenant_id)
+    if row is None:
+        return RedirectResponse("/", status_code=303)
+    try:
+        lifecycle.guard(tenant_id, "purge")
+    except lifecycle.LifecycleError as e:
+        _flash(request, "error", str(e))
+        return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+    if row["status"] != "cancelled":
+        _flash(request, "error", "Cancel the tenant first; only cancelled tenants can be purged.")
+        return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+    if confirm != row["slug"]:
+        _flash(request, "error", "Type the tenant's slug to confirm the purge.")
+        return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+    return _queue(request, "purge_tenant", row, user, {"reason": "purge now"})

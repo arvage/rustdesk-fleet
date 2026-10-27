@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Export your data — RustDesk Fleet{% endblock %}
+{% block page_title %}Export your data{% endblock %}
+{% block content %}
+{% if tenant.status == "cancelled" %}
+<div class="flash error">This account was cancelled. You can download your data here until it is deleted for good.</div>
+{% endif %}
+<div class="section"><div class="card"><div class="card-body">
+  <p style="margin:0 0 12px">Download your data as CSV files:</p>
+  <ul style="margin:0;line-height:2">
+  {% for key, label in exports.items() %}<li><a href="/export/{{ key }}.csv">{{ label }}</a></li>{% endfor %}
+  </ul>
+</div></div></div>
+{% endblock %}

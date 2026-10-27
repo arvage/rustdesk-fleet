@@ -312,9 +312,26 @@ class TenantMiddleware:
         if tenant is None and not is_device_api:
             return await _plain(send, 404, _NOT_FOUND_HTML)
         if tenant is not None and not tenant.is_open and not is_device_api:
-            return await _plain(send, 403, _INACTIVE_HTML)
+            # A cancelled tenant's admins may still sign in and export their
+            # data until the purge; everything else is closed.
+            if tenant.status == "cancelled" and _export_allowed(path):
+                if path == "/":
+                    return await _redirect(send, "/export")
+            else:
+                return await _plain(send, 403, _INACTIVE_HTML)
         scope.setdefault("state", {})["tenant"] = tenant
         return await self.app(scope, receive, send)
+
+
+def _export_allowed(path: str) -> bool:
+    """Paths a cancelled tenant can still reach: sign-in and the export page."""
+    return (path in ("/", "/login", "/logout", "/export") or path.startswith(("/login/webauthn", "/static/", "/export/")))
+
+
+async def _redirect(send, location: str) -> None:
+    await send({"type": "http.response.start", "status": 303,
+                "headers": [(b"location", location.encode()), (b"content-length", b"0")]})
+    await send({"type": "http.response.body", "body": b""})
 
 
 async def _plain(send, status: int, body: bytes) -> None:

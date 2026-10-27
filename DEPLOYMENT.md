@@ -531,9 +531,17 @@ registry (`data/db_v2.sqlite3`) and the dashboard database
 (`fleet.sqlite3`), plus `docker-compose.yml` and `rustdesk_version.txt`.
 Backups are run by the provider and cover every relay in the `relays`
 table: tenant #1's relay is stored as above, any other relay under
-`relays/<tenant id>/` in the same archive. The backup controls are on
-tenant #1's dashboard only.
+`relays/<tenant id>/` in the same archive. The backup controls are in the
+provider console (Backups).
 Installer binaries and upstream assets are excluded (large, reproducible).
+
+**Purged tenants and backups.** Purging a tenant (provider console, 30 days
+after cancellation) deletes its data from this box, but archives taken
+before the purge still contain it: its rows in `fleet.sqlite3` and its
+relay's keypair and peer database. They disappear as backup retention
+rotates those archives out (local: *Keep this many local archives*;
+off-site: *Keep this many off-site copies* or the bucket's lifecycle rule).
+Restoring such an archive would bring the purged tenant back as it was.
 Both live SQLite databases are copied with SQLite's online-backup API, so
 each archive is internally consistent. Archives land in
 `/opt/rustdesk-fleet/backups/` and the newest N are kept — set as *Keep this

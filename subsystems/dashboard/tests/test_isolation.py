@@ -27,6 +27,8 @@ def tenant_param(path: str, name: str):
         return "dynamic_group_id", MISSING_INT
     if name == "filename" and path.startswith("/download/"):
         return "installer_file", "RemoteSupport-nope-1.4.9-linux.sh"
+    if name == "token" and path.startswith("/invite/"):
+        return "invite_token", "no-such-invite-" + "x" * 20
     return {
         "rustdesk_id": ("rid", "999999999"),
         "rid": ("rid", "999999999"),
@@ -50,6 +52,7 @@ CATALOGUE_PARAMS = {
     ("/admin/emails/{key}", "key"): "device_offline",
     ("/d/{token}/{platform}", "platform"): "linux",
     ("/guides/{filename}", "filename"): "getting-help.pdf",                   # client-docs, public
+    ("/export/{name}.csv", "name"): "devices",                                # routes/export.py EXPORTS
 }
 
 # Enough form fields for every POST route to get past validation to its
