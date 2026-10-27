@@ -16,3 +16,7 @@ FLEET_DB = DATA_DIR / "fleet.sqlite3"
 HBBS_DB = DATA_DIR / "data" / "db_v2.sqlite3"
 OS_LIFECYCLE_CACHE = DATA_DIR / "os-lifecycle.json"
 # Per-tenant files (installers, branding, email logo): app.tenancy.tenant_files_dir().
+
+# Tests set this so the background watcher threads (routes/api.py,
+# routes/home.py) don't start; they call the watcher functions directly.
+WATCHERS_ENABLED = os.environ.get("FLEET_DISABLE_WATCHERS", "") != "1"

@@ -100,7 +100,8 @@ def _bg_poll_loop() -> None:
 
 
 # Start background polling immediately when the module is imported.
-threading.Thread(target=_bg_poll_loop, daemon=True, name="hbbs-ss-poll").start()
+if paths.WATCHERS_ENABLED:
+    threading.Thread(target=_bg_poll_loop, daemon=True, name="hbbs-ss-poll").start()
 
 router = APIRouter(prefix="/api")
 
@@ -335,7 +336,8 @@ def _bg_offline_watch_loop() -> None:
         time.sleep(_OFFLINE_WATCH_INTERVAL_S)
 
 
-threading.Thread(target=_bg_offline_watch_loop, daemon=True, name="device-offline-watch").start()
+if paths.WATCHERS_ENABLED:
+    threading.Thread(target=_bg_offline_watch_loop, daemon=True, name="device-offline-watch").start()
 
 
 @router.get("/devices")
@@ -602,4 +604,5 @@ def _bg_health_alert_loop() -> None:
         time.sleep(_HEALTH_ALERT_INTERVAL_S)
 
 
-threading.Thread(target=_bg_health_alert_loop, daemon=True, name="health-alert-watch").start()
+if paths.WATCHERS_ENABLED:
+    threading.Thread(target=_bg_health_alert_loop, daemon=True, name="health-alert-watch").start()

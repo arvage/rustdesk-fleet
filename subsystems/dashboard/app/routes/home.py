@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
+from app import paths
 from app.auth import _users_exist, require_auth
 from app.deps import get_db, log_event
 from app.notifications import fire_notification
@@ -131,7 +132,8 @@ def _rebuild_outdated_installers(tenant_id: int, version: str, user_email: str) 
         _rebuild_lock.release()
 
 
-threading.Thread(target=_bg_update_watch_loop, daemon=True, name="server-update-watch").start()
+if paths.WATCHERS_ENABLED:
+    threading.Thread(target=_bg_update_watch_loop, daemon=True, name="server-update-watch").start()
 
 
 def _set_flash(request: Request, type_: str, msg: str) -> None:

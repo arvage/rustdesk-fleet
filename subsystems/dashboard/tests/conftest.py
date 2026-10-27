@@ -26,6 +26,7 @@ PASSWORD = "correct-password-1"
 os.environ["FLEET_DATA_DIR"] = str(DATA_DIR)
 os.environ["SESSION_SECRET"] = SESSION_SECRET
 os.environ["SETUP_TOKEN"] = SETUP_TOKEN
+os.environ["FLEET_DISABLE_WATCHERS"] = "1"   # no background threads on the test DB
 sys.path[:0] = [str(DASH_DIR), str(SINGLE_TENANT_DIR)]
 
 import bcrypt  # noqa: E402
