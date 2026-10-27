@@ -47,11 +47,16 @@ def publish(host: str) -> None:
 
 def unpublish(host: str, revoke: bool = True) -> None:
     """Remove a web domain's vhost (reloading nginx) and, optionally, its
-    certificate. Safe to call when parts are already gone."""
-    _helper("remove-vhost", host)
-    _helper("reload-nginx")
-    if revoke:
-        _helper("revoke-cert", host)
+    certificate. Safe to call when parts are already gone. Every part is
+    tried; a WebError afterwards lists what failed."""
+    problems = []
+    for args in (("remove-vhost", host), ("reload-nginx",), *((("revoke-cert", host),) if revoke else ())):
+        try:
+            _helper(*args)
+        except WebError as e:
+            problems.append(f"{args[0]}: {e}")
+    if problems:
+        raise WebError("; ".join(problems))
 
 
 def purge_relay_data(tenant_id: int) -> None:

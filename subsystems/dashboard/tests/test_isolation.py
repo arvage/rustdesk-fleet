@@ -249,16 +249,17 @@ def test_a_pending_passkey_sign_in_doesnt_carry_to_another_tenant(two_tenants):
     assert r.status_code == 200 and r.json()["rpId"] == HOST
 
 
-def test_setup_creates_the_first_admin_of_the_requests_tenant(admin):
+def test_setup_is_only_for_tenant_one(admin):
+    """Other tenants get their first admin from an invite link (provider
+    console), never from /setup and SETUP_TOKEN."""
     from conftest import SETUP_TOKEN, add_tenant
     add_tenant(3, "initech", "c.rds.example.com")
     c = new_client("c.rds.example.com")
-    assert c.get("/", follow_redirects=False).headers["location"] == "/setup"
-    assert new_client(HOST).get("/setup", follow_redirects=False).headers["location"] == "/"
+    assert c.get("/", follow_redirects=False).headers["location"] == "/login"
+    assert c.get("/setup").status_code == 404
     r = c.post("/setup", data={"email": "boss@initech.example.com", "display_name": "Boss",
                                "password": "long-password-1", "password2": "long-password-1",
                                "setup_token": SETUP_TOKEN}, follow_redirects=False)
-    assert r.headers["location"] == "/login?setup=1"
-    assert [tuple(r) for r in db_rows("SELECT tenant_id, role FROM users WHERE email = 'boss@initech.example.com'")] == [(3, "admin")]
-    assert login(new_client("c.rds.example.com"), {"email": "boss@initech.example.com",
-                                                    "password": "long-password-1"}).status_code == 303
+    assert r.status_code == 404
+    assert db_rows("SELECT * FROM users WHERE tenant_id = 3") == []
+    assert new_client(HOST).get("/setup", follow_redirects=False).headers["location"] == "/"

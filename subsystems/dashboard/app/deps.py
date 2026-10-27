@@ -602,5 +602,7 @@ def run_migrations(db_path=None) -> None:
     from app.console import jobs as _jobs, relays as _relays
     _jobs.ensure_table(conn)
     _relays.ensure_tables(conn)
+    from app.console import tenants as _tenants
+    _tenants.ensure_tables(conn)
 
     conn.close()

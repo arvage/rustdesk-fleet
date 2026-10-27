@@ -14,6 +14,7 @@ from app.console.auth import ProviderAuthRedirect, router as auth_router
 from app.console.routes import router as console_router
 from app.console.server import router as server_router
 from app.console.relay_pages import router as relay_router
+from app.console.tenant_pages import router as tenant_router
 
 console_app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -56,3 +57,4 @@ console_app.include_router(auth_router)
 console_app.include_router(console_router)
 console_app.include_router(server_router)
 console_app.include_router(relay_router)
+console_app.include_router(tenant_router)

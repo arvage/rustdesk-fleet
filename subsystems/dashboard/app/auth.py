@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app import ratelimit
 from app.deps import get_db, log_event
 from app.tenancy import Tenant, get_tenant
+from app.tenant_migration import LEGACY_TENANT_ID
 from app.templates_config import templates
 
 router = APIRouter()
@@ -73,6 +74,11 @@ def sign_in(request: Request, user) -> None:
     request.session.clear()
     request.session["user_id"] = user["id"]
     request.session["session_version"] = user["session_version"]
+    conn = get_db()
+    conn.execute("UPDATE users SET last_sign_in_at = datetime('now') WHERE id = ? AND tenant_id = ?",
+                 (user["id"], tenant.id))
+    conn.commit()
+    conn.close()
 
 
 def bump_session_version(conn, tenant_id: int, user_id: int) -> int:
@@ -96,7 +102,11 @@ def require_auth(request: Request) -> dict:
     """
     tenant = get_tenant(request)
     if not _users_exist(tenant):
-        raise _SetupRedirect()
+        # Only tenant #1's original install path uses /setup; other tenants
+        # get their first admin from an invite link (provider console).
+        if tenant.id == LEGACY_TENANT_ID:
+            raise _SetupRedirect()
+        raise _AuthRedirect()
     user_id = request.session.get("user_id")
     if not user_id:
         raise _AuthRedirect()
@@ -143,8 +153,16 @@ def _setup_page(request: Request, error: str | None, token: str = "", status_cod
     )
 
 
+def _setup_allowed(tenant: Tenant) -> None:
+    """/setup (with SETUP_TOKEN) is tenant #1's install path only."""
+    if tenant.id != LEGACY_TENANT_ID:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404)
+
+
 @router.get("/setup", response_class=HTMLResponse)
 async def setup_get(request: Request, tenant: Tenant = Depends(get_tenant)):
+    _setup_allowed(tenant)
     if _users_exist(tenant):
         return RedirectResponse("/", status_code=303)
     if not _setup_token():
@@ -166,7 +184,8 @@ async def setup_post(
     setup_token: str = Form(""),
     tenant: Tenant = Depends(get_tenant),
 ):
-    """Create the first admin of the request's tenant."""
+    """Create the first admin of tenant #1 (other tenants: invite links)."""
+    _setup_allowed(tenant)
     if _users_exist(tenant):
         return RedirectResponse("/", status_code=303)
     if not _setup_token():
@@ -207,7 +226,7 @@ async def setup_post(
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_get(request: Request, tenant: Tenant = Depends(get_tenant)):
-    if not _users_exist(tenant):
+    if not _users_exist(tenant) and tenant.id == LEGACY_TENANT_ID:
         return RedirectResponse("/setup", status_code=303)
     if request.session.get("user_id"):
         return RedirectResponse("/", status_code=303)

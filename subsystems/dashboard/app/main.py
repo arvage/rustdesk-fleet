@@ -24,6 +24,7 @@ from app.routes.dynamic_groups import router as dynamic_groups_router
 from app.routes.reports import router as reports_router
 from app.routes.email_templates import router as email_templates_router
 from app.routes.timeline import router as timeline_router
+from app.routes.invites import router as invites_router
 from app.deps import run_migrations
 from app.tenancy import TenantMiddleware, UnknownTenant
 
@@ -100,7 +101,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 async def startup():
     run_migrations()
     # Provider console jobs (tenant creation, relay operations, purges).
-    from app.console import jobs, relays  # noqa: F401  (registers job handlers)
+    from app.console import jobs, relays, tenants  # noqa: F401  (registers job handlers)
     jobs.start_worker()
 
 
@@ -142,3 +143,4 @@ app.include_router(dynamic_groups_router)
 app.include_router(reports_router)
 app.include_router(email_templates_router)
 app.include_router(timeline_router)
+app.include_router(invites_router)

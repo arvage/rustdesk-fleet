@@ -1,0 +1,23 @@
+{% extends "console/base.html" %}
+{% block title %}New tenant — Provider console{% endblock %}
+{% block page_title %}New tenant{% endblock %}
+{% block content %}
+{% for e in errors %}<div class="flash error">{{ e }}</div>{% endfor %}
+<form method="post" action="/tenants" class="section"><div class="card"><div class="card-body" style="display:grid;gap:12px;max-width:520px">
+  <label>Display name<br><input name="name" id="name" value="{{ f.name or '' }}" required style="width:100%"></label>
+  <label>Slug<br><input name="slug" id="slug" value="{{ f.slug or '' }}" pattern="[a-z][a-z0-9-]{1,30}[a-z0-9]" style="width:100%">
+    <span class="text-sm text-muted">Web: <code><span id="s1">{{ f.slug or 'slug' }}</span>.{{ domain }}</code> · relay: <code><span id="s2">{{ f.slug or 'slug' }}</span>.relay.{{ domain }}</code>. Lowercase letters, digits and hyphens, 3–32 characters, starting with a letter. Can't be changed later.</span></label>
+  <label>First admin's email<br><input type="email" name="admin_email" value="{{ f.admin_email or '' }}" required style="width:100%"></label>
+  <label>First admin's name<br><input name="admin_name" value="{{ f.admin_name or '' }}" style="width:100%"></label>
+  <p class="text-sm text-muted" style="margin:0">Creating takes a minute: a relay with its own keypair and port block, a certificate and vhost for the web domain, the client PDF guides, and an invitation (valid 72 hours) for the first admin.</p>
+  <div><button class="btn btn-primary">Create tenant</button></div>
+</div></div></form>
+<script>
+const nameEl = document.getElementById('name'), slugEl = document.getElementById('slug');
+let touched = slugEl.value !== '';
+function suggest(n) { return n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+/, '').slice(0, 32).replace(/-+$/, ''); }
+function show() { document.getElementById('s1').textContent = document.getElementById('s2').textContent = slugEl.value || 'slug'; }
+nameEl.addEventListener('input', () => { if (!touched) { slugEl.value = suggest(nameEl.value); show(); } });
+slugEl.addEventListener('input', () => { touched = true; show(); });
+</script>
+{% endblock %}

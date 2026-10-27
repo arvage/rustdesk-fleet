@@ -68,6 +68,12 @@ def fresh_state():
     conn.commit()
     conn.close()
 
+    # Tenant #1's relay stack, as setup_server.py init writes it.
+    (DATA_DIR / "docker-compose.yml").write_text(
+        "services:\n  hbbs:\n    image: rustdesk/rustdesk-server:1.1.16\n    container_name: hbbs\n"
+        "  hbbr:\n    image: rustdesk/rustdesk-server:1.1.16\n    container_name: hbbr\n")
+    import shutil
+    shutil.rmtree(DATA_DIR / "tenants", ignore_errors=True)
     ratelimit.reset()
     tenancy.invalidate_cache()
     permissions.invalidate_cache()

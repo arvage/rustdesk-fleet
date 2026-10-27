@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up your account — RustDesk Fleet</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <script>
+  // Theme: 'light' | 'dark' | 'system' (follows the OS), saved per browser.
+  // Runs before the page paints so dark mode doesn't flash white.
+  (function () {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    function apply() {
+      var t = localStorage.getItem('rdf-theme') || 'system';
+      document.documentElement.dataset.theme = (t === 'dark' || (t === 'system' && mq.matches)) ? 'dark' : 'light';
+    }
+    apply();
+    mq.addEventListener('change', apply);
+    window.rdfApplyTheme = apply;
+  })();
+  </script>
+  <link rel="stylesheet" href="/static/style.css?v=5">
+</head>
+<body>
+<div class="login-shell">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="brand-icon">R</div>
+      <div>
+        <span class="brand-name">RustDesk Fleet</span>
+        <span class="brand-sub">Management Console</span>
+      </div>
+    </div>
+    {% if invite %}
+    <h2>Set up your account</h2>
+    <p>For <strong>{{ invite.email }}</strong>. This link works once.</p>
+    {% if error %}<div class="flash error" style="margin-bottom:16px">{{ error }}</div>{% endif %}
+    <form method="post" action="/invite/{{ token }}">
+      <div class="login-field">
+        <label for="display_name">Your name</label>
+        <input id="display_name" name="display_name" value="{{ invite.display_name }}" autocomplete="name">
+      </div>
+      <div class="login-field">
+        <label for="password">Password (10+ characters)</label>
+        <input type="password" id="password" name="password" required minlength="10" autocomplete="new-password">
+      </div>
+      <div class="login-field">
+        <label for="password2">Password again</label>
+        <input type="password" id="password2" name="password2" required minlength="10" autocomplete="new-password">
+      </div>
+      <button type="submit" class="btn btn-primary">Create my account</button>
+    </form>
+    {% else %}
+    <h2>Link not valid</h2>
+    <p>{{ error or "This invitation link is invalid, has already been used, or has expired. Ask your provider for a new one." }}</p>
+    <a href="/login" class="btn btn-ghost" style="margin-top:10px">Go to sign in</a>
+    {% endif %}
+  </div>
+</div>
+</body>
+</html>

@@ -66,9 +66,16 @@ CLIENT_GUIDES: dict[str, str] = {
 }
 
 
-def available_guides() -> list[dict]:
+def guide_path(tenant_id: int, filename: str) -> Path:
+    """The tenant's own guide (generated when the provider console created
+    it, with its name), else the repo's generic one (tenant #1)."""
+    own = tenant_files_dir(tenant_id) / "guides" / filename
+    return own if own.is_file() else GUIDES_DIR / filename
+
+
+def available_guides(tenant_id: int) -> list[dict]:
     return [{"filename": f, "label": label} for f, label in CLIENT_GUIDES.items()
-            if (GUIDES_DIR / f).is_file()]
+            if guide_path(tenant_id, f).is_file()]
 
 router = APIRouter()
 
@@ -345,7 +352,7 @@ async def public_download_page(request: Request, token: str, tenant: Tenant = De
             "installers": installers,
             "token": token,
             "expires_at": link["expires_at"],
-            "guides": available_guides(),
+            "guides": available_guides(tenant.id),
         },
     )
     resp.headers.update(_PUBLIC_HEADERS)
@@ -409,11 +416,11 @@ async def public_download_file(request: Request, token: str, platform: str,
 
 
 @router.get("/guides/{filename}")
-async def public_client_guide(filename: str):
-    if filename not in CLIENT_GUIDES or not (GUIDES_DIR / filename).is_file():
+async def public_client_guide(filename: str, tenant: Tenant = Depends(get_tenant)):
+    if filename not in CLIENT_GUIDES or not guide_path(tenant.id, filename).is_file():
         raise HTTPException(status_code=404)
     resp = FileResponse(
-        path=str(GUIDES_DIR / filename),
+        path=str(guide_path(tenant.id, filename)),
         filename=filename,
         media_type="application/pdf",
         content_disposition_type="inline",
