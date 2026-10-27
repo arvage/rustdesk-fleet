@@ -34,6 +34,15 @@ console_app.add_middleware(
     https_only=True,
     same_site="lax",
 )
+@console_app.middleware("http")
+async def _mark(request: Request, call_next):
+    """Mark console responses, so tests (and anyone debugging) can tell which
+    app answered: tenant routes never carry this header."""
+    response = await call_next(request)
+    response.headers["X-Fleet-App"] = "console"
+    return response
+
+
 console_app.mount("/static", StaticFiles(directory=str(Path(__file__).parents[1] / "static")), name="static")
 
 

@@ -141,6 +141,14 @@ def _rp_id() -> str:
     return settings.console_host()
 
 
+async def _json(request: Request) -> dict | None:
+    try:
+        body = await request.json()
+    except ValueError:
+        return None
+    return body if isinstance(body, dict) else None
+
+
 def _origin(request: Request) -> str:
     proto = request.headers.get("x-forwarded-proto") or request.url.scheme
     return f"{proto}://{request.headers.get('host') or request.url.netloc}"
@@ -175,7 +183,9 @@ async def login_complete(request: Request):
         return JSONResponse({"error": ratelimit.locked_message(wait)}, status_code=429)
     if not challenge:
         return JSONResponse({"error": "Sign-in session expired — try again."}, status_code=400)
-    body = await request.json()
+    body = await _json(request)
+    if body is None:
+        return JSONResponse({"error": "Bad request."}, status_code=400)
     conn = get_db()
     row = conn.execute(
         """SELECT c.id AS cred_row, c.public_key, c.sign_count, u.*
@@ -255,7 +265,10 @@ async def enroll_complete(request: Request, token: str):
     if row is None or pending.get("token") != _hash(token):
         conn.close()
         return JSONResponse({"error": "This enrollment link is invalid, used or expired."}, status_code=404)
-    body = await request.json()
+    body = await _json(request)
+    if body is None:
+        conn.close()
+        return JSONResponse({"error": "Bad request."}, status_code=400)
     nickname = (body.pop("nickname", "") or "").strip()[:100]
     try:
         v = verify_registration_response(
