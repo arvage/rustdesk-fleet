@@ -154,13 +154,3 @@ async def admin_enable(request: Request, admin_id: int, user: dict = Depends(req
     conn.close()
     _flash(request, "success", f"{target['email']} is enabled again.")
     return RedirectResponse("/admins", status_code=303)
-
-
-# ── Overview (the tenant list arrives in a later step) ───────────────────────
-
-@router.get("/", response_class=HTMLResponse)
-async def overview(request: Request, user: dict = Depends(require_provider)):
-    conn = get_db()
-    tenants = conn.execute("SELECT id, slug, display_name, status, created_at FROM tenants ORDER BY id").fetchall()
-    conn.close()
-    return page(request, "overview.html", {"current_user": user, "tenants": tenants})

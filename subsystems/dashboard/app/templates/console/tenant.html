@@ -1,0 +1,77 @@
+{% extends "console/base.html" %}
+{% block title %}{{ t.display_name }} — Provider console{% endblock %}
+{% block page_title %}{{ t.display_name }} <span class="text-muted">({{ t.slug }})</span>{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+{% block content %}
+{% if new_invite %}
+<div class="flash success" style="word-break:break-all">Invitation link for {{ new_invite.email }} (valid 72 hours{% if new_invite.emailed %}, also emailed{% endif %}):<br>
+  <code>{{ new_invite.link }}</code> <button class="btn-copy" onclick="copyText('{{ new_invite.link }}', this)">Copy</button></div>
+{% endif %}
+<div class="stats">
+  <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value" style="font-size:18px">{{ t.status }}</div>
+    {% if t.status == "cancelled" and t.purge_after %}<div class="stat-sub">purge after {{ t.purge_after | localtime }}</div>{% endif %}</div>
+  <div class="stat-card"><div class="stat-label">Devices</div><div class="stat-value">{{ t.devices }}</div></div>
+  <div class="stat-card"><div class="stat-label">Technicians</div><div class="stat-value">{{ t.technicians }}</div></div>
+  <div class="stat-card"><div class="stat-label">Session hours</div><div class="stat-value">{{ usage.session_hours_this_month }}</div>
+    <div class="stat-sub">this month · {{ usage.session_hours_last_month }} last month</div></div>
+  <div class="stat-card"><div class="stat-label">Last activity</div><div class="stat-value" style="font-size:16px">{{ t.last_activity | localtime if t.last_activity else "never" }}</div></div>
+</div>
+
+<div class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 10px">Relay</h2>
+  {% if relay %}
+  <div class="kv-grid">
+    <div class="kv-row"><div class="kv-key">Host</div><div class="kv-val"><code>{{ relay.host }}</code></div></div>
+    <div class="kv-row"><div class="kv-key">Ports</div><div class="kv-val">rendezvous {{ relay.hbbs_port }} (TCP+UDP) · relay {{ relay.hbbr_port }}{% if block %} · block {{ block.nat }}–{{ block.ws_relay }}{% endif %}</div></div>
+    <div class="kv-row"><div class="kv-key">Public key</div><div class="kv-val"><code style="word-break:break-all">{{ relay.pubkey or "—" }}</code></div></div>
+    <div class="kv-row"><div class="kv-key">Version</div><div class="kv-val">{{ t.relay_version or "—" }}</div></div>
+    <div class="kv-row"><div class="kv-key">Containers</div><div class="kv-val">{% for role, c in containers.items() %}{{ role }}: {{ c.status }}{% if not loop.last %} · {% endif %}{% endfor %} ({{ relay.status }})</div></div>
+  </div>
+  <p class="text-sm" style="margin:10px 0 0"><a href="/relays">Start, stop, restart or upgrade on the Relays page</a></p>
+  {% else %}<p class="text-muted">No relay.</p>{% endif %}
+</div></div></div>
+
+<div class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 10px">Domains</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Hostname</th><th>Kind</th><th>Primary</th><th>TLS</th><th>Certificate expires</th></tr></thead>
+    <tbody>{% for d in domains %}<tr><td><a href="https://{{ d.hostname }}/" target="_blank" rel="noopener">{{ d.hostname }}</a></td><td>{{ d.kind }}</td>
+      <td>{{ "yes" if d.is_primary else "" }}</td><td>{{ d.tls_status or "" }}</td><td>{{ d.cert_expires_at | localtime if d.cert_expires_at else "—" }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div></div></div>
+
+<div class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 10px">Admins</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Email</th><th>Name</th><th>Since</th><th>Last sign-in</th><th></th></tr></thead>
+    <tbody>
+    {% for a in admins %}<tr><td>{{ a.email }}</td><td>{{ a.display_name or "" }}</td><td>{{ a.created_at | localtime("%Y-%m-%d") }}</td><td>{{ a.last_sign_in_at | localtime if a.last_sign_in_at else "never" }}</td><td></td></tr>{% endfor %}
+    {% for i in invites %}<tr><td>{{ i.email }}</td><td>{{ i.display_name }}</td><td colspan="2" class="text-muted">invited {{ i.created_at | localtime }} · {% if i.expires_at < now %}expired{% else %}expires {{ i.expires_at | localtime }}{% endif %}</td>
+      <td><form method="post" action="/tenants/{{ t.id }}/invites/{{ i.id }}/resend" style="margin:0"><button class="btn btn-ghost btn-sm">Resend invite</button></form></td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div></div></div>
+
+<div class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 10px">Plan</h2>
+  <form method="post" action="/tenants/{{ t.id }}/plan" style="display:flex;gap:8px">
+    <input name="plan" value="{{ t.plan or '' }}" placeholder="e.g. Pilot, 25 devices" style="min-width:280px">
+    <button class="btn btn-ghost btn-sm">Save</button>
+  </form>
+  <p class="text-sm text-muted" style="margin:6px 0 0">Free text for now; billing will read it later.</p>
+</div></div></div>
+
+{% block lifecycle %}{% endblock %}
+
+<div class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 10px">Daily usage (last 31 days)</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Day</th><th>Devices</th><th>Technicians</th><th>Session minutes</th></tr></thead>
+    <tbody>{% for u in usage.history %}<tr><td>{{ u.day }}</td><td>{{ u.devices }}</td><td>{{ u.technicians }}</td><td>{{ u.session_minutes }}</td></tr>
+    {% else %}<tr><td colspan="4" class="text-muted">Recorded once a day.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div></div></div>
+
+{% if jobs %}<div class="section"><h2 style="font-size:14px">Recent jobs</h2>
+  <p class="text-sm">{% for j in jobs %}<a href="/jobs/{{ j.id }}">#{{ j.id }} {{ j.kind }} ({{ j.status }})</a>{% if not loop.last %} · {% endif %}{% endfor %}</p></div>{% endif %}
+{% endblock %}

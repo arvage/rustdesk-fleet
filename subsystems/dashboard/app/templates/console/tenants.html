@@ -1,0 +1,33 @@
+{% extends "console/base.html" %}
+{% block title %}Tenants — Provider console{% endblock %}
+{% block page_title %}Tenants{% endblock %}
+{% block topbar_actions %}<a href="/tenants/new" class="btn btn-primary btn-sm">New tenant</a>{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+{% block content %}
+<form method="get" class="section" style="display:flex;gap:8px">
+  <input name="q" value="{{ q }}" placeholder="Search name, slug or domain" style="min-width:260px">
+  <button class="btn btn-ghost btn-sm">Search</button>
+</form>
+<div class="section"><div class="table-wrap"><table class="js-sort">
+  <thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Created</th><th>Devices</th><th>Technicians</th>
+             <th>Relay</th><th>Version</th><th>Web domain</th><th>Certificate expires</th><th>Last activity</th></tr></thead>
+  <tbody>
+  {% for t in tenants %}
+    <tr>
+      <td><a href="/tenants/{{ t.id }}">{{ t.display_name }}</a></td>
+      <td><code>{{ t.slug }}</code></td>
+      <td>{{ t.status }}</td>
+      <td data-val="{{ t.created_at }}">{{ t.created_at | localtime("%Y-%m-%d") }}</td>
+      <td>{{ t.devices }}</td><td>{{ t.technicians }}</td>
+      <td>{{ t.relay_status or "—" }} · {{ t.relay_containers }}</td>
+      <td>{{ t.relay_version or "—" }}</td>
+      <td>{{ t.web_domain or "—" }}</td>
+      <td data-val="{{ t.cert_expires_at or '' }}">{{ t.cert_expires_at | localtime("%Y-%m-%d") if t.cert_expires_at else "—" }}</td>
+      <td data-val="{{ t.last_activity or '' }}">{{ t.last_activity | localtime if t.last_activity else "never" }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="11" class="text-muted">No tenants match.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% endblock %}

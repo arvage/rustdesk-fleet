@@ -604,5 +604,7 @@ def run_migrations(db_path=None) -> None:
     _relays.ensure_tables(conn)
     from app.console import tenants as _tenants
     _tenants.ensure_tables(conn)
+    from app.console import maintenance as _maintenance
+    _maintenance.ensure_table(conn)
 
     conn.close()

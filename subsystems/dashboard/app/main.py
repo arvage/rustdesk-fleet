@@ -103,6 +103,8 @@ async def startup():
     # Provider console jobs (tenant creation, relay operations, purges).
     from app.console import jobs, relays, tenants  # noqa: F401  (registers job handlers)
     jobs.start_worker()
+    from app.console import maintenance
+    maintenance.start()
 
 
 @app.exception_handler(_AuthRedirect)

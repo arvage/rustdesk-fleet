@@ -251,13 +251,15 @@ def upgrade(tenant: Tenant, version: str) -> None:
     _set_status(tenant.id, "active", version)
 
 
-def health(tenant: Tenant) -> dict[str, dict]:
-    """{'hbbs': {running, status, name}, 'hbbr': {...}} for one relay."""
+def health(tenant: Tenant, running: dict | None | bool = False) -> dict[str, dict]:
+    """{'hbbs': {running, status, name}, 'hbbr': {...}} for one relay. Pass a
+    running_containers() result to check many relays with one docker ps."""
     from setup_server import relay_containers
     import dataclasses
     names = relay_containers(dataclasses.asdict(tenant.relay)) if tenant.relay else []
     by_role = {("hbbr" if "hbbr" in n else "hbbs"): n for n in names}
-    running = system.SYSTEM.running_containers()
+    if running is False:
+        running = system.SYSTEM.running_containers()
     out = {}
     for role in ("hbbs", "hbbr"):
         name = by_role.get(role, role)
