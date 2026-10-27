@@ -68,7 +68,7 @@ Tenancy (phase 1a, built: see
   tenant is workable, and one MSP's leaked key can't reach another's devices.
 - **The tenant is chosen by the request's `Host`.** Each tenant has one or
   more domains in `tenant_domains`: a provider subdomain (phase 1b) and
-  optionally a custom domain the tenant points at us with a CNAME (phase 1c).
+  optionally a custom domain the tenant points at us with a CNAME (phase 1d).
   The original deployment's host is tenant #1's first (`legacy`) domain.
 - **Installers always use the relay host, never a custom domain**, so a
   tenant changing or losing their domain never strands devices. Relay host
@@ -78,15 +78,30 @@ Tenancy (phase 1a, built: see
   relay's keypair and the control database.
 - **The current deployment is tenant #1**, with its relay, keys, devices,
   users and URLs exactly as they were.
-- Next: creating tenants and their relay stacks, the provider console and
-  provider subdomains (phase 1b); custom domains with CNAME verification and
-  per-domain certificates (phase 1c).
+
+Provider console (phase 1b, built: see [`DEPLOYMENT.md`](DEPLOYMENT.md) §11):
+
+- **A provider console** at `admin.<PROVIDER_DOMAIN>`, separate from every
+  tenant (own app, own passkey-only accounts, own session cookie, optional IP
+  allowlist). We create and manage tenants there, and run the provider's
+  controls: backups, signing, host health, relay upgrades, the client version.
+- **Each tenant gets** a web domain `<slug>.<PROVIDER_DOMAIN>` (own Let's
+  Encrypt certificate) and a relay host `<slug>.relay.<PROVIDER_DOMAIN>` with
+  its own keypair and a never-reused block of ports. Two wildcard DNS
+  records, set up once by hand; no DNS API. Installers use the relay host and
+  `api-server = https://<slug>.<PROVIDER_DOMAIN>`.
+- **Tenant lifecycle**: trial or active, suspended (relay keeps running),
+  cancelled (relay stopped, **30-day grace period** with a read-only export
+  for the tenant's admins, reactivation possible), then purged. Usage is
+  recorded daily for billing later.
+- **Support access** to a tenant's dashboard needs the tenant's consent and
+  is time-limited: phase 1c.
+- **Custom domains** (a tenant's CNAME, verification, per-domain
+  certificates): phase 1d.
 
 - **Client PDF guides** ([`client-docs/`](client-docs/README.md)) are
-  generated per tenant when the tenant is created. They do not include IT
-  support contact details. `generate_guides()` in `client-docs/build_client_docs.py`
-  is ready for tenant creation to call; the hook itself waits for the tenant
-  model.
+  generated per tenant when the tenant is created (provider console), with
+  the tenant's name. They do not include IT support contact details.
 
 ## Questions to settle before building
 

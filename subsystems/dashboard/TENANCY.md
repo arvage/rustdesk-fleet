@@ -75,15 +75,19 @@ points at another tenant's parent, even if the application gets it wrong.
 ### Provider events in the audit log
 
 `provisioning_events.tenant_id` is the only nullable `tenant_id`. `NULL`
-marks a provider action that belongs to no tenant: backups and restores,
-code-signing settings, and anything the provider console does later.
+marks a provider event that belongs to no tenant: backups and restores,
+code-signing settings, update notices, console sign-ins.
 
-Until there is a provider console (phase 1b), the provider's own controls
-(backups, signing, host health) are on **tenant #1's** dashboard, which is
-where they have always been. `tenancy.is_provider_home(tenant)` is true only
-for tenant #1. Its Logs page also shows `NULL`-tenant events, so nothing
-disappears for tenant #1. Other tenants never see provider events or
-provider controls; those routes answer 404 for them.
+Provider console actions are written with `source = 'provider'`, the
+provider user's email, and `tenant_id` NULL or the tenant acted on
+(`deps.provider_log`). The console's Audit log shows provider events and
+provider actions; a tenant's own Logs page shows neither (its audit scope
+is `tenant_id = ? AND source IS NOT 'provider'`).
+
+The provider's controls (backups, signing, host health and its alerts, the
+client version, relay restarts and upgrades) are in the provider console
+(phase 1b). Until then they were on tenant #1's dashboard; tenant #1's
+dashboard now shows only what any tenant sees.
 
 ## Provider-level, not per tenant (for now)
 
@@ -96,8 +100,36 @@ provider controls; those routes answer 404 for them.
 - **The RustDesk client version** (`rustdesk_version.txt`,
   `installer-assets/`): one pinned version for every tenant's installers.
 - **Host health** (CPU, memory, disk of the box) and its memory/disk alerts:
-  about our server, so only the provider home tenant sees and gets them.
-  Each tenant still sees its own relay's containers and devices.
+  about our server, so they are on the console's Host health page and go to
+  the provider admins. Each tenant still sees its own relay's containers
+  and devices.
+- **The rustdesk-server version**: relays are upgraded from the console,
+  one at a time.
+
+## Provider console
+
+`admin.<PROVIDER_DOMAIN>` is served by a separate app (`app/console/`), not
+by tenant routes: `tenant_for_request()` returns `CONSOLE` for that host and
+`TenantMiddleware` hands the request to the console app, which has its own
+routes and session cookie (`rdf_provider_session`, signed with a different
+key). No tenant route answers there and no console route answers on a
+tenant host (`tests/test_console_separation.py`). Optional
+`PROVIDER_ALLOWED_IPS` restricts the console by IP.
+
+Provider admins (`provider_users`) are separate from every tenant's users and
+sign in with passkeys only (`provider_webauthn_credentials`, RP ID = the
+console host), enrolled through one-time links valid for 1 hour
+(`provider_enrollments`, from `scripts/provider_admin.py` or a console
+invite). Sessions are checked against the database on every request
+(`session_version`, `disabled_at`) and last `PROVIDER_SESSION_MAX_AGE`
+(8 hours). Support access to a tenant's dashboard (with the tenant's
+consent) is phase 1c.
+
+Long operations (tenant creation, relay start/stop/upgrade, cancel,
+reactivate, purge) are console jobs (`provider_jobs`), run one at a time by
+a worker thread with live progress; a job interrupted by a restart is undone
+where needed and marked failed. The only root access is `rdf-helper`
+(DEPLOYMENT.md §11).
 
 ## Files on disk
 
@@ -113,16 +145,21 @@ A relay's own files (keypair, hbbs database, compose file) are wherever its
 
 ## Relay host vs. web domains
 
-`relays.host` is what devices use: it is baked into installers as the ID and
-relay server. `tenant_domains` are the web hostnames for the dashboard and
-download links. They are separate on purpose: installers always use the
-relay host, never a custom domain, so a tenant that changes or loses a domain
-never strands devices. For tenant #1 both happen to be the same name today.
+`relays.host` is what devices use for the raw hbbs/hbbr ports: it is baked
+into installers as the ID and relay server. For tenants created in the
+console it is `<slug>.relay.<PROVIDER_DOMAIN>` and needs no certificate.
+`tenant_domains` are the web hostnames, with certificates: the dashboard,
+download links and the device API (`api-server`). For console-made tenants
+the primary one is `<slug>.<PROVIDER_DOMAIN>` (kind `provider_subdomain`).
 
-`tenant_domains.kind` is `legacy` (tenant #1's original host), `provider_subdomain`
-(`<slug>.<our domain>`, phase 1b) or `custom` (a tenant's CNAME, phase 1c);
-`verified_at` and `tls_status` are there for phase 1c's verification and
-certificates.
+They are separate on purpose. A relay can move to another box by changing
+one DNS record (`<slug>.relay…`) without touching the web side, and
+installers never name a custom domain, so a tenant that changes or loses one
+never strands devices. Tenant #1 keeps its single name for both (kind
+`legacy`) and gets no relay subdomain.
+
+`tenant_domains.kind` `custom` (a tenant's CNAME) is phase 1d;
+`verified_at`, `tls_status` and `cert_expires_at` are already there for it.
 
 ## How the RustDesk client finds its API server
 
@@ -256,8 +293,8 @@ With the defaults that is TCP 21115–21119 and UDP 21116: the familiar range.
 the keypair in its working directory and *enforces* it: clients with another
 key are refused. `hbbr` with no `-k` enforces nothing (any client may use the
 relay); `-k _` would make it check the same key. Tenant #1's compose runs
-plain `hbbs` / `hbbr`, so new relays do the same (see "Looked wrong" in the
-phase 1b summary).
+plain `hbbs` / `hbbr`, so new relays do the same; enforcing the key on hbbr
+too (`-k _`) is a later change.
 
 **Port blocks.** Each relay gets a block of 10 ports starting at `B`
 (`RELAY_PORT_BASE` = 21200, then 21210, … up to `RELAY_PORT_MAX` = 21999,
@@ -284,3 +321,36 @@ The relays run with `network_mode: host`, like tenant #1's, binding their
 ports directly (no Docker port mapping, which matters for UDP). The cloud
 firewall must allow TCP and UDP on the whole `RELAY_PORT_BASE`–`RELAY_PORT_MAX`
 range once, up front; the console shows that range.
+
+## Lifecycle
+
+| Status | Dashboard and download links | Relay | Device reports |
+|---|---|---|---|
+| `trial`, `active` | open | running | accepted, config pushed |
+| `suspended` | "not active" page | **keeps running** (nothing to re-register on reactivation) | accepted, no config pushed |
+| `cancelled` | sign-in and a read-only **export page** (CSVs of devices, groups, users, sessions, file transfers) for the tenant's admins; everything else "not active" | **stopped** (`docker compose stop`: containers, keys and data kept) | accepted if they arrive, no config pushed |
+| `purged` | gone (its domains are removed: 404) | removed | rejected (unknown host) |
+
+- **Suspend** (console): immediate. For non-payment and the like.
+- **Reactivate**: from suspended, or from cancelled while `purge_after` is in
+  the future. From cancelled the relay is started again with the same keys
+  and ports, so devices reconnect on their own.
+- **Cancel**: records `cancelled_at` and `purge_after = cancelled_at + 30
+  days` and emails the tenant's admins. The console shows the countdown and
+  can extend it.
+- **Purge**: the hourly maintenance pass emails the admins 7 days before
+  `purge_after` and queues the purge when it passes; "purge now" (typing the
+  slug) does it at once. Purge removes the relay containers, compose file,
+  keypair and hbbs data (the root-owned part through `rdf-helper
+  purge-relay-data`), the tenant's files (installers, guides, branding), its
+  vhosts and certificates (revoked), its `relays` and `tenant_domains` rows,
+  and every tenant-owned row. It keeps the `tenants` row (status `purged`,
+  slug reserved for good), the port block in `relay_port_blocks` (never
+  reused), `tenant_usage_daily` and the provider's audit entries about the
+  tenant. A purge that stops half-way can be run again.
+- **Tenant #1** can't be cancelled or purged.
+
+`tenant_usage_daily` (devices, technicians, session minutes per tenant per
+day, written by the hourly maintenance pass) is provider-level and outlives
+both deletions and purges; billing will read it later. `tenants.plan` is free
+text for now.

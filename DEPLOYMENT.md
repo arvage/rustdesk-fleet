@@ -126,6 +126,11 @@ sudo chmod 600 /etc/rustdesk-fleet/dashboard.env
 | `SESSION_MAX_AGE` | no | Session lifetime in seconds. Default 43200 (12 hours). |
 | `FLEET_DATA_DIR` | no | Data directory. Default `/opt/rustdesk-fleet`; the tests point it at a temp dir. |
 | `FLEET_TENANT1_SLUG`, `FLEET_TENANT1_NAME` | no | Slug (lowercase letters, digits, hyphens) and display name given to tenant #1 when the tenancy migration creates it. Default `tenant1` / `Tenant 1`. Read once; afterwards the `tenants` row is what counts. |
+| `PROVIDER_DOMAIN` | for the provider console | e.g. `rds.example.com`. The console is `admin.<domain>`; each tenant gets `<slug>.<domain>` (web) and `<slug>.relay.<domain>` (relay). Empty: no console, no new tenants. Also read by `rdf-helper` (as root) to validate hostnames. |
+| `PROVIDER_SESSION_MAX_AGE` | no | Provider console session lifetime in seconds. Default 28800 (8 hours). |
+| `PROVIDER_ALLOWED_IPS` | no | Comma-separated IPs or CIDRs allowed to reach the console (checked on `X-Real-IP`). Empty: no restriction. |
+| `RELAY_PORT_BASE`, `RELAY_PORT_MAX` | no | Port range for tenant relays. Default 21200–21999 (80 blocks of 10). Keep it open in the cloud firewall. |
+| `RDF_HELPER` | no | Path of the root helper. Default `/usr/local/sbin/rdf-helper`. |
 
 Install the systemd unit:
 
@@ -771,6 +776,154 @@ after the certificate rotates.
 | Sign fails, endpoint/account error | Endpoint host doesn't match the account's region, or account name case is wrong. |
 | Test fails, "jsign jar not found" | Install the jar (server prerequisites above). |
 | Signs but still warns on download | Identity validation / certificate profile not fully provisioned yet. |
+
+## 11. Provider console and tenants
+
+The provider console (`https://admin.<PROVIDER_DOMAIN>/`) is where we create
+and manage tenants (MSPs). Design: [`subsystems/dashboard/TENANCY.md`](subsystems/dashboard/TENANCY.md).
+
+### One-time setup
+
+1. **DNS.** Two wildcard A records pointing at this box (no DNS API is used):
+
+   ```
+   *.rds.example.com          A   <box IP>     # admin.…, <slug>.… (web)
+   *.relay.rds.example.com    A   <box IP>     # <slug>.relay.… (relays)
+   ```
+
+   Moving one tenant's relay to another box later is one more specific
+   record (`<slug>.relay.rds.example.com`).
+
+2. **Firewall.** In the cloud firewall (Lightsail networking tab, by hand —
+   the console never calls the AWS API), open the relay range once, up front:
+   **TCP 21200–21999 and UDP 21200–21999** (or your `RELAY_PORT_BASE`–
+   `RELAY_PORT_MAX`). Each tenant uses 5 ports of a 10-port block: TCP B–B+4
+   and UDP B+1 (TENANCY.md, "Port layout"). The console's Relays and Settings
+   pages show the range it expects. Ports 80 and 443 must already be open
+   (certificates use Let's Encrypt HTTP-01).
+
+3. **The helper, certbot and the console's certificate.** On a box that is
+   already installed:
+
+   ```bash
+   cd ~/rustdesk-fleet
+   ./install.sh --provider-only --provider-domain rds.example.com --email you@example.com
+   ```
+
+   This touches nothing else (not the existing vhost, relay or units). It:
+   - installs `certbot` and `python3-reportlab` (client PDF guides);
+   - copies `subsystems/provisioning/rdf_helper.py` to
+     `/usr/local/sbin/rdf-helper` (root:root, 0755) and writes
+     `/etc/sudoers.d/rdf-helper`:
+     `<dashboard user> ALL=(root) NOPASSWD: /usr/local/sbin/rdf-helper`.
+     That helper is the dashboard's only root access: `issue-cert`,
+     `write-vhost`, `remove-vhost`, `revoke-cert`, `reload-nginx`,
+     `purge-relay-data`, each validating its arguments (hostnames must be
+     `<slug>.<PROVIDER_DOMAIN>` or the console host). Root never runs files
+     from the repo checkout;
+   - adds `PROVIDER_DOMAIN` to `/etc/rustdesk-fleet/dashboard.env` if missing
+     and restarts the dashboard;
+   - writes `/etc/nginx/conf.d/rdf-provider.conf`: a port-80 server for
+     `*.<PROVIDER_DOMAIN>` (ACME challenges from `/var/www/certbot`, else a
+     redirect to HTTPS) and `include /etc/nginx/rdf-tenants/*.conf;`, where the
+     helper writes one 443 vhost per tenant domain and the console. Those
+     vhosts use the `rdf_signin` rate-limit zone defined by the main vhost;
+   - issues the console's certificate and writes its vhost. Every nginx
+     reload checks `nginx -t` and fails on any new `[emerg]` in the error log.
+
+   Re-run it after changing `--email` or if DNS wasn't ready the first time.
+
+4. **The first provider admin.** Provider admins sign in with passkeys only:
+
+   ```bash
+   python3 ~/rustdesk-fleet/subsystems/dashboard/scripts/provider_admin.py add you@example.com "Your Name"
+   ```
+
+   It prints a one-time enrollment link (valid 1 hour). Open it on the device
+   you'll sign in from and create a passkey. More admins: invite them from the
+   console (Provider admins), or `provider_admin.py enroll-link EMAIL` for a
+   new link, `disable EMAIL`, `list`.
+
+5. **Provider email.** Console → Settings: SMTP for provider alerts (to every
+   provider admin), console invitations and emails to tenants' admins;
+   host-health thresholds; the Let's Encrypt account email.
+
+### Creating a tenant
+
+Console → Tenants → New tenant: name, slug (3–32 characters, a letter first;
+`admin`, `relay`, `www` and the like are reserved, and slugs of purged tenants
+stay taken) and the first admin's email. The job (shown live) creates the
+tenant (trial), provisions its relay on the next port block, issues the
+certificate and vhost for `<slug>.<PROVIDER_DOMAIN>`, builds the tenant's
+PDF guides, and emails a one-time invitation (72 hours) to
+`https://<slug>.<PROVIDER_DOMAIN>/invite/<token>`; the link is also shown in
+the job and on the tenant's page (Resend invite). If a step fails, everything
+is undone except the port block; fix the cause and create it again.
+
+Tenants' installers point at `<slug>.relay.<PROVIDER_DOMAIN>:<ports>` with
+the tenant's own key and `api-server = https://<slug>.<PROVIDER_DOMAIN>`.
+
+### Lifecycle
+
+Suspend (dashboard and links off, relay keeps running), reactivate, cancel
+(relay stops now, the admins can only export CSVs, purge after 30 days;
+admins are emailed at cancellation and 7 days before), extend the grace
+period, purge now (type the slug). Tenant #1 can't be cancelled or purged.
+What purging keeps and removes: TENANCY.md, "Lifecycle". Backups taken
+before a purge still hold the tenant's data (Section 8).
+
+### Upgrading the live box to phase 1b
+
+Pacific MIT keeps its URL, relay, ports, keys, devices, installers and
+sessions. What changes for it: backups, signing, host health, the client
+version and relay upgrades/restarts move to the console; its Server Info
+shows hbbs port **21116** (the rendezvous port; 21115 was the NAT-test port).
+
+1. Back up, and keep a plain copy of the database (as in the phase 1a
+   upgrade, Section 4):
+   `sudo python3 ~/rustdesk-fleet/subsystems/single-tenant/backup.py run`, then
+   the `sqlite3` online-backup one-liner to `~/fleet-pre-1b.sqlite3`.
+2. Check the migrations on a copy with the new code (from a worktree of the
+   new commit): `python3 <worktree>/subsystems/dashboard/scripts/check_migration.py /tmp/fleet-check.sqlite3`.
+   It must end with `All checks passed.`
+3. Add the DNS records and open the firewall range (above). Wait until
+   `getent hosts admin.rds.example.com` resolves to the box.
+4. `git pull --ff-only` (or merge the branch) in `~/rustdesk-fleet`, then
+   `./install.sh --provider-only --provider-domain rds.example.com --email you@example.com`.
+   It restarts the dashboard, which runs the migrations (provider tables,
+   tenants status `purged`, relay port blocks, tenant #1's hbbs port fix).
+5. `python3 subsystems/dashboard/scripts/provider_admin.py add you@example.com "Your Name"`,
+   enroll your passkey, sign in to `https://admin.rds.example.com/`, set
+   Settings (SMTP, Let's Encrypt email).
+6. Check: tenant #1's site and sign-in work without signing in again,
+   devices still heartbeat, `nginx -t` passes, no new `[emerg]` in
+   `/var/log/nginx/error.log`, the console's Tenants, Relays and Host health
+   pages show tenant #1.
+
+Rollback: stop the dashboard, restore `~/fleet-pre-1b.sqlite3`, check out the
+previous commit, remove `/etc/nginx/conf.d/rdf-provider.conf` and
+`/etc/nginx/rdf-tenants/`, reload nginx, start the dashboard.
+
+### End-to-end checklist (after deploy)
+
+1. Console → New tenant: a test tenant (`e2etest`), with your own email as
+   admin. The job finishes; `https://e2etest.rds.example.com/` loads with a
+   valid certificate.
+2. Accept the invitation; you land in the test tenant's dashboard (not
+   Pacific MIT's). Create a client group and build its **Windows** installer.
+3. Install it on a spare machine. Within a minute the device shows up under
+   the test tenant's Devices, with its details (hostname, OS: the device API
+   over `https://e2etest…`), and **not** in Pacific MIT's.
+4. On a technician machine, set RustDesk's ID server to
+   `e2etest.relay.rds.example.com:<hbbs port>`, relay
+   `e2etest.relay.rds.example.com:<hbbr port>` and the test tenant's key
+   (console → tenant page). Connect to the device; a session appears in the
+   test tenant's Logs.
+5. Console → cancel the tenant. The device goes offline within a minute or
+   two; the test tenant's dashboard shows only the export page.
+6. Reactivate. The device comes back online by itself (same keys and ports).
+7. Cancel again, then "Purge now" (type the slug). `https://e2etest…` stops
+   answering, the tenant shows as purged, and its port block stays reserved.
 
 ## Verify everything
 

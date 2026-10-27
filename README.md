@@ -30,10 +30,11 @@ session): [`client-docs/`](client-docs/README.md).
 
 ## Tenancy (in progress)
 
-The dashboard now has a tenant model: each MSP is a tenant with its own
-relay, keypair, users, groups and devices, chosen by the request's host, in
-one control database. The original deployment is tenant #1; creating more
-tenants comes next. See
+The dashboard has a tenant model: each MSP is a tenant with its own relay,
+keypair, users, groups and devices, chosen by the request's host, in one
+control database. The original deployment is tenant #1. A provider console
+(`admin.<PROVIDER_DOMAIN>`) creates and manages tenants: relay, web domain,
+certificate, first admin, and their lifecycle (DEPLOYMENT.md §11). See
 [`subsystems/dashboard/TENANCY.md`](subsystems/dashboard/TENANCY.md) and
 [`VISION.md`](VISION.md). Within a tenant, everything below still applies.
 

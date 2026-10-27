@@ -49,18 +49,39 @@ rules: [`TENANCY.md`](TENANCY.md).
   hbbs peer table. Suspended tenants' devices still report; they just get no
   config pushed.
 - **Provider-level:** code signing, backups, the OS lifecycle cache, the
-  pinned RustDesk client version and host health/alerts. Until a provider
-  console exists, their controls are on tenant #1's dashboard only
-  (`tenancy.is_provider_home`); for other tenants those routes are 404.
+  pinned RustDesk client version, relay upgrades and restarts, and host
+  health/alerts. Their controls are in the provider console (below).
 - **Tenant #1** is the deployment from before tenancy: same host, relay, keys,
   devices, users and file locations. The migration that created it
   (`app/tenant_migration.py`) runs on startup, once; check it on a copy with
   `scripts/check_migration.py` (see DEPLOYMENT.md).
 
+## Provider console
+
+`https://admin.<PROVIDER_DOMAIN>/` (`app/console/`, a separate app; see
+TENANCY.md "Provider console" and DEPLOYMENT.md §11). Passkey-only provider
+admins; every action lands in the provider audit log.
+
+| Route | Description |
+|---|---|
+| `GET /` | Tenants: name, slug, status, devices, technicians, relay status and version, web domain, certificate expiry, last activity (search, sort) |
+| `GET /tenants/new`, `POST /tenants` | Create a tenant (a job: slug check, tenant, relay, certificate + vhost, PDF guides, first-admin invite) |
+| `GET /tenants/{id}` | Relay ports and key, domains, admins and pending invites, usage (devices, technicians, session hours this and last month, daily history), plan, lifecycle |
+| `POST /tenants/{id}/plan` · `/suspend` · `/reactivate` · `/cancel` · `/extend-grace` · `/purge`, `POST /tenants/{id}/invites/{invite}/resend` | Plan and lifecycle actions (cancel and purge need the slug typed; not for tenant #1) |
+| `GET /relays`, `POST /relays/{tenant}/start\|stop\|restart\|upgrade`, `POST /relays/upgrade-all` | Relay health, versions and operations (upgrade-all goes one relay at a time, stopping at the first failure) |
+| `GET /jobs`, `GET /jobs/{id}` (+ `.json`) | Background jobs and their live progress |
+| `GET /audit` | Provider audit log, filterable by event, tenant, admin, text |
+| `GET /health` (+ `.json`) | Host CPU, memory, disk, uptime and every relay's containers |
+| `/backup…`, `/signing…`, `/client-version`, `/settings` | Backups and restore, code signing, the pinned RustDesk client version, provider SMTP, alert thresholds, Let's Encrypt email |
+| `/admins…` | Provider admins: invite (one-time passkey enrollment link, 1 hour), new link, disable, enable |
+| `/login`, `/login/webauthn/begin` · `/complete`, `/enroll/{token}…`, `POST /logout` | Passkey sign-in and enrollment |
+
 ## First-run setup
 
-`/setup` creates the first admin of the request's tenant. If that tenant has
-no users, its routes redirect to `/setup`. The setup page creates the first admin account (email + bcrypt-hashed password) and only accepts the form with the right `SETUP_TOKEN` (`/setup?token=…` pre-fills it). With no token configured it accepts nothing. After the first admin exists, `/setup` is permanently locked out and the token is ignored.
+`/setup` (with `SETUP_TOKEN`) creates the first admin of **tenant #1** only:
+its original install path. If tenant #1 has no users, its routes redirect to
+`/setup`. Every other tenant gets its first admin from the invite link the
+provider console sends; `/setup` is 404 there. The setup page creates the first admin account (email + bcrypt-hashed password) and only accepts the form with the right `SETUP_TOKEN` (`/setup?token=…` pre-fills it). With no token configured it accepts nothing. After the first admin exists, `/setup` is permanently locked out and the token is ignored.
 
 ## Security
 
@@ -107,9 +128,6 @@ Staff pages (all require login):
 | Route | Description |
 |---|---|
 | `GET /` | Signed out: the public landing page (`site/index.html` at the repo root). Signed in: Server Status: a **Server Health** section (live CPU/memory/disk/uptime, hbbs/hbbr containers, devices online — polled from `/api/server/health`, with alert-threshold markers), a **Server Info** section (status, host, ports, server/client versions with update banners, public key), and a **Backups** section (last-run status, Back up now, download latest) |
-| `POST /server/update` | Update hbbs/hbbr to the latest release (`update_server`) |
-| `POST /installers/update-version` | Move installers to the latest RustDesk client release, optionally rebuilding every group's installers in the background (`update_server`) |
-| `POST /server/backup`, `GET /server/backup/download/latest` | Run a backup now / download the newest archive (`manage_backups`; tenant #1 only) |
 | `GET /devices` | Device inventory sorted by label (unlabeled last): Computer / OS / client version (client-reported), live online · in session · offline status, group filter; **Recently registered** panel (last 7 days, no client group yet); **ⓘ details** modal per device (full reported details + recent sessions) |
 | `POST /devices/{id}/edit` · `/delete`, `POST /devices/sync` | Label/group a device (`manage_devices`); delete hides it and clears its details/sessions/file transfers — a verified heartbeat later auto-un-hides it; import peers from hbbs. Edit and delete accept a `next` local path to return to (the group page uses it) |
 | `POST /devices/{id}/assign-group` | Set a device's client group and, if a `label` field is sent, its label (Recently registered panel; `manage_devices`) |
@@ -124,16 +142,14 @@ Staff pages (all require login):
 | `GET /download/{filename}` | Staff installer download (path-traversal safe, DB-gated) |
 | `GET /users` + `POST /users/...` | User management: assign roles, group access, password reset, passkeys, MFA reminders (`manage_users`) |
 | `GET /admin` | Admin landing: tool cards + fleet stats (any admin-area capability) |
-| `GET /admin/signing` + `POST /admin/signing/save` · `/test` | Installer signing config (Azure Trusted Signing) and connection test (provider-level: tenant #1 only) |
 | `GET /admin/reports`, `GET /admin/reports/{key}`, `GET /admin/reports/{key}/{section}.csv` | Reports catalogue, one report (`?group=<slug>\|__none__&days=7\|30\|90\|180\|365`), and any of its tables as CSV (any admin-area capability) |
 | `GET /admin/emails`, `GET/POST /admin/emails/{key}`, `GET/POST /admin/emails/design`, `GET /admin/emails/logo.png` | Email templates: list, per-email editor (save / reset), shared design + logo upload (`manage_notifications`) |
 | `POST /admin/emails/preview`, `POST /admin/emails/{key}/test` | Render an unsaved draft with sample data (JSON → HTML); send the saved version to the signed-in user |
 | `GET /dynamic-groups`, `GET /dynamic-groups/{id}`, `GET /dynamic-groups/{id}/export.csv` | Dynamic (rule-based) groups: list with live counts, members, CSV (any signed-in user) |
 | `GET /dynamic-groups/new`, `GET /dynamic-groups/{id}/edit`, `POST /dynamic-groups/save` · `/{id}/delete`, `POST /dynamic-groups/preview` | Rule builder, save/delete, live match preview (`manage_devices`) |
-| `GET /admin/backup` + `POST /admin/backup/save` · `/test` · `/run` · `/restore`, `GET /admin/backup/download` | Backup destination config (S3/Wasabi/B2/Spaces/MinIO), test, run, restore, per-archive download (`manage_backups`; provider-level: tenant #1 only) |
 | `GET /admin/roles` + `POST /admin/roles...` | Roles & permissions: create/edit/delete permission levels via a capability matrix (`manage_roles`) |
 | `GET /admin/export/devices.csv` | Device inventory CSV (`manage_devices`) |
-| `POST /admin/restart-relay`, `POST /admin/logs/prune` | Restart hbbs/hbbr; prune old audit events (`manage_system`) |
+| `POST /admin/logs/prune` | Prune old audit events (`manage_system`) |
 | `GET /account` + `POST /account/...` | Own profile, password, passkeys, sign-in method |
 | `GET /notifications` + `POST /notifications/...` | SMTP settings, server-health alert thresholds, test email (`manage_notifications`) |
 | `POST /notifications/events/{event_type}` | Auto-save a single event-trigger toggle (form field `enabled=1`/`0`); returns JSON (`manage_notifications`) |
@@ -145,6 +161,8 @@ Staff pages (all require login):
 | `GET /api/devices`, `GET /api/devices/status`, `GET /api/devices/{id}/sessions`, `GET /api/server/health` | JSON for the live tables, per-device session history, and server-health tiles |
 | `GET/POST /setup`, `GET/POST /login`, `/login/webauthn/...`, `POST /logout` | First-run setup (needs `SETUP_TOKEN`), password and passkey sign-in, sign out (`GET /logout` only redirects to `/`) |
 | `POST /account/sign-out-everywhere`, `POST /users/{id}/sign-out` | End all of your own sessions / another user's (`manage_users`) |
+| `GET /export`, `GET /export/{name}.csv` | CSV export of devices, client groups, users, sessions and file transfers (`manage_users`); all a cancelled tenant can still reach |
+| `GET/POST /invite/{token}` | One-time sign-up link from the provider console (first admin of a new tenant), valid 72 hours, only on that tenant's host |
 
 Public, no login:
 
@@ -161,8 +179,8 @@ Public, no login:
   per-user MFA.
 - **Roles & permissions** (`app/permissions.py`, Admin → Roles): capability-
   based permission levels, not a fixed admin/tech pair. Capabilities —
-  manage_devices, manage_groups, update_server, manage_notifications,
-  manage_backups, manage_system, manage_users, manage_roles — are enforced
+  manage_devices, manage_groups, manage_notifications, manage_system,
+  manage_users, manage_roles — are enforced
   server-side on every write route; viewing is always allowed, so a role with
   no capabilities is read-only. Built-in roles: Administrator (locked = all),
   Technician (devices + groups), Viewer (read-only), copied into each tenant.
@@ -285,6 +303,9 @@ Heartbeat/sysinfo requests are excluded from the uvicorn access log
 | `app/tenancy.py` | `Tenant`/`Relay`, Host → tenant (`TenantMiddleware`, `get_tenant`), per-tenant file paths, `active_tenants()` for background jobs |
 | `app/tenant_schema.py`, `app/tenant_migration.py` | The `tenants`/`relays`/`tenant_domains` tables; the one-time move of the single-tenant data to tenant #1 and the final shape of every tenant-owned table |
 | `scripts/check_migration.py` | Dry-run the migrations on a copy of `fleet.sqlite3` and report |
+| `app/console/` | The provider console: `main.py` (the app), `auth.py` (passkey-only provider sign-in), `tenants.py` (creation job), `lifecycle.py`, `relays.py` (port blocks, compose, docker), `web.py` (certificates and vhosts via rdf-helper), `jobs.py` (background jobs), `maintenance.py` (daily usage, certificate expiry, due purges), `system.py` (every external command) |
+| `scripts/provider_admin.py` | Add, list, disable provider admins; print enrollment links |
+| `../provisioning/rdf_helper.py` | The root helper, installed as `/usr/local/sbin/rdf-helper` |
 | `app/deps.py` | DB access, hbbs peer reader, `get_devices()` (fleet + peers + client-reported details, label order), `run_migrations()` (idempotent `ALTER`/`CREATE IF NOT EXISTS`) |
 | `app/fleet.py` | `fleet_snapshot()`: devices plus derived facts (RAM/cores as numbers, OS support, live status, days since seen/registered/last session) — shared by dynamic groups and reports |
 | `app/dynamic_groups.py`, `app/reports.py`, `app/email_templates.py` | Rule engine, report catalogue, email catalogue + renderer (see Features) |
