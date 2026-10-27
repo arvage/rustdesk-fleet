@@ -15,14 +15,25 @@ rollback to the single-tenant code. Nothing reads it after this migration.
 """
 from __future__ import annotations
 
+import os
+import re
 import sqlite3
 
 from app.tenant_schema import ensure_tenancy_tables, normalize_host
 
 # The deployment that existed before tenancy becomes tenant #1.
 LEGACY_TENANT_ID = 1
-LEGACY_TENANT_SLUG = "pacificmit"
-LEGACY_TENANT_NAME = "Pacific MIT"
+_DEFAULT_SLUG = "tenant1"
+_DEFAULT_NAME = "Tenant 1"
+
+
+def legacy_tenant_identity() -> tuple[str, str]:
+    """(slug, display name) for tenant #1, from FLEET_TENANT1_SLUG and
+    FLEET_TENANT1_NAME (dashboard.env). Only used when the migration creates
+    tenant #1; after that the tenants row is the source of truth."""
+    slug = re.sub(r"[^a-z0-9-]+", "-", os.environ.get("FLEET_TENANT1_SLUG", "").strip().lower()).strip("-")
+    name = os.environ.get("FLEET_TENANT1_NAME", "").strip()
+    return slug or _DEFAULT_SLUG, name or _DEFAULT_NAME
 
 # Final shape of every tenant-owned table, parents before children. "{t}" is
 # the table name: rebuilds create "<name>__tenancy" and rename it.
@@ -403,7 +414,7 @@ def _seed_tenant_one(conn, hbbs_db_path: str) -> None:
     if conn.execute("SELECT COUNT(*) FROM tenants").fetchone()[0] == 0:
         conn.execute(
             "INSERT INTO tenants (id, slug, display_name, status) VALUES (?, ?, ?, 'active')",
-            (LEGACY_TENANT_ID, LEGACY_TENANT_SLUG, LEGACY_TENANT_NAME),
+            (LEGACY_TENANT_ID, *legacy_tenant_identity()),
         )
     if not conn.execute("SELECT 1 FROM tenants WHERE id = ?", (LEGACY_TENANT_ID,)).fetchone():
         return  # tenants were created some other way; nothing to inherit

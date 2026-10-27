@@ -21,7 +21,7 @@ def heartbeat(client, rid="123456789", uuid=b"uuid-1", headers=None):
 
 def test_tenant_one_is_the_existing_host():
     t = tenancy.resolve_host(HOST.upper() + ":443")
-    assert t is not None and t.id == 1 and t.slug == "pacificmit" and t.hostname == HOST
+    assert t is not None and t.id == 1 and t.slug == "tenant1" and t.hostname == HOST
     assert t.relay is not None and t.relay.pubkey == "PUBKEY1"
     assert t.relay.ports == {21115, 21116, 21117, 21118, 21119}
 

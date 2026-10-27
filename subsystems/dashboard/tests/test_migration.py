@@ -112,11 +112,13 @@ def test_every_row_moves_to_tenant_one_and_counts_are_unchanged(tmp_path):
     assert query(db, "PRAGMA integrity_check")[0][0] == "ok"
 
 
-def test_tenant_one_inherits_the_relay_and_host(tmp_path):
+def test_tenant_one_inherits_the_relay_and_host(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLEET_TENANT1_SLUG", " Example-IT ")
+    monkeypatch.setenv("FLEET_TENANT1_NAME", "Example IT")
     db = legacy_db(tmp_path / "fleet.sqlite3")
     run(db)
     [t] = query(db, "SELECT * FROM tenants")
-    assert (t["id"], t["slug"], t["display_name"], t["status"]) == (1, "pacificmit", "Pacific MIT", "active")
+    assert (t["id"], t["slug"], t["display_name"], t["status"]) == (1, "example-it", "Example IT", "active")
     [r] = query(db, "SELECT * FROM relays")
     assert (r["tenant_id"], r["host"], r["hbbs_port"], r["hbbr_port"], r["pubkey"]) == (1, "RDS.example.com", 21115, 21117, "PUBKEY")
     assert (r["data_dir"], r["compose_path"], r["hbbs_db_path"], r["status"]) == (
@@ -199,6 +201,14 @@ def test_an_interrupted_migration_leaves_the_old_schema(tmp_path, monkeypatch):
     monkeypatch.setattr(tenant_migration, "_rebuild", real)
     assert run(db) is True
     assert query(db, "SELECT COUNT(*) AS n FROM devices WHERE tenant_id = 1")[0]["n"] == 3
+
+
+def test_tenant_one_name_defaults_without_env(tmp_path, monkeypatch):
+    monkeypatch.delenv("FLEET_TENANT1_SLUG", raising=False)
+    monkeypatch.delenv("FLEET_TENANT1_NAME", raising=False)
+    db = legacy_db(tmp_path / "fleet.sqlite3")
+    run(db)
+    assert tuple(query(db, "SELECT slug, display_name FROM tenants")[0]) == ("tenant1", "Tenant 1")
 
 
 def test_fresh_install_gets_tenant_one_without_a_relay(tmp_path):

@@ -21,6 +21,7 @@ Env vars loaded from `/etc/rustdesk-fleet/dashboard.env`:
 - `SETUP_TOKEN` — unlocks `/setup` while no users exist (written by `install.sh`)
 - `SESSION_MAX_AGE` — session lifetime in seconds, default 12 hours
 - `FLEET_DATA_DIR` — data directory, default `/opt/rustdesk-fleet` (see `app/paths.py`)
+- `FLEET_TENANT1_SLUG`, `FLEET_TENANT1_NAME` — slug and display name for tenant #1, used once when the tenancy migration creates it (default `tenant1` / `Tenant 1`)
 - `DASHBOARD_PASSWORD` — legacy, no longer consulted (auth now uses the `users` table)
 
 ## Tenancy

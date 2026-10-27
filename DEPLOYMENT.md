@@ -125,6 +125,7 @@ sudo chmod 600 /etc/rustdesk-fleet/dashboard.env
 | `SETUP_TOKEN` | until the first admin exists | Unlocks `/setup` (Section 5). Ignored once a user exists; the line can then be deleted. |
 | `SESSION_MAX_AGE` | no | Session lifetime in seconds. Default 43200 (12 hours). |
 | `FLEET_DATA_DIR` | no | Data directory. Default `/opt/rustdesk-fleet`; the tests point it at a temp dir. |
+| `FLEET_TENANT1_SLUG`, `FLEET_TENANT1_NAME` | no | Slug (lowercase letters, digits, hyphens) and display name given to tenant #1 when the tenancy migration creates it. Default `tenant1` / `Tenant 1`. Read once; afterwards the `tenants` row is what counts. |
 
 Install the systemd unit:
 
@@ -324,7 +325,8 @@ unused, for one release in case of a rollback. Do it in this order:
    cd ~/rustdesk-fleet && git fetch origin
    git worktree add ~/rdf-tenancy-check origin/main
    cp ~/fleet-pre-tenancy.sqlite3 /tmp/fleet-check.sqlite3
-   python3 ~/rdf-tenancy-check/subsystems/dashboard/scripts/check_migration.py /tmp/fleet-check.sqlite3
+   FLEET_TENANT1_SLUG=acme-it FLEET_TENANT1_NAME="Acme IT" \
+     python3 ~/rdf-tenancy-check/subsystems/dashboard/scripts/check_migration.py /tmp/fleet-check.sqlite3
    ```
 
    It prints row counts per table before and after (they must match, apart
@@ -349,7 +351,12 @@ unused, for one release in case of a rollback. Do it in this order:
    Without this, devices on the old port-21114 channel that send an IP
    address as their Host would be rejected after the upgrade.
 
-4. **Deploy and restart:**
+4. **Name tenant #1**: add `FLEET_TENANT1_SLUG=…` and `FLEET_TENANT1_NAME=…`
+   (the values you used in step 2) to `/etc/rustdesk-fleet/dashboard.env`
+   (`sudo nano` it; keep it mode 600). Skip this and tenant #1 is called
+   `tenant1` / "Tenant 1".
+
+   **Deploy and restart:**
 
    ```bash
    cd ~/rustdesk-fleet && git pull --ff-only
