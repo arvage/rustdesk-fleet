@@ -23,6 +23,13 @@
 #   --no-client-port        Don't open it (default)
 #   --with-installer-assets Download the RustDesk client binaries now so you can
 #                             build installers immediately (large; needs network)
+#   --provider-domain <d>   Provider domain for the provider console and tenants
+#                             (admin.<d>, <slug>.<d>, <slug>.relay.<d>); needs
+#                             wildcard DNS for *.<d> and *.relay.<d>
+#   --provider-only         Only set up the provider console pieces (certbot,
+#                             rdf-helper + sudoers, nginx include dir, the
+#                             console's certificate and vhost) on a box that is
+#                             already installed; touches nothing else
 #   --yes                   Non-interactive: accept defaults, no prompts
 #
 # Run with no flags for an interactive wizard (prompts for domain, TLS, DNS
@@ -36,6 +43,8 @@ LE_EMAIL="${RDF_LE_EMAIL:-}"
 TLS_MODE="${RDF_TLS:-auto}"
 CLIENT_PORT="${RDF_CLIENT_PORT:-}"       # unset -> ask (interactive) / default off
 INSTALLER_ASSETS="${RDF_INSTALLER_ASSETS:-}"
+PROVIDER_DOMAIN="${RDF_PROVIDER_DOMAIN:-}"
+PROVIDER_ONLY=0
 ASSUME_YES=0
 
 while [[ $# -gt 0 ]]; do
@@ -46,8 +55,10 @@ while [[ $# -gt 0 ]]; do
     --client-port) CLIENT_PORT=1; shift;;
     --no-client-port) CLIENT_PORT=0; shift;;
     --with-installer-assets) INSTALLER_ASSETS=1; shift;;
+    --provider-domain) PROVIDER_DOMAIN="$2"; shift 2;;
+    --provider-only) PROVIDER_ONLY=1; shift;;
     --yes|-y) ASSUME_YES=1; shift;;
-    -h|--help) sed -n '2,29p' "$0" | sed 's/^#\s\?//'; exit 0;;
+    -h|--help) sed -n '2,37p' "$0" | sed 's/^#\s\?//'; exit 0;;
     *) echo "Unknown option: $1" >&2; exit 2;;
   esac
 done
@@ -87,6 +98,90 @@ ask() {  # ask "prompt" "default(y/n)" -> returns 0 for yes
   ans="${ans:-$def}"
   [[ "$ans" =~ ^[Yy]$ ]]
 }
+
+# ── Provider console pieces (also run alone with --provider-only) ───────────
+# rdf-helper is the dashboard's only root access: certificates and nginx
+# vhosts for tenant domains and the console. It is copied out of the repo
+# (root never runs repo files) and the sudoers entry allows exactly it.
+HELPER=/usr/local/sbin/rdf-helper
+TENANT_VHOST_DIR=/etc/nginx/rdf-tenants
+
+reload_nginx_checked() {   # nginx -t, reload, and no [emerg] after the reload
+  sudo nginx -t
+  local before; before=$(sudo stat -c %s /var/log/nginx/error.log 2>/dev/null || echo 0)
+  sudo systemctl reload nginx
+  sleep 2
+  if sudo tail -c +$((before + 1)) /var/log/nginx/error.log 2>/dev/null | grep -q '\[emerg\]'; then
+    sudo tail -c +$((before + 1)) /var/log/nginx/error.log | grep '\[emerg\]' >&2
+    die "nginx refused the new configuration (it keeps running the old one). Fix the error above and re-run."
+  fi
+}
+
+provider_setup() {
+  log "Setting up the provider console pieces"
+  sudo install -m 0755 -o root -g root "$REPO_DIR/subsystems/provisioning/rdf_helper.py" "$HELPER"
+  echo "$RUN_USER ALL=(root) NOPASSWD: $HELPER" | sudo tee /etc/sudoers.d/rdf-helper >/dev/null
+  sudo chmod 0440 /etc/sudoers.d/rdf-helper
+  sudo visudo -cf /etc/sudoers.d/rdf-helper >/dev/null || die "the rdf-helper sudoers entry is invalid"
+  info "Installed $HELPER and its sudoers entry (for $RUN_USER)."
+
+  if [[ -n "$PROVIDER_DOMAIN" ]]; then
+    PROVIDER_DOMAIN="${PROVIDER_DOMAIN,,}"
+    if sudo grep -q '^PROVIDER_DOMAIN=' "$ETC_DIR/dashboard.env"; then
+      info "PROVIDER_DOMAIN is already set in $ETC_DIR/dashboard.env — leaving it."
+      PROVIDER_DOMAIN="$(sudo sed -n 's/^PROVIDER_DOMAIN=//p' "$ETC_DIR/dashboard.env" | head -n1)"
+    else
+      echo "PROVIDER_DOMAIN=$PROVIDER_DOMAIN" | sudo tee -a "$ETC_DIR/dashboard.env" >/dev/null
+      info "Added PROVIDER_DOMAIN=$PROVIDER_DOMAIN to $ETC_DIR/dashboard.env."
+    fi
+  else
+    PROVIDER_DOMAIN="$(sudo sed -n 's/^PROVIDER_DOMAIN=//p' "$ETC_DIR/dashboard.env" 2>/dev/null | head -n1)"
+  fi
+  if [[ -z "$PROVIDER_DOMAIN" ]]; then
+    warn "No PROVIDER_DOMAIN (use --provider-domain): skipping the console host and tenant domains."
+    return 0
+  fi
+
+  # Port 80 for every tenant/console host: ACME challenges, else HTTPS.
+  # Tenant and console vhosts (443) are written by rdf-helper into
+  # $TENANT_VHOST_DIR. The sign-in rate-limit zone they use (rdf_signin) is
+  # defined by the main vhost.
+  sudo mkdir -p "$TENANT_VHOST_DIR" /var/www/certbot
+  sudo tee /etc/nginx/conf.d/rdf-provider.conf >/dev/null <<EOF
+# RustDesk Fleet provider domains (install.sh). Tenant and console vhosts:
+# $TENANT_VHOST_DIR, written by rdf-helper.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name *.$PROVIDER_DOMAIN;
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location / { return 301 https://\$host\$request_uri; }
+}
+include $TENANT_VHOST_DIR/*.conf;
+EOF
+  reload_nginx_checked
+  sudo systemctl restart rustdesk-dashboard.service
+  local console="admin.$PROVIDER_DOMAIN"
+  if sudo test -f "$TENANT_VHOST_DIR/$console.conf"; then
+    info "The console vhost for $console already exists."
+  elif sudo "$HELPER" issue-cert "$console" ${LE_EMAIL:+"$LE_EMAIL"} && sudo "$HELPER" write-vhost "$console" \
+       && sudo "$HELPER" reload-nginx; then
+    info "Provider console: https://$console/"
+  else
+    warn "Couldn't set up https://$console/ yet (DNS for *.$PROVIDER_DOMAIN must point here, port 80 open). Re-run with --provider-only."
+  fi
+  info "Create the first provider admin:  python3 $DASH_DIR/scripts/provider_admin.py add you@example.com 'Your Name'"
+}
+
+if [[ $PROVIDER_ONLY -eq 1 ]]; then
+  [[ -f "$ETC_DIR/dashboard.env" ]] || die "--provider-only needs an installed box ($ETC_DIR/dashboard.env is missing)."
+  log "Installing certbot and reportlab"
+  sudo apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot python3-reportlab
+  provider_setup
+  log "Done (provider pieces only)."
+  exit 0
+fi
 
 INTERACTIVE=0
 if [[ $ASSUME_YES -eq 0 && -t 0 ]]; then INTERACTIVE=1; fi
@@ -228,8 +323,10 @@ fi
 # ── 2. System packages ───────────────────────────────────────────────────────
 log "Installing system packages"
 sudo apt-get update -qq
-PKGS=(docker.io docker-compose-v2 python3 python3-pip nsis nginx gnupg)
-[[ "$TLS_MODE" == "letsencrypt" ]] && PKGS+=(certbot python3-certbot-nginx)
+# certbot issues tenants' and the console's certificates (webroot), and
+# reportlab builds tenants' client PDF guides.
+PKGS=(docker.io docker-compose-v2 python3 python3-pip nsis nginx gnupg certbot python3-reportlab)
+[[ "$TLS_MODE" == "letsencrypt" ]] && PKGS+=(python3-certbot-nginx)
 [[ "$TLS_MODE" == "selfsigned" ]] && PKGS+=(openssl)
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PKGS[@]}"
 sudo systemctl enable --now docker
@@ -517,6 +614,8 @@ case "$TLS_MODE" in
     ;;
 esac
 
+provider_setup
+
 # ── 10. Firewall (only if ufw is active; cloud security groups are separate) ─
 if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
   log "Opening ports in ufw"
@@ -525,8 +624,13 @@ if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
   sudo ufw allow 80/tcp >/dev/null 2>&1 || true
   sudo ufw allow 443/tcp >/dev/null 2>&1 || true
   [[ $CLIENT_PORT -eq 1 ]] && sudo ufw allow 21114/tcp >/dev/null 2>&1 || true
+  # Tenant relays (provider console): RELAY_PORT_BASE-RELAY_PORT_MAX.
+  if [[ -n "$PROVIDER_DOMAIN" ]]; then
+    sudo ufw allow 21200:21999/tcp >/dev/null 2>&1 || true
+    sudo ufw allow 21200:21999/udp >/dev/null 2>&1 || true
+  fi
 else
-  warn "ufw not active — if this box is behind a cloud firewall/security group, open TCP+UDP 21115-21119, TCP 443 and 80$([[ $CLIENT_PORT -eq 1 ]] && echo ', and TCP 21114')."
+  warn "ufw not active — if this box is behind a cloud firewall/security group, open TCP+UDP 21115-21119, TCP 443 and 80$([[ $CLIENT_PORT -eq 1 ]] && echo ', and TCP 21114')$([[ -n "$PROVIDER_DOMAIN" ]] && echo ', and TCP+UDP 21200-21999 for tenant relays')."
 fi
 
 # ── 11. Installer assets (optional, large download) ──────────────────────────
