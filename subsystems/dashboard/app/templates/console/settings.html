@@ -1,0 +1,34 @@
+{% extends "console/base.html" %}
+{% block title %}Settings — Provider console{% endblock %}
+{% block page_title %}Provider settings{% endblock %}
+{% block content %}
+<div class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 8px">From the environment (dashboard.env)</h2>
+  <p class="text-sm" style="margin:0">PROVIDER_DOMAIN <code>{{ env.PROVIDER_DOMAIN or "not set" }}</code> · console <code>{{ env.console or "—" }}</code> ·
+     relay ports <code>{{ env.port_range }}</code> (TCP, and UDP on each block's main port: keep this range open in the cloud firewall)</p>
+</div></div></div>
+<form method="post" action="/settings" class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 8px">Provider email</h2>
+  <p class="text-sm text-muted" style="margin:0 0 12px">Used for provider alerts (to every provider admin: {{ admins | join(", ") or "none yet" }}), console invitations and emails to tenants' admins about their account.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
+    <label>SMTP host<br><input name="smtp_host" value="{{ s.smtp_host }}"></label>
+    <label>Port<br><input name="smtp_port" value="{{ s.smtp_port }}"></label>
+    <label>Security<br><select name="smtp_tls">{% for o in ["starttls", "ssl", "none"] %}<option {% if s.smtp_tls == o %}selected{% endif %}>{{ o }}</option>{% endfor %}</select></label>
+    <label>User<br><input name="smtp_user" value="{{ s.smtp_user }}"></label>
+    <label>Password<br><input type="password" name="smtp_pass" placeholder="{{ 'saved — leave blank to keep' if s.smtp_pass_set else '' }}"></label>
+    <label>From address<br><input name="from_addr" value="{{ s.from_addr }}"></label>
+  </div>
+  <h2 style="font-size:14px;margin:18px 0 8px">Host health alerts</h2>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+    <label><input type="checkbox" name="alerts_enabled" value="1" {% if s.alerts_enabled == "1" %}checked{% endif %}> Email alerts</label>
+    <label>Memory threshold %<br><input type="number" min="1" max="100" name="mem_threshold" value="{{ s.mem_threshold }}"></label>
+    <label>Disk threshold %<br><input type="number" min="1" max="100" name="disk_threshold" value="{{ s.disk_threshold }}"></label>
+  </div>
+  <h2 style="font-size:14px;margin:18px 0 8px">Certificates</h2>
+  <label>Let's Encrypt account email<br><input name="letsencrypt_email" value="{{ s.letsencrypt_email }}"></label>
+  <div style="margin-top:16px;display:flex;gap:8px">
+    <button class="btn btn-primary btn-sm">Save</button>
+    <button class="btn btn-ghost btn-sm" formaction="/settings/test-email">Send me a test email</button>
+  </div>
+</div></div></form>
+{% endblock %}

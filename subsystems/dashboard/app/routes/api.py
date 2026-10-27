@@ -15,7 +15,7 @@ from app import paths
 from app.auth import require_auth
 from app.deps import device_known, get_db, get_devices, get_hbbs_peers, log_event
 from app.notifications import fire_notification
-from app.tenancy import Tenant, active_tenants, get_tenant, is_provider_home
+from app.tenancy import Tenant, active_tenants, get_tenant
 
 # How long to keep a device marked online after its IP was last seen in an
 # established TCP connection.  RustDesk reconnects every ~12-30 s; 90 s
@@ -463,19 +463,19 @@ def _pct(used: float, total: float) -> float | None:
 
 def _server_health(tenant: Tenant) -> dict:
     """The tenant's relay containers and devices online. Host metrics (CPU,
-    memory, disk) are about our server, so only the provider home gets them."""
+    memory, disk) are about our server: they are on the provider console's
+    Host health page (console/server.py), not here."""
     status = _compute_status(tenant)
     online = sum(1 for s in status.values() if s in ("online", "in session"))
-    tenant_part = {
+    return {
         "containers": _container_states(tenant),
         "devices": {"online": online, "total": len(status)},
     }
-    if not is_provider_home(tenant):
-        return tenant_part
-    return {**_host_health(tenant.id), **tenant_part}
 
 
-def _host_health(tenant_id: int) -> dict:
+def _host_health() -> dict:
+    """CPU, memory, swap, disk and uptime of the box, with the provider's
+    alert thresholds (provider console)."""
     mem = _meminfo()
     mem_total = mem.get("MemTotal", 0)
     mem_used = mem_total - mem.get("MemAvailable", 0) if mem_total else 0
@@ -493,8 +493,8 @@ def _host_health(tenant_id: int) -> dict:
         load1 = load5 = load15 = None
 
     try:
-        from app.notifications import get_settings
-        s = get_settings(tenant_id)
+        from app import provider_config
+        s = provider_config.get_all()
         mem_thr = int(s.get("mem_threshold") or 90)
         disk_thr = int(s.get("disk_threshold") or 90)
     except Exception:
@@ -531,7 +531,7 @@ async def server_health(_: dict = Depends(require_auth), tenant: Tenant = Depend
 # Notifications page and fires the memory_high / disk_high email alerts. Edge-
 # triggered with a short debounce and hysteresis so a crossing emails once, not
 # every cycle, and a brief spike doesn't alert. This is about our server, so
-# it uses (and alerts) the provider home tenant only (TENANCY.md).
+# it uses the provider's settings and emails the provider admins.
 
 _HEALTH_ALERT_INTERVAL_S = 60
 _HEALTH_ALERT_DEBOUNCE = 2     # consecutive readings above threshold before firing
@@ -554,20 +554,17 @@ def _fmt_b(b: int) -> str:
 
 
 def _check_health_thresholds() -> None:
-    from app.notifications import get_settings, fire_notification
-    from app.tenancy import LEGACY_TENANT_ID, load_tenant
+    from app import provider_config, settings as env
+    from app.console import mail
 
-    home = load_tenant(LEGACY_TENANT_ID)
-    if home is None:
-        return
-    settings = get_settings(home.id)
-    if not settings.get("enabled"):
+    settings = provider_config.get_all()
+    if settings.get("alerts_enabled") != "1" or not mail.smtp_settings():
         for st in _health_alert_state.values():   # don't fire a stale crossing on re-enable
             st["count"] = 0
         return
 
-    health = _host_health(home.id)
-    host = (home.relay.host if home.relay else "") or "—"
+    health = _host_health()
+    host = env.provider_domain() or os.uname().nodename
     mem = health.get("mem") or {}
     disk = health.get("disk") or {}
 
@@ -584,11 +581,13 @@ def _check_health_thresholds() -> None:
         st["count"] = st["count"] + 1 if pct >= threshold else 0
         if not st["high"] and st["count"] >= _HEALTH_ALERT_DEBOUNCE:
             st["high"] = True
-            # fire_notification also honours the per-event on/off toggle and SMTP config.
-            fire_notification(home.id, event, {
-                "pct": pct, "pct_str": f"{pct}%", "threshold": threshold,
-                "usage": usage, "host": host,
-            })
+            what = "memory" if event == "memory_high" else "disk"
+            mail.send_to_provider_admins(
+                f"Server {what} high — {pct}% used",
+                mail.simple_html(f"Server {what} above {threshold}%",
+                                 [f"{host}: {what} is at {pct}% ({usage}).",
+                                  f"The alert threshold is {threshold}% (provider console → Settings)."]),
+                event=event)
         elif st["high"] and pct < max(threshold - _HEALTH_ALERT_HYSTERESIS, 0):
             st["high"] = False
             st["count"] = 0

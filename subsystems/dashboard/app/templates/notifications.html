@@ -153,48 +153,6 @@
     </form>
   </div>
 
-  <!-- ── Server health alerts ─────────────────────────────────────────────── -->
-  <div class="card">
-    <div class="card-header">
-      <div>
-        <h2 style="font-size:13px;font-weight:600;color:var(--text-1);margin:0">Server health alerts</h2>
-        <div style="font-size:12px;color:var(--text-3);margin-top:2px">
-          Email when the server's memory or disk usage stays above these thresholds.
-          Turn each alert on or off under <strong>Event triggers</strong> below.
-        </div>
-      </div>
-    </div>
-    <form method="post" action="/notifications/health-alerts" class="notif-form">
-      <div style="padding:18px;display:flex;flex-direction:column;gap:16px">
-        <div class="grid-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-          <div class="field">
-            <label>
-              Memory threshold
-              <span style="font-weight:400;color:var(--text-3)"> — % used</span>
-            </label>
-            <input type="number" name="mem_threshold" min="1" max="100" step="1"
-                   value="{{ settings.mem_threshold or 90 }}" placeholder="90">
-          </div>
-          <div class="field">
-            <label>
-              Disk threshold
-              <span style="font-weight:400;color:var(--text-3)"> — % used</span>
-            </label>
-            <input type="number" name="disk_threshold" min="1" max="100" step="1"
-                   value="{{ settings.disk_threshold or 90 }}" placeholder="90">
-          </div>
-        </div>
-        <div style="font-size:11px;color:var(--text-3)">
-          An alert fires once when usage first crosses its threshold (after a short grace period),
-          and re-arms once usage drops a few points back below it — so you won't be emailed every minute.
-        </div>
-        <div>
-          <button type="submit" class="btn btn-primary btn-sm">Save thresholds</button>
-        </div>
-      </div>
-    </form>
-  </div>
-
     <!-- Event triggers -->
     <div class="card">
       <div class="card-header">

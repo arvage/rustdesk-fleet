@@ -128,41 +128,6 @@ async def notifications_event_toggle(
     return JSONResponse({"ok": True, "enabled": bool(enabled)})
 
 
-@router.post("/notifications/health-alerts")
-async def notifications_health_alerts(
-    request: Request,
-    mem_threshold: str = Form("90"),
-    disk_threshold: str = Form("90"),
-    current_user: dict = Depends(require_auth),
-):
-    _require_admin(current_user)
-
-    def _clamp(v: str, default: int = 90) -> int:
-        try:
-            return max(1, min(100, int(float(v))))
-        except (ValueError, TypeError):
-            return default
-
-    mem = _clamp(mem_threshold)
-    disk = _clamp(disk_threshold)
-
-    tid = current_user["tenant_id"]
-    conn = get_db()
-    conn.execute("INSERT OR IGNORE INTO notification_settings (tenant_id) VALUES (?)", (tid,))
-    conn.execute(
-        "UPDATE notification_settings SET mem_threshold=?, disk_threshold=?,"
-        " updated_at=datetime('now') WHERE tenant_id=?",
-        (mem, disk, tid),
-    )
-    log_event(conn, "health_alert_thresholds_updated", f"mem={mem}% disk={disk}%", current_user["email"],
-              tenant_id=tid)
-    conn.commit()
-    conn.close()
-
-    _set_flash(request, "success", f"Health alert thresholds saved (memory {mem}%, disk {disk}%).")
-    return RedirectResponse("/notifications", status_code=303)
-
-
 @router.post("/notifications/test")
 async def notifications_test(
     request: Request,

@@ -64,7 +64,7 @@
         </a>
       </div>
       {% set p = (current_user.permissions if current_user else []) or [] %}
-      {% if current_user and ('manage_backups' in p or 'manage_system' in p or 'manage_users' in p or 'manage_roles' in p or 'manage_notifications' in p or 'update_server' in p) %}
+      {% if current_user and ('manage_system' in p or 'manage_users' in p or 'manage_roles' in p or 'manage_notifications' in p) %}
       <div class="nav-section">
         <div class="nav-label">Admin</div>
         <a href="/admin" class="nav-item {% if request.url.path == '/admin' or (request.url.path.startswith('/admin/') and not request.url.path.startswith('/admin/reports') and not request.url.path.startswith('/admin/emails')) %}active{% endif %}">

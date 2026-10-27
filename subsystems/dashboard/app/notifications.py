@@ -13,9 +13,7 @@ Supported event types (EVENT_LABELS keys):
   device_online      — a previously-offline device came back online
   installer_built    — an installer was compiled for a group
   installer_deleted  — an installer build was deleted
-  server_update_available — a newer rustdesk-server release is on GitHub
   installer_downloaded — a client downloaded an installer via a shared link
-  client_update_available — a newer RustDesk client release is on GitHub
 """
 
 from __future__ import annotations
@@ -43,11 +41,7 @@ EVENT_LABELS: dict[str, str] = {
     "installer_deleted": "Installer deleted",
     "user_created":      "User account created",
     "user_deleted":      "User account deleted",
-    "server_update_available": "New server version available",
     "installer_downloaded": "Client downloaded installer via link",
-    "client_update_available": "New client version available",
-    "memory_high":       "Server memory above threshold",
-    "disk_high":         "Server disk above threshold",
 }
 
 _SUBJECTS: dict[str, str] = {
@@ -59,11 +53,7 @@ _SUBJECTS: dict[str, str] = {
     "installer_deleted": "Installer deleted — {group_name} ({platform})",
     "user_created":      "New user created — {email}",
     "user_deleted":      "User deleted — {email}",
-    "server_update_available": "RustDesk server {latest_version} available",
     "installer_downloaded": "Installer downloaded — {group_name} ({platform})",
-    "client_update_available": "RustDesk client {latest_version} available",
-    "memory_high":       "Server memory high — {pct}% used",
-    "disk_high":         "Server disk high — {pct}% used",
 }
 
 # ── Settings helpers ──────────────────────────────────────────────────────────

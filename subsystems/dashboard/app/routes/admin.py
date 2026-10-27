@@ -1,10 +1,8 @@
 import csv
 import io
-import subprocess
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.auth import require_auth
 from app.deps import get_db, get_devices, log_event
@@ -12,55 +10,26 @@ from app.permissions import (
     require_perm, user_can, all_roles, CAPABILITIES, CAP_KEYS, slugify_role_key, invalidate_cache,
 )
 import json
-from app.routes.home import require_provider_home
-from app.tenancy import Tenant, get_tenant, is_provider_home
+from app.tenancy import Tenant, get_tenant
 from app.templates_config import templates
 
 router = APIRouter()
 
-# Backups and code signing are provider-level (TENANCY.md): their routes
-# exist only on the provider home tenant and 404 everywhere else. Their
-# audit events have no tenant (tenant_id NULL).
-_PROVIDER = [Depends(require_provider_home)]
+# Backups, code signing, relay restarts and upgrades are provider-level: they
+# are in the provider console (app/console), not here.
 
 
 def _set_flash(request: Request, type_: str, msg: str) -> None:
     request.session["flash"] = {"type": type_, "msg": msg}
 
 
-_ADMIN_AREA_CAPS = ("manage_backups", "manage_system", "manage_users", "manage_roles",
-                    "manage_notifications", "update_server")
+_ADMIN_AREA_CAPS = ("manage_system", "manage_users", "manage_roles", "manage_notifications")
 
 
 def _require_admin(current_user: dict) -> None:
     """Landing gate: any admin-area capability may open /admin."""
     if not any(user_can(current_user, c) for c in _ADMIN_AREA_CAPS):
         raise PermissionError("You don't have access to the admin area.")
-
-
-def _backup_cfg() -> dict:
-    conn = get_db()
-    conn.execute("INSERT OR IGNORE INTO backup_config (id) VALUES (1)")
-    conn.commit()
-    row = conn.execute("SELECT * FROM backup_config WHERE id = 1").fetchone()
-    conn.close()
-    return dict(row)
-
-
-def _restart_relay(tenant: Tenant) -> tuple[bool, str]:
-    """Restart the tenant's hbbs/hbbr containers. Returns (ok, message)."""
-    if tenant.relay is None:
-        return False, "This account has no relay yet."
-    try:
-        r = subprocess.run(
-            ["docker", "compose", "-f", tenant.relay.compose_path, "restart"],
-            capture_output=True, text=True, timeout=120,
-        )
-        if r.returncode != 0:
-            return False, (r.stderr or "docker compose restart failed").strip()[:400]
-        return True, "hbbs/hbbr restarted."
-    except Exception as e:
-        return False, str(e)[:400]
 
 
 # ── Admin landing ────────────────────────────────────────────────────────────
@@ -74,25 +43,12 @@ async def admin_home(request: Request, current_user: dict = Depends(require_auth
     device_count = conn.execute("SELECT COUNT(*) FROM devices WHERE tenant_id = ? AND hidden = 0", (tid,)).fetchone()[0]
     active_sessions = conn.execute(
         "SELECT COUNT(*) FROM device_sessions WHERE tenant_id = ? AND ended_at IS NULL", (tid,)).fetchone()[0]
-    # Same events the Logs page shows (the provider home also sees provider events).
+    # Same events the Logs page shows.
     log_count = conn.execute(
-        "SELECT COUNT(*) FROM provisioning_events WHERE (tenant_id = ?"
-        + (" OR tenant_id IS NULL" if is_provider_home(tenant) else "") + ") AND source IS NOT 'provider'",
+        "SELECT COUNT(*) FROM provisioning_events WHERE tenant_id = ? AND source IS NOT 'provider'",
         (tid,)).fetchone()[0]
     user_count = conn.execute("SELECT COUNT(*) FROM users WHERE tenant_id = ?", (tid,)).fetchone()[0]
     conn.close()
-    backup_status = offsite = None
-    if is_provider_home(tenant):
-        try:
-            import backup
-            backup_status = backup.status()
-        except Exception:
-            backup_status = None
-        try:
-            import backup_remote
-            offsite = backup_remote.offsite_summary()
-        except Exception:
-            offsite = None
     return templates.TemplateResponse(
         request, "admin.html",
         {
@@ -101,379 +57,8 @@ async def admin_home(request: Request, current_user: dict = Depends(require_auth
             "active_sessions": active_sessions,
             "log_count": log_count,
             "user_count": user_count,
-            "backup_status": backup_status,
-            "offsite": offsite,
-            "provider_home": is_provider_home(tenant),
         },
     )
-
-
-# ── Backup & restore ─────────────────────────────────────────────────────────
-
-def _signing_cfg() -> dict:
-    conn = get_db()
-    conn.execute("INSERT OR IGNORE INTO signing_config (id) VALUES (1)")
-    conn.commit()
-    row = conn.execute("SELECT * FROM signing_config WHERE id = 1").fetchone()
-    conn.close()
-    return dict(row)
-
-
-def _save_signing_form(form, current_user: dict) -> dict:
-    def f(name: str, default: str = "") -> str:
-        return (form.get(name) or default).strip()
-
-    enabled = 1 if f("enabled") == "1" else 0
-    auto_sign = 1 if f("auto_sign") == "1" else 0
-    conn = get_db()
-    conn.execute("INSERT OR IGNORE INTO signing_config (id) VALUES (1)")
-    conn.execute(
-        """UPDATE signing_config SET enabled=?, auto_sign=?, provider='azure_trusted_signing',
-               azure_tenant_id=?, azure_client_id=?, endpoint=?, account_name=?, profile_name=?,
-               updated_at=datetime('now') WHERE id=1""",
-        (enabled, auto_sign, f("azure_tenant_id"), f("azure_client_id"),
-         f("endpoint"), f("account_name"), f("profile_name")),
-    )
-    # Secret: blank submission preserves the stored value.
-    if f("azure_client_secret"):
-        conn.execute("UPDATE signing_config SET azure_client_secret=? WHERE id=1", (f("azure_client_secret"),))
-    log_event(conn, "signing_config_updated", f"enabled={enabled} auto_sign={auto_sign}", current_user["email"],
-              tenant_id=None)
-    conn.commit()
-    conn.close()
-    return _signing_cfg()
-
-
-@router.get("/admin/signing", response_class=HTMLResponse, dependencies=_PROVIDER)
-async def admin_signing(request: Request, current_user: dict = Depends(require_auth)):
-    require_perm(current_user, "manage_system")
-    cfg = _signing_cfg()
-    cfg_view = dict(cfg)
-    cfg_view["secret_set"] = bool(cfg.get("azure_client_secret"))
-    cfg_view.pop("azure_client_secret", None)
-    try:
-        import sign_installer
-        jsign_present = sign_installer.JSIGN_JAR.exists()
-    except Exception:
-        jsign_present = False
-    return templates.TemplateResponse(
-        request, "admin_signing.html",
-        {"current_user": current_user, "cfg": cfg_view, "jsign_present": jsign_present},
-    )
-
-
-@router.post("/admin/signing/save", dependencies=_PROVIDER)
-async def admin_signing_save(request: Request, current_user: dict = Depends(require_auth)):
-    require_perm(current_user, "manage_system")
-    cfg = _save_signing_form(await request.form(), current_user)
-    state = "ON" if cfg["enabled"] else "OFF"
-    auto = " Auto-sign is on." if cfg["enabled"] and cfg["auto_sign"] else ""
-    _set_flash(request, "success", f"Signing settings saved. Code signing is {state}.{auto}")
-    return RedirectResponse("/admin/signing", status_code=303)
-
-
-@router.post("/admin/signing/test", dependencies=_PROVIDER)
-async def admin_signing_test(request: Request, current_user: dict = Depends(require_auth)):
-    require_perm(current_user, "manage_system")
-    cfg = _save_signing_form(await request.form(), current_user)
-    try:
-        import sign_installer
-        res = sign_installer.test(cfg)
-    except Exception as e:
-        res = {"ok": False, "error": str(e)[:400]}
-    if res["ok"]:
-        _set_flash(request, "success", "Saved. Azure token acquired and jsign is present — signing is ready.")
-    else:
-        _set_flash(request, "error", f"Saved, but the signing test failed: {res['error']}")
-    return RedirectResponse("/admin/signing", status_code=303)
-
-
-@router.get("/admin/backup", response_class=HTMLResponse, dependencies=_PROVIDER)
-async def admin_backup(request: Request, current_user: dict = Depends(require_auth)):
-    require_perm(current_user, "manage_backups")
-    cfg = _backup_cfg()
-    try:
-        import backup
-        archives = backup.list_archives()
-        backup_status = backup.status()
-    except Exception:
-        archives, backup_status = [], None
-    # Off-site listing: shown whenever a destination is configured (even if the toggle is off).
-    remote_archives, remote_error, remote_configured = [], None, False
-    try:
-        import backup_remote
-        remote_configured = backup_remote.offsite_summary(cfg)["configured"]
-        if remote_configured:
-            remote_archives = backup_remote.list_remote(cfg)
-    except Exception as e:
-        remote_error = f"{type(e).__name__}: {str(e)[:300]}"
-    # Never send secrets to the browser; show only whether they're set.
-    cfg_view = dict(cfg)
-    cfg_view["s3_secret_set"] = bool(cfg.get("s3_secret_key"))
-    cfg_view["passphrase_set"] = bool(cfg.get("passphrase"))
-    cfg_view.pop("s3_secret_key", None)
-    cfg_view.pop("passphrase", None)
-    return templates.TemplateResponse(
-        request, "admin_backup.html",
-        {
-            "current_user": current_user,
-            "cfg": cfg_view,
-            "archives": archives,
-            "remote_archives": remote_archives,
-            "remote_error": remote_error,
-            "remote_configured": remote_configured,
-            "backup_status": backup_status,
-        },
-    )
-
-
-def _save_backup_form(form, current_user: dict) -> dict:
-    """Persist the destination form. Secret + passphrase: blank keeps the stored value."""
-    def f(name: str, default: str = "") -> str:
-        return (form.get(name) or default).strip()
-
-    provider = f("provider", "s3")
-    provider = provider if provider in ("s3", "rclone") else "s3"
-    try:
-        ret = max(1, min(365, int(f("retention", "14"))))
-    except ValueError:
-        ret = 14
-    try:
-        off_ret = max(0, min(3650, int(f("offsite_retention", "0") or "0")))
-    except ValueError:
-        off_ret = 0
-    is_enabled = 1 if f("enabled") == "1" else 0
-
-    conn = get_db()
-    conn.execute("INSERT OR IGNORE INTO backup_config (id) VALUES (1)")
-    conn.execute(
-        """UPDATE backup_config SET enabled=?, provider=?, s3_provider=?, s3_endpoint=?,
-               s3_region=?, s3_bucket=?, s3_prefix=?, s3_access_key=?, rclone_remote=?,
-               retention=?, offsite_retention=?, updated_at=datetime('now') WHERE id=1""",
-        (is_enabled, provider, f("s3_provider", "aws"), f("s3_endpoint"), f("s3_region"),
-         f("s3_bucket"), f("s3_prefix"), f("s3_access_key"), f("rclone_remote"), ret, off_ret),
-    )
-    if f("s3_secret_key"):
-        conn.execute("UPDATE backup_config SET s3_secret_key=? WHERE id=1", (f("s3_secret_key"),))
-    if f("passphrase"):
-        conn.execute("UPDATE backup_config SET passphrase=? WHERE id=1", (f("passphrase"),))
-    log_event(conn, "backup_config_updated", f"provider={provider} enabled={is_enabled}", current_user["email"],
-              tenant_id=None)
-    conn.commit()
-    conn.close()
-    return _backup_cfg()
-
-
-@router.post("/admin/backup/save", dependencies=_PROVIDER)
-async def admin_backup_save(request: Request, current_user: dict = Depends(require_auth)):
-    require_perm(current_user, "manage_backups")
-    cfg = _save_backup_form(await request.form(), current_user)
-    try:
-        import backup_remote
-        summary = backup_remote.offsite_summary(cfg)
-    except Exception:
-        summary = {"enabled": bool(cfg["enabled"]), "configured": True}
-    if summary["enabled"] and not summary["configured"]:
-        _set_flash(request, "error",
-                   "Saved, but off-site copy is on without a bucket and access keys — uploads will fail.")
-    elif summary["enabled"]:
-        _set_flash(request, "success", "Saved. Off-site copy is ON — every backup will be uploaded.")
-    else:
-        _set_flash(request, "success", "Saved. Off-site copy is OFF — backups stay on this server only.")
-    return RedirectResponse("/admin/backup", status_code=303)
-
-
-@router.post("/admin/backup/test", dependencies=_PROVIDER)
-async def admin_backup_test(request: Request, current_user: dict = Depends(require_auth)):
-    """Save what's on screen, then test it — so the test matches the form and nothing is lost."""
-    require_perm(current_user, "manage_backups")
-    cfg = _save_backup_form(await request.form(), current_user)
-    try:
-        import backup_remote
-        res = backup_remote.test(cfg)
-    except Exception as e:
-        res = {"ok": False, "error": str(e)[:400]}
-    state = "ON" if cfg["enabled"] else "OFF (turn it on to upload backups)"
-    if res["ok"]:
-        _set_flash(request, "success",
-                   f"Saved. Destination reachable — credentials and bucket look good. Off-site copy is {state}.")
-    else:
-        _set_flash(request, "error", f"Saved, but the destination test failed: {res['error']}")
-    return RedirectResponse("/admin/backup", status_code=303)
-
-
-@router.post("/admin/backup/run", dependencies=_PROVIDER)
-def admin_backup_run(request: Request, current_user: dict = Depends(require_auth)):
-    require_perm(current_user, "manage_backups")
-    import backup
-    st = backup.run()
-    if st.get("ok"):
-        msg = f"Backup created — {st['file']} ({st['size_human']})."
-        off = st.get("offsite", {})
-        if off.get("attempted"):
-            msg += " Off-site copy ok." if off.get("ok") else f" Off-site copy FAILED: {off.get('error')}"
-        _set_flash(request, "success" if not (off.get("attempted") and not off.get("ok")) else "error", msg)
-    else:
-        _set_flash(request, "error", f"Backup failed: {st.get('error')}")
-    return RedirectResponse("/admin/backup", status_code=303)
-
-
-@router.post("/admin/backup/restore")
-def admin_backup_restore(
-    request: Request,
-    archive: str = Form(""),
-    confirm: str = Form(""),
-    current_user: dict = Depends(require_auth),
-    tenant: Tenant = Depends(require_provider_home),
-):
-    require_perm(current_user, "manage_backups")
-    import backup
-    if confirm != "yes":
-        _set_flash(request, "error", "Restore not confirmed.")
-        return RedirectResponse("/admin/backup", status_code=303)
-    # Only allow an archive that actually exists in the backup dir (no traversal).
-    names = {a["file"] for a in backup.list_archives()}
-    if archive not in names:
-        _set_flash(request, "error", "Unknown archive.")
-        return RedirectResponse("/admin/backup", status_code=303)
-
-    res = backup.restore(backup.BACKUP_DIR / archive)
-    return _finish_restore(request, tenant, res, archive, current_user)
-
-
-def _finish_restore(request: Request, tenant: Tenant, res: dict, label: str, current_user: dict) -> RedirectResponse:
-    """Shared tail of local + off-site restore: restart relay, audit, flash."""
-    if not res["ok"]:
-        _set_flash(request, "error", f"Restore failed: {res['error']} (a safety snapshot was taken: {res.get('safety')})")
-        return RedirectResponse("/admin/backup", status_code=303)
-
-    # A restore can touch every relay's keypair and peer DB: restart them all.
-    from app.tenancy import active_tenants
-    results = [(t, *_restart_relay(t)) for t in active_tenants() if t.relay]
-    failed = [f"{t.slug}: {m}" for t, ok_, m in results if not ok_]
-    ok, relay_msg = not failed, "; ".join(failed)
-    log_event_conn = get_db()
-    log_event(log_event_conn, "backup_restored", f"{label} -> {', '.join(res['applied'])}", current_user["email"],
-              tenant_id=None)
-    log_event_conn.commit()
-    log_event_conn.close()
-    msg = (f"Restored {', '.join(res['applied'])} from {label}. "
-           f"Safety snapshot: {res.get('safety')}. "
-           + ("Relay restarted." if ok else f"Relay restart FAILED: {relay_msg} — restart it from the box.")
-           + " If you get logged out, sign in again.")
-    _set_flash(request, "success" if ok else "error", msg)
-    return RedirectResponse("/admin/backup", status_code=303)
-
-
-@router.post("/admin/backup/offsite/restore")
-def admin_backup_offsite_restore(
-    request: Request,
-    archive: str = Form(""),
-    confirm: str = Form(""),
-    current_user: dict = Depends(require_auth),
-    tenant: Tenant = Depends(require_provider_home),
-):
-    """Download an off-site archive to a temp dir and restore from it."""
-    require_perm(current_user, "manage_backups")
-    import tempfile
-    import shutil
-    import backup
-    import backup_remote
-    if confirm != "yes":
-        _set_flash(request, "error", "Restore not confirmed.")
-        return RedirectResponse("/admin/backup", status_code=303)
-    tmp = Path(tempfile.mkdtemp(prefix="rdf-offsite-"))
-    try:
-        try:
-            # download() only accepts names in the off-site listing (no arbitrary keys).
-            path = backup_remote.download(_backup_cfg(), archive, tmp)
-        except FileNotFoundError:
-            _set_flash(request, "error", "Unknown off-site archive.")
-            return RedirectResponse("/admin/backup", status_code=303)
-        except Exception as e:
-            hint = " The access key needs s3:GetObject to restore." if "AccessDenied" in str(e) or "403" in str(e) else ""
-            _set_flash(request, "error", f"Could not download {archive}: {type(e).__name__}: {str(e)[:250]}.{hint}")
-            return RedirectResponse("/admin/backup", status_code=303)
-        res = backup.restore(path)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-    return _finish_restore(request, tenant, res, f"off-site {archive}", current_user)
-
-
-@router.post("/admin/backup/offsite/delete", dependencies=_PROVIDER)
-def admin_backup_offsite_delete(
-    request: Request,
-    archive: str = Form(""),
-    confirm: str = Form(""),
-    current_user: dict = Depends(require_auth),
-):
-    """Delete one archive from the off-site destination. Local copies are not touched."""
-    require_perm(current_user, "manage_backups")
-    import backup_remote
-    if confirm != "yes":
-        _set_flash(request, "error", "Delete not confirmed.")
-        return RedirectResponse("/admin/backup", status_code=303)
-    try:
-        backup_remote.delete_remote(_backup_cfg(), archive)
-    except FileNotFoundError:
-        _set_flash(request, "error", "Unknown off-site archive.")
-        return RedirectResponse("/admin/backup", status_code=303)
-    except Exception as e:
-        hint = " The access key needs s3:DeleteObject to delete." if "AccessDenied" in str(e) or "403" in str(e) else ""
-        _set_flash(request, "error", f"Could not delete {archive}: {type(e).__name__}: {str(e)[:250]}.{hint}")
-        return RedirectResponse("/admin/backup", status_code=303)
-    conn = get_db()
-    log_event(conn, "backup_offsite_deleted", archive, current_user["email"], tenant_id=None)
-    conn.commit()
-    conn.close()
-    _set_flash(request, "success", f"Deleted {archive} from the off-site destination. Local copies are unchanged.")
-    return RedirectResponse("/admin/backup", status_code=303)
-
-
-@router.post("/admin/backup/delete", dependencies=_PROVIDER)
-def admin_backup_delete(
-    request: Request,
-    archive: str = Form(""),
-    confirm: str = Form(""),
-    current_user: dict = Depends(require_auth),
-):
-    """Delete one local archive. Off-site copies are not touched."""
-    require_perm(current_user, "manage_backups")
-    import backup
-    if confirm != "yes":
-        _set_flash(request, "error", "Delete not confirmed.")
-        return RedirectResponse("/admin/backup", status_code=303)
-    # Only allow an archive that actually exists in the backup dir (no traversal).
-    names = {a["file"] for a in backup.list_archives()}
-    if archive not in names:
-        _set_flash(request, "error", "Unknown archive.")
-        return RedirectResponse("/admin/backup", status_code=303)
-    try:
-        (backup.BACKUP_DIR / archive).unlink()
-    except OSError as e:
-        _set_flash(request, "error", f"Could not delete {archive}: {e.strerror or e}")
-        return RedirectResponse("/admin/backup", status_code=303)
-    conn = get_db()
-    log_event(conn, "backup_deleted", archive, current_user["email"], tenant_id=None)
-    conn.commit()
-    conn.close()
-    left = len(names) - 1
-    _set_flash(request, "success" if left else "error",
-               f"Deleted {archive} from this server. "
-               + (f"{left} local archive(s) left." if left else
-                  "No local archives left — use Back up now to create one."))
-    return RedirectResponse("/admin/backup", status_code=303)
-
-
-@router.get("/admin/backup/download", dependencies=_PROVIDER)
-def admin_backup_download(archive: str = "", current_user: dict = Depends(require_auth)):
-    require_perm(current_user, "manage_backups")
-    import backup
-    names = {a["file"] for a in backup.list_archives()}
-    if archive not in names:
-        raise PermissionError("Unknown archive.")
-    return FileResponse(str(backup.BACKUP_DIR / archive), filename=archive,
-                        media_type="application/octet-stream")
 
 
 # ── Maintenance tools ────────────────────────────────────────────────────────
@@ -499,23 +84,6 @@ async def admin_export_devices(current_user: dict = Depends(require_auth),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=rustdesk-devices.csv"},
     )
-
-
-@router.post("/admin/restart-relay")
-def admin_restart_relay(request: Request, confirm: str = Form(""), current_user: dict = Depends(require_auth),
-                        tenant: Tenant = Depends(get_tenant)):
-    require_perm(current_user, "manage_system")
-    if confirm != "yes":
-        _set_flash(request, "error", "Restart not confirmed.")
-        return RedirectResponse("/admin", status_code=303)
-    ok, msg = _restart_relay(tenant)
-    conn = get_db()
-    log_event(conn, "relay_restarted" if ok else "relay_restart_failed", msg, current_user["email"],
-              tenant_id=tenant.id)
-    conn.commit()
-    conn.close()
-    _set_flash(request, "success" if ok else "error", msg if ok else f"Restart failed: {msg}")
-    return RedirectResponse("/admin", status_code=303)
 
 
 @router.post("/admin/logs/prune")

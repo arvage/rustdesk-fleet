@@ -9,44 +9,9 @@
   <div class="stat-card"><div class="stat-label">Devices</div><div class="stat-value">{{ device_count }}</div></div>
   <div class="stat-card"><div class="stat-label">Active sessions</div><div class="stat-value">{{ active_sessions }}</div></div>
   <div class="stat-card"><div class="stat-label">Users</div><div class="stat-value">{{ user_count }}</div></div>
-  {% if provider_home %}
-  <div class="stat-card">
-    <div class="stat-label">Last backup</div>
-    {% if backup_status and backup_status.ok %}
-    <div class="stat-value" style="font-size:16px">{{ backup_status.at | localtime }}</div>
-    <div class="stat-sub">{{ backup_status.size_human }}{% if backup_status.offsite and backup_status.offsite.attempted %}{% if backup_status.offsite.ok %} · off-site ok{% else %} · <span style="color:var(--danger)">off-site failed</span>{% endif %}{% elif offsite and offsite.enabled %} · off-site on (next run){% else %} · local only{% endif %}</div>
-    {% elif backup_status %}
-    <div class="stat-value" style="font-size:16px;color:var(--danger)">failed</div>
-    {% else %}
-    <div class="stat-value" style="font-size:16px;color:var(--text-3)">none yet</div>
-    {% endif %}
-  </div>
-  {% endif %}
 </div>
 
 <div class="card-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px">
-
-  {% if provider_home %}
-  <!-- Backup & restore -->
-  <div class="card"><div class="card-body">
-    <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Backup &amp; restore</h2>
-    <p class="text-muted text-sm" style="margin:0 0 14px">
-      Configure an off-site destination (Amazon S3, Wasabi, Backblaze B2, DigitalOcean Spaces, MinIO),
-      run or download a backup, or restore the keypair and databases.
-    </p>
-    <a href="/admin/backup" class="btn btn-primary btn-sm">Open backup settings</a>
-  </div></div>
-
-  <!-- Code signing -->
-  <div class="card"><div class="card-body">
-    <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Installer signing</h2>
-    <p class="text-muted text-sm" style="margin:0 0 14px">
-      Authenticode-sign Windows installers with Azure Trusted Signing, so clients don't see the
-      "unknown publisher" SmartScreen warning.
-    </p>
-    <a href="/admin/signing" class="btn btn-ghost btn-sm">Open signing settings</a>
-  </div></div>
-  {% endif %}
 
   <!-- Users -->
   <div class="card"><div class="card-body">
@@ -65,7 +30,7 @@
   <!-- Notifications -->
   <div class="card"><div class="card-body">
     <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Notifications &amp; alerts</h2>
-    <p class="text-muted text-sm" style="margin:0 0 14px">SMTP, event triggers, and server health alert thresholds.</p>
+    <p class="text-muted text-sm" style="margin:0 0 14px">SMTP and event triggers.</p>
     <a href="/notifications" class="btn btn-ghost btn-sm">Notification settings</a>
   </div></div>
 
@@ -90,17 +55,6 @@
     <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Export device inventory</h2>
     <p class="text-muted text-sm" style="margin:0 0 14px">Download all devices (id, host, OS, group, versions, last seen) as CSV.</p>
     <a href="/admin/export/devices.csv" class="btn btn-ghost btn-sm">Download CSV</a>
-  </div></div>
-
-  <!-- Restart relay -->
-  <div class="card"><div class="card-body">
-    <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Restart relay</h2>
-    <p class="text-muted text-sm" style="margin:0 0 14px">Restart the hbbs/hbbr containers. Active remote sessions drop briefly.</p>
-    <form method="post" action="/admin/restart-relay" style="margin:0"
-          onsubmit="return confirm('Restart hbbs/hbbr now? Active remote sessions will drop for a few seconds.')">
-      <input type="hidden" name="confirm" value="yes">
-      <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--warning)">Restart hbbs/hbbr</button>
-    </form>
   </div></div>
 
   <!-- Prune logs -->

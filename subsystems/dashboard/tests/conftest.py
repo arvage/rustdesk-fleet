@@ -131,12 +131,25 @@ def get_status(c: TestClient, path: str):
     return r.status_code, r.headers.get("location")
 
 
-def forge_session(data: dict) -> str:
+def forge_session(data: dict, secret: str = SESSION_SECRET) -> str:
     """A session cookie signed with the test secret, the way Starlette's
     SessionMiddleware signs one, for cookies the app would never issue."""
     from itsdangerous import TimestampSigner
     payload = base64.b64encode(json.dumps(data).encode())
-    return TimestampSigner(SESSION_SECRET).sign(payload).decode()
+    return TimestampSigner(secret).sign(payload).decode()
+
+
+def provider_client(email: str = "ops@example.com") -> TestClient:
+    """A client signed in to the provider console as a (new) provider admin."""
+    from app.console.auth import add_provider_user
+    conn = get_db()
+    row = conn.execute("SELECT id FROM provider_users WHERE email = ?", (email,)).fetchone()
+    uid = row["id"] if row else add_provider_user(conn, email, email.split("@")[0])
+    conn.close()
+    c = new_client(CONSOLE_HOST)
+    c.cookies.set("rdf_provider_session",
+                  forge_session({"provider_user_id": uid, "provider_sv": 1}, "provider-console:" + SESSION_SECRET))
+    return c
 
 
 def add_peer(rustdesk_id: str, uuid: bytes) -> None:

@@ -1,0 +1,138 @@
+{% extends "console/base.html" %}
+{% block title %}Host health — Provider console{% endblock %}
+{% block page_title %}Host health{% endblock %}
+{% block content %}
+<div class="section">
+  <div class="section-head"><h2>Host</h2>
+    <span class="text-sm text-muted" id="health-updated"></span>
+  </div>
+  <div class="stats" style="margin-bottom:0">
+    <div class="stat-card">
+      <div class="stat-label">CPU</div>
+      <div class="stat-value" id="h-cpu">…</div>
+      <div class="stat-sub" id="h-cpu-sub"></div>
+      <div class="meter"><span id="h-cpu-bar" style="width:0%"></span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Memory</div>
+      <div class="stat-value" id="h-mem">…</div>
+      <div class="stat-sub" id="h-mem-sub"></div>
+      <div class="meter"><span id="h-mem-bar" style="width:0%"></span><i class="meter-mark" id="h-mem-mark" style="display:none"></i></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Disk</div>
+      <div class="stat-value" id="h-disk">…</div>
+      <div class="stat-sub" id="h-disk-sub"></div>
+      <div class="meter"><span id="h-disk-bar" style="width:0%"></span><i class="meter-mark" id="h-disk-mark" style="display:none"></i></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Host Uptime</div>
+      <div class="stat-value" id="h-uptime" style="font-size:20px">…</div>
+      <div class="stat-sub" id="h-swap-sub"></div>
+    </div>
+  </div>
+</div>
+<div class="section">
+  <div class="section-head"><h2>Relays</h2></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Tenant</th><th>Status</th><th>hbbs</th><th>hbbr</th></tr></thead>
+    <tbody id="h-relays"><tr><td colspan="4" class="text-muted">checking…</td></tr></tbody>
+  </table></div>
+</div>
+
+<script>
+(function () {
+  const POLL_MS = 15000;
+  // With a configured threshold: red at/above it, amber within 10 points below,
+  // else green. Without one (CPU), fall back to generic 70/90 bands.
+  function meterColour(p, thr) {
+    if (p == null) return 'var(--border-md)';
+    if (thr != null) return p >= thr ? 'var(--danger)' : p >= thr - 10 ? 'var(--warning)' : 'var(--success)';
+    return p >= 90 ? 'var(--danger)' : p >= 70 ? 'var(--warning)' : 'var(--success)';
+  }
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  function setMeter(id, pct, thr) {
+    const b = document.getElementById(id);
+    if (!b) return;
+    b.style.width = (pct == null ? 0 : Math.min(pct, 100)) + '%';
+    b.style.background = meterColour(pct, thr);
+  }
+  function setMark(id, threshold) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (threshold == null) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.style.left = Math.min(Math.max(threshold, 0), 100) + '%';
+    el.title = 'Alert threshold: ' + threshold + '%';
+  }
+  function fmtKB(kb) {              // meminfo is in kB
+    const mb = kb / 1024;
+    return mb >= 1024 ? (mb / 1024).toFixed(mb >= 10240 ? 0 : 1) + ' GB' : Math.round(mb) + ' MB';
+  }
+  function fmtB(b) {
+    const gb = b / 1e9;
+    return gb >= 1 ? gb.toFixed(gb >= 10 ? 0 : 1) + ' GB' : Math.round(b / 1e6) + ' MB';
+  }
+  function fmtUptime(s) {
+    if (s == null) return '—';
+    const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+    return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+  }
+
+  async function refresh() {
+    try {
+      const r = await fetch('/health.json');
+      if (!r.ok) return;
+      const h = await r.json();
+
+      const cpu = h.cpu || {};
+      setText('h-cpu', cpu.pct == null ? '…' : cpu.pct + '%');
+      setText('h-cpu-sub',
+        [cpu.cores ? cpu.cores + (cpu.cores === 1 ? ' core' : ' cores') : '',
+         cpu.load1 != null ? `load ${cpu.load1} · ${cpu.load5} · ${cpu.load15}` : '']
+        .filter(Boolean).join(' · '));
+      setMeter('h-cpu-bar', cpu.pct);
+
+      const thr = h.thresholds || {};
+
+      const m = h.mem || {};
+      setText('h-mem', m.pct == null ? '—' : m.pct + '%');
+      setText('h-mem-sub',
+        [m.total_kb ? `${fmtKB(m.used_kb)} / ${fmtKB(m.total_kb)}` : '',
+         thr.mem != null ? `alert ≥ ${thr.mem}%` : ''].filter(Boolean).join(' · '));
+      setMeter('h-mem-bar', m.pct, thr.mem);
+      setMark('h-mem-mark', thr.mem);
+
+      const dk = h.disk || {};
+      setText('h-disk', dk.pct == null ? '—' : dk.pct + '%');
+      setText('h-disk-sub',
+        [dk.total_b ? `${fmtB(dk.used_b)} / ${fmtB(dk.total_b)}` : '',
+         thr.disk != null ? `alert ≥ ${thr.disk}%` : ''].filter(Boolean).join(' · '));
+      setMeter('h-disk-bar', dk.pct, thr.disk);
+      setMark('h-disk-mark', thr.disk);
+
+      const dv = h.devices || {};
+      setText('h-devonline', `${dv.online ?? '—'}${dv.total != null ? ' / ' + dv.total : ''}`);
+
+      setText('h-uptime', fmtUptime(h.uptime_s));
+      const sw = h.swap || {};
+      setText('h-swap-sub', sw.total_kb ? `swap ${sw.pct}% of ${fmtKB(sw.total_kb)}` : 'no swap configured');
+
+      document.getElementById('h-relays').innerHTML = (h.relays || []).map(r => {
+        const cells = ['hbbs', 'hbbr'].map(n => {
+          const c = (r.containers || {})[n] || {};
+          const colour = c.running ? '#10B981' : c.running === false ? '#EF4444' : '#94A3B8';
+          return `<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${colour}"></span> ${c.status || 'unknown'}</td>`;
+        }).join('');
+        return `<tr><td><a href="/tenants/${r.tenant}">${r.name}</a></td><td>${r.status}</td>${cells}</tr>`;
+      }).join('') || '<tr><td colspan="4" class="text-muted">No relays.</td></tr>';
+      setText('health-updated', 'updated ' + new Date().toLocaleTimeString('en-US',
+        { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    } catch (_) {}
+  }
+  refresh();
+  setInterval(refresh, POLL_MS);
+})();
+</script>
+<p class="text-muted text-sm">Alerts go to every provider admin when memory or disk stays above the thresholds on the <a href="/settings">Settings</a> page.</p>
+{% endblock %}

@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "console/base.html" %}
 {% block title %}Backup &amp; Restore — RustDesk Fleet{% endblock %}
 {% block page_title %}Backup &amp; Restore{% endblock %}
 {% block content_class %}content-wide{% endblock %}
@@ -16,7 +16,6 @@
 @media (max-width:620px){ .bk-grid { grid-template-columns:1fr; } }
 </style>
 
-<p style="margin:0 0 18px"><a href="/admin" style="color:var(--accent);text-decoration:none;font-size:13px">← Admin</a></p>
 
 <div style="display:flex;flex-direction:column;gap:20px">
 
@@ -30,12 +29,12 @@
           destination protects you against losing the whole server.
         </div>
       </div>
-      <button type="submit" form="backup-form" formaction="/admin/backup/test"
+      <button type="submit" form="backup-form" formaction="/backup/test"
               class="btn btn-ghost btn-sm" style="flex-shrink:0"
               title="Saves the settings below, then checks the bucket and keys">Save &amp; test connection</button>
     </div>
 
-    <form method="post" action="/admin/backup/save" class="bk-form" id="backup-form">
+    <form method="post" action="/backup/save" class="bk-form" id="backup-form">
       <div style="padding:18px;display:flex;flex-direction:column;gap:16px">
 
         <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#0F172A;border-radius:8px">
@@ -124,7 +123,7 @@
           {% if backup_status and backup_status.ok %}Last backup {{ backup_status.at | localtime }} · {{ backup_status.size_human }}{% else %}Keypair + databases. Nightly at 03:30 UTC.{% endif %}
         </div>
       </div>
-      <form method="post" action="/admin/backup/run" style="margin:0;flex-shrink:0"
+      <form method="post" action="/backup/run" style="margin:0;flex-shrink:0"
             onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Backing up…'">
         <button type="submit" class="btn btn-primary btn-sm">Back up now</button>
       </form>
@@ -156,14 +155,14 @@
             <td class="text-sm text-muted">{{ a.size_human }}</td>
             <td class="text-sm text-muted mono" style="white-space:nowrap">{{ a.modified }}</td>
             <td style="white-space:nowrap;text-align:right">
-              <a href="/admin/backup/download?archive={{ a.file }}" class="btn btn-ghost btn-sm">Download</a>
-              <form method="post" action="/admin/backup/restore" style="display:inline;margin:0"
+              <a href="/backup/download?archive={{ a.file }}" class="btn btn-ghost btn-sm">Download</a>
+              <form method="post" action="/backup/restore" style="display:inline;margin:0"
                     onsubmit="return confirm('Restore from {{ a.file }}?\n\nThis overwrites the server keypair and databases with this archive and restarts the relay. A safety snapshot of the current state is taken first. You may be logged out.\n\nProceed?')">
                 <input type="hidden" name="archive" value="{{ a.file }}">
                 <input type="hidden" name="confirm" value="yes">
                 <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--warning)">Restore</button>
               </form>
-              <form method="post" action="/admin/backup/delete" style="display:inline;margin:0"
+              <form method="post" action="/backup/delete" style="display:inline;margin:0"
                     onsubmit="return confirm('Delete {{ a.file }} from this server?{% if archives|length == 1 %}\n\nThis is the ONLY local archive — you will have no local backup until the next one runs.{% endif %}\n\nOff-site copies are not affected. This cannot be undone.')">
                 <input type="hidden" name="archive" value="{{ a.file }}">
                 <input type="hidden" name="confirm" value="yes">
@@ -211,13 +210,13 @@
             <td class="text-sm text-muted">{{ a.size_human }}</td>
             <td class="text-sm text-muted mono" style="white-space:nowrap">{{ a.modified }}</td>
             <td style="white-space:nowrap;text-align:right">
-              <form method="post" action="/admin/backup/offsite/restore" style="display:inline;margin:0"
+              <form method="post" action="/backup/offsite/restore" style="display:inline;margin:0"
                     data-busy="Restoring…" data-confirm="Restore from off-site {{ a.file }}?\n\nIt is downloaded from the bucket, then overwrites the server keypair and databases and restarts the relay. A local safety snapshot of the current state is taken first. You may be logged out.{% if a.encrypted and not cfg.passphrase_set %}\n\nWARNING: this archive is encrypted but no passphrase is set — the restore will fail.{% endif %}\n\nProceed?">
                 <input type="hidden" name="archive" value="{{ a.file }}">
                 <input type="hidden" name="confirm" value="yes">
                 <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--warning)">Restore</button>
               </form>
-              <form method="post" action="/admin/backup/offsite/delete" style="display:inline;margin:0"
+              <form method="post" action="/backup/offsite/delete" style="display:inline;margin:0"
                     data-confirm="Delete {{ a.file }} from the off-site destination?{% if remote_archives|length == 1 %}\n\nThis is the ONLY off-site copy — nothing will survive loss of this server until the next upload.{% endif %}\n\nLocal copies are not affected. This cannot be undone.">
                 <input type="hidden" name="archive" value="{{ a.file }}">
                 <input type="hidden" name="confirm" value="yes">

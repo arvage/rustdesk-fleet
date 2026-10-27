@@ -134,48 +134,6 @@ TEMPLATES: dict[str, dict] = {
         "sample": {"display_name": "Sam Lee", "email": "sam@example.com", "role": "tech",
                    "deleted_by": "admin@example.com"},
     },
-    "client_update_available": {
-        "name": "New client version available", "category": "Alerts", "audience": "team",
-        "subject": "RustDesk client {latest_version} available",
-        "heading": "Client update available",
-        "intro": "A newer RustDesk client release is available. An admin can switch the installers to it "
-                 "from the dashboard Home page, and rebuild every group's installers in one step.",
-        "outro": "Devices that are already installed keep their current version until they're "
-                 "reinstalled with a new installer.",
-        "details": [("Installers use", "current_version"), ("Latest client", "latest_version")],
-        "sample": {"current_version": "1.5.0", "latest_version": "1.5.1"},
-    },
-    "server_update_available": {
-        "name": "New server version available", "category": "Alerts", "audience": "team",
-        "subject": "RustDesk server {latest_version} available",
-        "heading": "Server update available",
-        "intro": "A newer RustDesk server release is available. An admin can apply it from the dashboard Home page.",
-        "outro": "**Note:** updating restarts hbbs/hbbr and drops any active remote sessions.",
-        "details": [("Current version", "current_version"), ("Latest version", "latest_version")],
-        "sample": {"current_version": "1.1.14", "latest_version": "1.1.15"},
-    },
-    "memory_high": {
-        "name": "Server memory above threshold", "category": "Alerts", "audience": "team",
-        "subject": "Server memory high — {pct}% used",
-        "heading": "Server memory high",
-        "intro": "**Alert:** server memory usage has crossed the configured threshold.",
-        "outro": "Sustained high memory can cause the hbbs/hbbr containers or the dashboard to be killed "
-                 "by the OOM killer. Consider adding swap or a larger instance.",
-        "details": [("Memory used", "pct_str"), ("Threshold", "threshold_str"), ("Used / total", "usage"),
-                    ("Host", "host")],
-        "sample": {"pct": 93, "threshold": 90, "usage": "1.8 GB / 1.9 GB", "host": "rds.example.com"},
-    },
-    "disk_high": {
-        "name": "Server disk above threshold", "category": "Alerts", "audience": "team",
-        "subject": "Server disk high — {pct}% used",
-        "heading": "Server disk high",
-        "intro": "**Alert:** server disk usage has crossed the configured threshold.",
-        "outro": "When the disk fills, installer builds, the fleet database and new client registrations "
-                 "can fail. Free space or grow the volume.",
-        "details": [("Disk used", "pct_str"), ("Threshold", "threshold_str"), ("Used / total", "usage"),
-                    ("Host", "host")],
-        "sample": {"pct": 91, "threshold": 90, "usage": "36.4 GB / 40 GB", "host": "rds.example.com"},
-    },
     "user_credentials": {
         "name": "New user welcome (login details)", "category": "Emails to users", "audience": "team",
         "subject": "Your RustDesk Fleet account credentials",
@@ -461,9 +419,6 @@ def _prepare(key: str, ctx: dict) -> dict:
         c["online_at"] = c.get("online_at") or c["timestamp"]
     if key == "installer_built":
         c["sha256_short"] = (c.get("sha256") or "")[:16] + "…" if c.get("sha256") else ""
-    if key in ("memory_high", "disk_high"):
-        c["pct_str"] = c.get("pct_str") or (f"{c['pct']}%" if c.get("pct") else "")
-        c["threshold_str"] = f"{c['threshold']}%" if c.get("threshold") else ""
     if key in ("user_credentials", "mfa_reminder"):
         c["name"] = c.get("name") or c.get("display_name") or c.get("email", "")
     if key == "download_link":

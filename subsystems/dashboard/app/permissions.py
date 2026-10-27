@@ -6,6 +6,9 @@ reference a role by key (users.role). Capabilities gate the write/admin actions
 below; viewing (devices, sessions, logs) is open to any signed-in user, so a
 role with no capabilities is effectively read-only.
 
+Relay restarts and upgrades, backups and the client version are the
+provider's (the provider console), so no tenant role has them.
+
 `admin` is a locked system role that always has every capability, so an
 account can never be edited into being unable to manage roles/users.
 """
@@ -26,14 +29,8 @@ CAPABILITIES = [
      "Edit labels and groups, delete/restore devices, sync from the server", "Fleet"),
     ("manage_groups", "Manage client groups & installers",
      "Create/edit groups and client settings, build installers, share download links", "Fleet"),
-    ("update_server", "Update server & client versions",
-     "Apply RustDesk server/client updates and rebuild installers", "Fleet"),
-    ("manage_notifications", "Manage notifications & alerts",
-     "SMTP settings, event triggers, and server-health alert thresholds", "System"),
-    ("manage_backups", "Manage backups",
-     "Configure destinations, run, download and restore backups", "System"),
     ("manage_system", "System maintenance",
-     "Restart the relay (hbbs/hbbr) and prune the audit log", "System"),
+     "Prune the audit log", "System"),
     ("manage_users", "Manage users",
      "Create, edit and delete user accounts, group access and passkeys", "Administration"),
     ("manage_roles", "Manage roles & permissions",

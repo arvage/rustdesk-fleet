@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "console/base.html" %}
 {% block title %}Installer Signing — RustDesk Fleet{% endblock %}
 {% block page_title %}Installer Signing{% endblock %}
 {% block content_class %}content-wide{% endblock %}
@@ -16,7 +16,6 @@
 @media (max-width:620px){ .sg-grid { grid-template-columns:1fr; } }
 </style>
 
-<p style="margin:0 0 18px"><a href="/admin" style="color:var(--accent);text-decoration:none;font-size:13px">← Admin</a></p>
 
 <div class="card">
   <div class="card-header">
@@ -27,7 +26,7 @@
         Setup steps are in <code>DEPLOYMENT.md</code> → “Code signing”.
       </div>
     </div>
-    <button type="submit" form="signing-form" formaction="/admin/signing/test"
+    <button type="submit" form="signing-form" formaction="/signing/test"
             class="btn btn-ghost btn-sm" style="flex-shrink:0"
             title="Saves these settings, then checks the Azure token and jsign">Save &amp; test</button>
   </div>
@@ -40,7 +39,7 @@
   </div>
   {% endif %}
 
-  <form method="post" action="/admin/signing/save" class="sg-form" id="signing-form">
+  <form method="post" action="/signing/save" class="sg-form" id="signing-form">
     <div style="padding:18px;display:flex;flex-direction:column;gap:16px">
 
       <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#0F172A;border-radius:8px">

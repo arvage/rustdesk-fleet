@@ -12,6 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app import settings
 from app.console.auth import ProviderAuthRedirect, router as auth_router
 from app.console.routes import router as console_router
+from app.console.server import router as server_router
 
 console_app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -52,3 +53,4 @@ async def _not_found(request: Request, _exc):
 
 console_app.include_router(auth_router)
 console_app.include_router(console_router)
+console_app.include_router(server_router)

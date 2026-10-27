@@ -348,8 +348,8 @@ def run_migrations(db_path=None) -> None:
     """)
     conn.commit()
 
-    # Server-health alert thresholds (percent used) for the memory_high /
-    # disk_high alerts — configurable from the Notifications page.
+    # Server-health alert thresholds (percent used). No longer read: host
+    # alerts are provider-level now (provider console → Settings).
     notif_cols = {row[1] for row in conn.execute("PRAGMA table_info(notification_settings)").fetchall()}
     if "mem_threshold" not in notif_cols:
         conn.execute("ALTER TABLE notification_settings ADD COLUMN mem_threshold INTEGER NOT NULL DEFAULT 90")

@@ -6,7 +6,7 @@ from app.deps import get_db
 from app.notifications import EVENT_LABELS, get_log
 from app.permissions import user_can
 from app.routes.sessions import _LIST_SQL, _row
-from app.tenancy import Tenant, get_tenant, is_provider_home
+from app.tenancy import Tenant, get_tenant
 from app.templates_config import templates
 
 router = APIRouter()
@@ -76,14 +76,10 @@ _STATUS_EVENTS = ("device_online", "device_offline")
 
 
 def _events_scope(tenant: Tenant) -> str:
-    """WHERE fragment for this tenant's audit events. The provider home
-    (tenant #1) also sees provider events (tenant_id NULL: backups,
-    signing), as it always has; no other tenant ever does. Pair it with the
-    (tenant.id,) parameter."""
-    # Provider console actions about this tenant (source 'provider') are the
-    # provider's record, not the tenant's: they stay out of its Logs page.
-    if is_provider_home(tenant):
-        return "(tenant_id = ? OR tenant_id IS NULL) AND source IS NOT 'provider'"
+    """WHERE fragment for this tenant's audit events; pair it with the
+    (tenant.id,) parameter. Provider events (no tenant: backups, signing) and
+    provider console actions about the tenant (source 'provider') are the
+    provider's record, in the console's audit log, not the tenant's."""
     return "tenant_id = ? AND source IS NOT 'provider'"
 
 

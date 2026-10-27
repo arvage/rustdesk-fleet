@@ -90,12 +90,6 @@ def tenant_files_dir(tenant_id: int) -> Path:
     return _dir(tenant_id)
 
 
-def is_provider_home(tenant: Tenant) -> bool:
-    """Tenant #1 hosts the provider's own controls (backups, signing, host
-    health) until the provider console exists. See TENANCY.md."""
-    return tenant.id == LEGACY_TENANT_ID
-
-
 # ── Lookups ──────────────────────────────────────────────────────────────────
 
 def _relay_from_row(r) -> Relay:
