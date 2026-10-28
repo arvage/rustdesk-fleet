@@ -343,6 +343,9 @@ sudo pip3 install --break-system-packages -q \
 log "Preparing $FLEET_ROOT"
 sudo mkdir -p "$FLEET_ROOT"
 sudo chown "$RUN_USER:$RUN_USER" "$FLEET_ROOT"
+# Relay private keys, peer DBs and the fleet DB (secrets) live here, and the
+# relay containers create their files world-readable: close the directory.
+sudo chmod 0750 "$FLEET_ROOT"
 sudo mkdir -p "$ETC_DIR"
 
 # ── 5. Bring up the relay (hbbs/hbbr) ────────────────────────────────────────

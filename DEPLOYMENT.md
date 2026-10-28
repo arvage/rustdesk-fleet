@@ -953,6 +953,7 @@ sqlite3 /opt/rustdesk-fleet/fleet.sqlite3 \
 | Path | What |
 |---|---|
 | `~/rustdesk-fleet` | Repo checkout — code only, no secrets/data |
+| `/opt/rustdesk-fleet` | Data dir, owned by the dashboard user, mode `750` (set by `install.sh` and on every dashboard start): it holds relay private keys and secrets, and the relay containers create their files world-readable |
 | `/opt/rustdesk-fleet/fleet.sqlite3` | The control database: every tenant's dashboard data, with a `tenant_id` on each tenant-owned row, plus `tenants`, `relays` and `tenant_domains` (see `subsystems/dashboard/TENANCY.md`) |
 | `/opt/rustdesk-fleet/docker-compose.yml` | Deployed compose file (may drift from the repo template after an in-place server update — see Section 2) |
 | `/opt/rustdesk-fleet/data` | Tenant #1's relay: hbbs/hbbr keypair, hbbs peer DB + runtime state (container's `/root`). Every relay's paths are in its `relays` row |

@@ -101,6 +101,9 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 @app.on_event("startup")
 async def startup():
     run_migrations()
+    from app import paths
+    if paths.close_data_dir():
+        logging.getLogger(__name__).warning("Closed %s to other users (mode 750).", paths.DATA_DIR)
     # Provider console jobs (tenant creation, relay operations, purges).
     from app.console import jobs, lifecycle, relays, tenants  # noqa: F401  (registers job handlers)
     jobs.start_worker()

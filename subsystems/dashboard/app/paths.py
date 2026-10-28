@@ -20,3 +20,20 @@ OS_LIFECYCLE_CACHE = DATA_DIR / "os-lifecycle.json"
 # Tests set this so the background watcher threads (routes/api.py,
 # routes/home.py) don't start; they call the watcher functions directly.
 WATCHERS_ENABLED = os.environ.get("FLEET_DISABLE_WATCHERS", "") != "1"
+
+
+def close_data_dir() -> bool:
+    """Keep other local accounts (www-data and the like) out of DATA_DIR. It
+    holds every relay's private key, the hbbs peer databases (whose uuids
+    authenticate device reports) and the fleet database (SMTP, backup and
+    signing secrets), and the relay containers create their files
+    world-readable, so the directory is what protects them. Only the owner
+    (the dashboard user) and root need it. Returns True if it was changed."""
+    try:
+        st = DATA_DIR.stat()
+        if st.st_uid != os.geteuid() or not st.st_mode & 0o007:
+            return False
+        os.chmod(DATA_DIR, st.st_mode & 0o7770)
+        return True
+    except OSError:
+        return False
