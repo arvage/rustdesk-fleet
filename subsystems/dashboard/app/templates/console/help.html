@@ -1,0 +1,136 @@
+{% extends "console/base.html" %}
+{% block title %}Help — Provider console{% endblock %}
+{% block page_title %}Help{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+
+{% block content %}
+<div class="help-wrap">
+<p class="text-muted text-sm" style="margin-bottom:18px">
+  Running the service: tenants, their relays, and this server. Each tenant's own dashboard has its own Help page for its technicians.
+</p>
+
+<div class="help-toc">
+  <a href="#tenants">Tenants</a>
+  <a href="#trial">Trial &amp; subscription</a>
+  <a href="#lifecycle">Suspend, cancel, purge</a>
+  <a href="#relays">Relays</a>
+  <a href="#jobs">Jobs &amp; audit log</a>
+  <a href="#health">Host health</a>
+  <a href="#backups">Backups</a>
+  <a href="#signing">Code signing</a>
+  <a href="#client">Client version</a>
+  <a href="#settings">Settings &amp; email</a>
+  <a href="#admins">Provider admins</a>
+</div>
+
+<div class="help-sec" id="tenants">
+  <h2><span class="n">1</span> Tenants</h2>
+  <ul>
+    <li><strong>New tenant</strong> runs a job: checks the slug, creates the tenant, starts its relay on the next free port block, publishes <code>https://&lt;slug&gt;.{{ provider_domain or "&lt;provider domain&gt;" }}</code> with its own Let's Encrypt certificate, generates its client PDF guides, and invites its first admin.</li>
+    <li>The <strong>invite link</strong> is emailed and also shown in the job, valid for 3 days. Without provider email set up, send it yourself.</li>
+    <li>The <strong>tenant page</strong> shows usage (devices, technicians, session hours this month), the relay (ports, key, containers), the web domain and certificate, the plan, admins with their last sign-in, and the lifecycle actions.</li>
+    <li><strong>Plan</strong> is free text for now, shown to the tenant on its home page.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="trial">
+  <h2><span class="n">2</span> Trial &amp; subscription</h2>
+  <ul>
+    <li>New tenants start on a <strong>14-day trial</strong>. Their dashboard shows the end date and days left on the home page and a banner on every other page.</li>
+    <li>Their admins are emailed <strong>3 days before</strong> the end. When it ends the tenant is <strong>suspended</strong> automatically (checked hourly), and the admins are emailed again.</li>
+    <li><strong>Activate</strong> — the tenant has subscribed: trial → active, and the trial notices go away.</li>
+    <li><strong>Extend trial</strong> — adds days, counted from now if the trial has already ended.</li>
+    <li><strong>Reactivate</strong> goes back to trial while trial time is left, otherwise to active. To give an expired trial more time, extend it first, then reactivate.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="lifecycle">
+  <h2><span class="n">3</span> Suspend, cancel, purge</h2>
+  <table class="help-table">
+    <tr><td>Suspend</td><td>Immediate. The tenant's dashboard and download links show "not active"; its relay keeps running, so devices stay registered. For non-payment and the like.</td></tr>
+    <tr><td>Cancel (type the slug)</td><td>Stops the relay (keys and data kept). The tenant's admins can only sign in to export CSVs. Purged after 30 days; admins are emailed at cancellation and 7 days before.</td></tr>
+    <tr><td>Extend grace period</td><td>Pushes a cancelled tenant's purge date out.</td></tr>
+    <tr><td>Reactivate</td><td>From suspended, or from cancelled within the grace period (the relay starts again with the same keys and ports, so devices reconnect on their own).</td></tr>
+    <tr><td>Purge now (type the slug)</td><td>Deletes the relay, keys, files, domains and data for good. The slug and port block are never reused; usage history and the audit log are kept.</td></tr>
+  </table>
+  <p style="margin-top:10px">Tenant #1 can't be cancelled or purged.</p>
+</div>
+
+<div class="help-sec" id="relays">
+  <h2><span class="n">4</span> Relays</h2>
+  <ul>
+    <li>Each tenant has its own relay (hbbs + hbbr containers) at <code>&lt;slug&gt;.relay.{{ provider_domain or "&lt;provider domain&gt;" }}</code>, with its own keypair and a block of 5 ports. Tenant #1 uses the default 21115–21119.</li>
+    <li>New tenants' ports come from <strong>{{ port_range }}</strong> (TCP and UDP), which must stay open in the cloud firewall.</li>
+    <li><strong>Restart / Stop / Start / Upgrade</strong> per relay, or <strong>Upgrade all relays</strong> one at a time. A restart or upgrade briefly drops that tenant's active sessions.</li>
+    <li>Technicians' own RustDesk apps need their tenant's relay settings; each tenant's Help page lists them.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="jobs">
+  <h2><span class="n">5</span> Jobs &amp; audit log</h2>
+  <ul>
+    <li>Tenant creation, cancel, reactivate, purge and relay work run as <strong>jobs</strong>, one per tenant at a time, with each step and its result shown.</li>
+    <li>The <strong>audit log</strong> records every console action and scheduled event (trial warnings and expiries, purge warnings, provider emails). Tenants never see these entries.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="health">
+  <h2><span class="n">6</span> Host health</h2>
+  <ul>
+    <li>Live CPU, memory (and swap), disk and uptime for this server, plus every tenant's relay containers.</li>
+    <li>Memory and disk show the alert threshold as a marker and turn amber within 10 points of it, red at it.</li>
+    <li>Set thresholds under <strong>Settings → Host health alerts</strong>. Every provider admin is emailed when usage stays above one (debounced), once per crossing.</li>
+    <li>Each tenant adds two relay containers, so memory is usually what limits how many tenants fit.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="backups">
+  <h2><span class="n">7</span> Backups</h2>
+  <ul>
+    <li>A backup covers <strong>every tenant relay's keypair</strong> (every client is tied to it) and peer registry, and the <strong>dashboard database</strong>. It runs <strong>nightly at 03:30 UTC</strong>; you can also back up on demand.</li>
+    <li>Set an <strong>off-site destination</strong> (Amazon S3, Wasabi, Backblaze B2, DigitalOcean Spaces, MinIO or another S3 endpoint), then <strong>Save &amp; test connection</strong> and turn the off-site copy on. Local-only backups don't survive losing the server.</li>
+    <li>Set an <strong>encryption passphrase</strong> and keep a copy off this server: restoring needs it.</li>
+    <li><strong>Retention</strong> is separate for each copy: local archives on the server (in <code>/opt/rustdesk-fleet/backups</code>), and off-site copies in the bucket (0 = keep all; pruning needs <code>s3:DeleteObject</code>).</li>
+    <li><strong>Restore</strong> takes a safety snapshot first, replaces the keypairs and databases, and restarts the relays. With the same keys, clients reconnect without reconfiguration.</li>
+    <li><strong>Off-site archives</strong> are listed too, with Restore (downloads, then restores; needs <code>s3:GetObject</code>) and Delete.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="signing">
+  <h2><span class="n">8</span> Code signing</h2>
+  <ul>
+    <li>Signs every tenant's Windows installers with <strong>Azure Trusted Signing</strong> (via jsign on this server), so clients don't see SmartScreen's “unknown publisher” warning. Setup steps: DEPLOYMENT.md → “Code signing”.</li>
+    <li>Fill in the Azure directory and application IDs, client secret, endpoint, account and certificate profile, then <strong>Save &amp; test</strong> and turn signing on.</li>
+    <li><strong>Sign automatically after each build</strong> (recommended), or tenants use <strong>Sign / Re-sign</strong> on their group pages.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="client">
+  <h2><span class="n">9</span> Client version</h2>
+  <ul>
+    <li>Every tenant's installers are built with one pinned RustDesk client version. When a newer release is out, <strong>Update installers</strong> downloads it, optionally rebuilding every tenant's outdated installers in the background.</li>
+    <li>Installed devices keep their version until reinstalled (or updated by a group's automatic updates); download links always serve the newest build.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="settings">
+  <h2><span class="n">10</span> Settings &amp; email</h2>
+  <ul>
+    <li><strong>Provider email</strong> (SMTP) sends console invitations, host health alerts to every provider admin, and emails to tenants' admins: invites, trial warnings and expiry, cancellation and purge warnings. <strong>Send me a test email</strong> checks it.</li>
+    <li>Mail to tenants' admins goes to outside domains, so the mail server must allow relaying from this server, and the sending domain's SPF (and ideally DKIM) must cover it, or mail lands in spam.</li>
+    <li>Tenants set up their own SMTP for their own alerts, in their dashboard.</li>
+    <li><strong>Let's Encrypt account email</strong> receives certificate notices for the tenants' and console's certificates.</li>
+    <li>The provider domain and relay port range come from <code>dashboard.env</code> and are shown read-only.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="admins">
+  <h2><span class="n">11</span> Provider admins</h2>
+  <ul>
+    <li>Provider admins sign in with <strong>passkeys only</strong>. <strong>Invite a provider admin</strong> emails a one-time enrollment link, valid for 1 hour; <strong>New enrollment link</strong> issues another for an existing admin.</li>
+    <li><strong>Disable</strong> blocks an admin's sign-in at once; <strong>Enable</strong> restores it.</li>
+    <li>From the server shell: <code>provider_admin.py --domain &lt;provider domain&gt; add | enroll-link …</code> (DEPLOYMENT.md §11).</li>
+  </ul>
+</div>
+</div>
+{% endblock %}

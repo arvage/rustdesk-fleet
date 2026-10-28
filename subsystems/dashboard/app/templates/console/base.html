@@ -21,7 +21,7 @@
     window.rdfApplyTheme = apply;
   })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=6">
+  <link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 <body>
 <div class="shell">
@@ -55,6 +55,7 @@
       <div class="nav-section" style="margin-bottom:0">
         <div class="nav-label">Access</div>
         {{ item('/admins', 'Provider admins', request.url.path.startswith('/admins')) }}
+        {{ item('/help', 'Help', request.url.path == '/help') }}
       </div>
     </nav>
     <div class="sidebar-footer">

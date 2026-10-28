@@ -421,6 +421,14 @@ def host_health_payload() -> dict:
     return {**_host_health(), "relays": relays}
 
 
+@router.get("/help", response_class=HTMLResponse)
+async def help_page(request: Request, user: dict = Depends(require_provider)):
+    from app import settings as env
+    return templates.TemplateResponse(request, "console/help.html", {
+        "current_user": user, "provider_domain": env.provider_domain(),
+        "port_range": f"{env.relay_port_base()}–{env.relay_port_max()}"})
+
+
 @router.get("/health", response_class=HTMLResponse)
 async def health(request: Request, user: dict = Depends(require_provider)):
     return templates.TemplateResponse(request, "console/health.html", {"current_user": user})

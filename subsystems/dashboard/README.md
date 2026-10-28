@@ -72,6 +72,7 @@ admins; every action lands in the provider audit log.
 | `GET /jobs`, `GET /jobs/{id}` (+ `.json`) | Background jobs and their live progress |
 | `GET /audit` | Provider audit log, filterable by event, tenant, admin, text |
 | `GET /health` (+ `.json`) | Host CPU, memory, disk, uptime and every relay's containers |
+| `GET /help` | Provider help: tenants, trial, lifecycle, relays, host, backups, signing, client version, settings, admins |
 | `/backup…`, `/signing…`, `/client-version`, `/settings` | Backups and restore, code signing, the pinned RustDesk client version, provider SMTP, alert thresholds, Let's Encrypt email |
 | `/admins…` | Provider admins: invite (one-time passkey enrollment link, 1 hour), new link, disable, enable |
 | `/login`, `/login/webauthn/begin` · `/complete`, `/enroll/{token}…`, `POST /logout` | Passkey sign-in and enrollment |

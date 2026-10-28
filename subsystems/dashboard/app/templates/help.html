@@ -4,29 +4,6 @@
 {% block content_class %}content-wide{% endblock %}
 
 {% block content %}
-<style>
-.help-wrap { max-width: 880px; }
-.help-toc { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px; }
-.help-toc a { font-size:12px; text-decoration:none; color:var(--text-2); background:var(--surface);
-  border:1px solid var(--border-md); border-radius:999px; padding:5px 12px; }
-.help-toc a:hover { border-color:var(--accent); color:var(--accent); }
-.help-sec { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-  box-shadow:var(--shadow); padding:20px 22px; margin-bottom:16px; scroll-margin-top:16px; }
-.help-sec h2 { font-size:15px; font-weight:700; margin:0 0 10px; color:var(--text-1);
-  display:flex; align-items:center; gap:8px; }
-.help-sec h2 .n { width:22px;height:22px;flex-shrink:0;border-radius:6px;background:var(--accent);color:#fff;
-  font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center; }
-.help-sec p, .help-sec li { font-size:13.5px; line-height:1.65; color:var(--text-2); }
-.help-sec ul { margin:8px 0; padding-left:20px; }
-.help-sec li { margin:3px 0; }
-.help-sec strong { color:var(--text-1); }
-.help-sec code { background:var(--border); padding:1px 5px; border-radius:4px; font-size:12px; }
-.help-table { width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
-.help-table td { padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
-.help-table td:first-child { color:var(--text-1); font-weight:500; white-space:nowrap; width:42%; }
-.help-table td:last-child { color:var(--text-2); }
-</style>
-
 <div class="help-wrap">
 <p class="text-muted text-sm" style="margin-bottom:18px">
   How to use the dashboard day to day. Replace <code>rds.example.com</code> with your server address.
@@ -87,10 +64,10 @@
 <div class="help-sec" id="s2">
   <h2><span class="n">2</span> Server Status (home)</h2>
   <ul>
-    <li><strong>Server Health</strong> — live tiles: containers (hbbs/hbbr), CPU, memory, disk, devices online, uptime. Memory/disk show the alert threshold and turn amber/red near it.</li>
-    <li><strong>Server Info</strong> — status, host, ports, running server/client versions (with “update available” badges), and the public key clients use.</li>
-    <li><strong>Backups</strong> — last backup status; admins get <strong>Back up now</strong> and <strong>Download latest</strong>.</li>
-    <li>Admins also see one-click banners to update the RustDesk server or the client version used for new installers.</li>
+    <li><strong>Subscription</strong> — your account's subscription (Trial or Active) and plan. A trial shows its end date and days left; when it ends the account is suspended until your provider reactivates it.</li>
+    <li><strong>Relay</strong> — live tiles: your relay's containers (hbbs/hbbr) and devices online.</li>
+    <li><strong>Server Info</strong> — status, host, ports, the RustDesk server version, the client version new installers are built with, and the public key clients use.</li>
+    <li>The server itself (updates, backups, capacity) is run by your provider.</li>
   </ul>
 </div>
 
@@ -161,9 +138,10 @@
 <div class="help-sec" id="s8">
   <h2><span class="n">8</span> Admin tools</h2>
   <ul>
-    <li><strong>Backup &amp; Restore</strong> — off-site destination (S3 / Wasabi / Backblaze B2 / Spaces / MinIO), encryption, test, back up, download, restore.</li>
-    <li><strong>Installer signing</strong> — Authenticode-sign Windows installers with Azure Trusted Signing (no SmartScreen “unknown publisher” warning); automatic after each build, or <strong>Sign / Re-sign</strong> per installer on the group page.</li>
-    <li><strong>Email templates</strong> (see below), <strong>Reports</strong> (see below), <strong>Roles &amp; permissions</strong>, <strong>Export device inventory (CSV)</strong>, <strong>Restart relay</strong> (brief session drop), <strong>Prune logs</strong>.</li>
+    <li><strong>Users &amp; access</strong>, <strong>Roles &amp; permissions</strong>, <strong>Notifications &amp; alerts</strong>, <strong>Email templates</strong> and <strong>Reports</strong> (each described below).</li>
+    <li><strong>Export device inventory</strong> — all devices (id, host, OS, group, versions, last seen) as CSV.</li>
+    <li><strong>Prune logs</strong> — delete audit events older than 30 days, 90 days, 180 days or 1 year.</li>
+    <li><strong>Signed installers</strong> — when your provider has set up code signing, Windows installers are signed (no SmartScreen “unknown publisher” warning), automatically after each build or with <strong>Sign / Re-sign</strong> on the group page.</li>
   </ul>
 </div>
 
@@ -200,20 +178,15 @@
 <div class="help-sec" id="s11">
   <h2><span class="n">11</span> Backups</h2>
   <ul>
-    <li>Protect the server <strong>keypair</strong> (every client is tied to it) and the databases. A <strong>nightly</strong> backup runs automatically; you can also back up on demand.</li>
-    <li>Set an <strong>off-site destination</strong> and <strong>encryption passphrase</strong> under Admin → Backup &amp; Restore, then test and enable. Local-only backups don't survive losing the server.</li>
-    <li><strong>Retention</strong> is separate for each copy: <em>local archives</em> kept on the server (default 14), and <em>off-site copies</em> kept in the bucket (0 = keep all; pruning needs <code>s3:DeleteObject</code>).</li>
-    <li><strong>Restore</strong> takes a safety snapshot first, replaces the keypair + databases, and restarts the relay. Clients reconnect without reconfiguration (same key).</li>
-    <li><strong>Off-site archives</strong> are listed too, with <strong>Restore</strong> (downloads from the bucket, then restores) and <strong>Delete</strong>. Restore needs <code>s3:GetObject</code>; delete needs <code>s3:DeleteObject</code>.</li>
+    <li>Your provider backs up your relay's keypair (every client is tied to it), its device registry and your dashboard data every night, and restores them if needed. There's nothing to set up on your side.</li>
   </ul>
 </div>
 
 <div class="help-sec" id="s12">
   <h2><span class="n">12</span> Notifications &amp; alerts</h2>
   <ul>
-    <li><strong>SMTP</strong> for outbound mail (send a test). <strong>Event triggers</strong> choose which events email you: device registered / came online / went offline / deleted, installer built / deleted / downloaded, user created / deleted, new server or client version, memory or disk high. Toggles save as soon as you flip them.</li>
+    <li><strong>SMTP</strong> for outbound mail (send a test). <strong>Event triggers</strong> choose which events email you: device registered / came online / went offline / deleted, installer built / deleted / downloaded, user created / deleted. Toggles save as soon as you flip them.</li>
     <li>Device alerts are checked every 30 seconds. <strong>New device registered</strong> fires as soon as a device registers — it doesn't wait for a group. <strong>Came online</strong> / <strong>went offline</strong> fire on state changes of known devices. A dashboard restart never floods you.</li>
-    <li><strong>Server health alerts</strong> — set memory and disk thresholds; you're emailed when usage crosses them (debounced). These are the markers on the Server Health tiles.</li>
     <li>Sent emails are listed under <strong>Logs → Email deliveries</strong>.</li>
   </ul>
 </div>
@@ -246,9 +219,6 @@
     <tr><td>Push auto-update / lock settings</td><td>Client Groups → group → Client Settings</td></tr>
     <tr><td>Give a colleague access</td><td>Admin → Users → add user + role</td></tr>
     <tr><td>Limit what a role can do</td><td>Admin → Roles &amp; permissions</td></tr>
-    <tr><td>Set up off-site backups</td><td>Admin → Backup &amp; Restore</td></tr>
-    <tr><td>Restore the server</td><td>Admin → Backup &amp; Restore → Restore</td></tr>
-    <tr><td>Get alerted on low disk/memory</td><td>Admin → Notifications → health thresholds</td></tr>
     <tr><td>See who connected to what</td><td>Logs → Remote sessions</td></tr>
     <tr><td>See who connected to which devices over a period</td><td>Timeline → By user, pick dates</td></tr>
     <tr><td>See a device's connection history over time</td><td>Remote sessions → click the device, or Devices → ⓘ → Connection timeline</td></tr>

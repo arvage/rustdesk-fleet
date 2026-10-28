@@ -512,3 +512,25 @@ th.sortable:hover { color: var(--text-1); }
   --viz-5: #d55181; --viz-6: #008300; --viz-7: #9085e9; --viz-8: #e66767;
   --viz-neutral: #4B5870; --status-neutral: #4B5870; --status-info: #3987e5;
 }
+
+/* ── Help pages (tenant /help and console /help) ─────────────── */
+.help-wrap { max-width: 880px; }
+.help-toc { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:22px; }
+.help-toc a { font-size:12px; text-decoration:none; color:var(--text-2); background:var(--surface);
+  border:1px solid var(--border-md); border-radius:999px; padding:5px 12px; }
+.help-toc a:hover { border-color:var(--accent); color:var(--accent); }
+.help-sec { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  box-shadow:var(--shadow); padding:20px 22px; margin-bottom:16px; scroll-margin-top:16px; }
+.help-sec h2 { font-size:15px; font-weight:700; margin:0 0 10px; color:var(--text-1);
+  display:flex; align-items:center; gap:8px; }
+.help-sec h2 .n { width:22px;height:22px;flex-shrink:0;border-radius:6px;background:var(--accent);color:#fff;
+  font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center; }
+.help-sec p, .help-sec li { font-size:13.5px; line-height:1.65; color:var(--text-2); }
+.help-sec ul { margin:8px 0; padding-left:20px; }
+.help-sec li { margin:3px 0; }
+.help-sec strong { color:var(--text-1); }
+.help-sec code { background:var(--border); padding:1px 5px; border-radius:4px; font-size:12px; }
+.help-table { width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
+.help-table td { padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+.help-table td:first-child { color:var(--text-1); font-weight:500; white-space:nowrap; width:42%; }
+.help-table td:last-child { color:var(--text-2); }
