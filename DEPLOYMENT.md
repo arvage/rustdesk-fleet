@@ -868,8 +868,9 @@ the tenant's own key and `api-server = https://<slug>.<PROVIDER_DOMAIN>`.
 
 ### Lifecycle
 
-New tenants start on trial; **Activate** moves one to active (its users see a
-trial banner until then). Suspend (dashboard and links off, relay keeps running), reactivate, cancel
+New tenants start on a 14-day trial (its users see a banner with the days
+left; admins are emailed 3 days before) and are suspended when it ends.
+**Activate** moves one to active; **Extend trial** adds days. Suspend (dashboard and links off, relay keeps running), reactivate, cancel
 (relay stops now, the admins can only export CSVs, purge after 30 days;
 admins are emailed at cancellation and 7 days before), extend the grace
 period, purge now (type the slug). Tenant #1 can't be cancelled or purged.

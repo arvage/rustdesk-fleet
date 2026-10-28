@@ -1,6 +1,10 @@
 """Tenant lifecycle: activate, suspend, reactivate, cancel, purge (TENANCY.md).
 
 - activate:    trial → active, once the tenant has subscribed.
+- trial:       new tenants get TRIAL_DAYS; their admins are emailed
+               TRIAL_WARN_DAYS before the end, and at the end the tenant is
+               suspended. Reactivating goes back to trial while trial time is
+               left (see extend_trial), otherwise to active.
 - suspend:     the dashboard and download links show "not active"; the relay
                keeps running, so devices stay registered for reactivation.
 - reactivate:  from suspended, or from cancelled within the grace period
@@ -27,6 +31,8 @@ from app.tenant_migration import LEGACY_TENANT_ID
 
 GRACE_DAYS = 30
 WARN_DAYS = 7
+TRIAL_DAYS = 14
+TRIAL_WARN_DAYS = 3
 
 
 class LifecycleError(jobs.JobFailed):
@@ -81,9 +87,33 @@ def activate(tenant_id: int, by: str) -> None:
     if t is None or t["status"] != "trial":
         conn.close()
         raise LifecycleError("Only a trial tenant can be activated.")
-    _set(conn, tenant_id, status="active")
+    _set(conn, tenant_id, status="active", trial_ends_at=None, trial_warning_sent_at=None)
     provider_log(conn, "tenant_activated", t["slug"], by, tenant_id)
     conn.close()
+
+
+def extend_trial(tenant_id: int, days: int, by: str) -> str:
+    """Push the trial end out by `days` (from now if it has already passed).
+    A tenant suspended at the end of its trial stays suspended until it is
+    reactivated, which then puts it back on trial."""
+    conn = get_db()
+    t = _row(conn, tenant_id)
+    if t is None or not t["trial_ends_at"] or t["status"] not in ("trial", "suspended"):
+        conn.close()
+        raise LifecycleError("Only a tenant on trial, or suspended at the end of one, has a trial to extend.")
+    days = max(1, min(365, int(days)))
+    base = max(_now(), datetime.strptime(t["trial_ends_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc))
+    new = base + timedelta(days=days)
+    _set(conn, tenant_id, trial_ends_at=_fmt(new), trial_warning_sent_at=None)
+    provider_log(conn, "tenant_trial_extended", f"{t['slug']} +{days}d → {_fmt(new)}", by, tenant_id)
+    conn.close()
+    return _fmt(new)
+
+
+def reopened_status(row) -> str:
+    """The status a reactivated tenant goes back to: trial while its trial
+    has time left, otherwise active."""
+    return "trial" if row["trial_ends_at"] and row["trial_ends_at"] > _fmt(_now()) else "active"
 
 
 def extend_grace(tenant_id: int, days: int, by: str) -> str:
@@ -163,9 +193,12 @@ def _reactivate(job) -> None:
                     relays.start(t)
                 except relays.RelayError as e:
                     raise LifecycleError(str(e))
-    with job.step("Mark the tenant active"):
+    status = reopened_status(row)
+    with job.step(f"Mark the tenant {'back on trial' if status == 'trial' else 'active'}"):
         conn = get_db()
-        _set(conn, job.tenant_id, status="active", cancelled_at=None, purge_after=None, purge_warning_sent_at=None)
+        trial = {} if status == "trial" else {"trial_ends_at": None, "trial_warning_sent_at": None}
+        _set(conn, job.tenant_id, status=status, cancelled_at=None, purge_after=None, purge_warning_sent_at=None,
+             **trial)
         provider_log(conn, "tenant_reactivated", row["slug"], job.created_by, job.tenant_id)
         conn.close()
 
@@ -246,4 +279,27 @@ def daily(now: datetime | None = None) -> None:
             ])
             _set(conn, t["id"], purge_warning_sent_at=_fmt(now))
             provider_log(conn, "tenant_purge_warning_sent", t["slug"], "scheduled", t["id"])
+    _trials(conn, now)
     conn.close()
+
+
+def _trials(conn, now: datetime) -> None:
+    rows = conn.execute("SELECT * FROM tenants WHERE status = 'trial' AND trial_ends_at IS NOT NULL AND id != ?",
+                        (LEGACY_TENANT_ID,)).fetchall()
+    for t in rows:
+        due = datetime.strptime(t["trial_ends_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        if due <= now:
+            _set(conn, t["id"], status="suspended")
+            provider_log(conn, "tenant_trial_expired", f"{t['slug']}; suspended", "scheduled", t["id"])
+            _notify_admins(conn, t["id"], f"Your {t['display_name']} RustDesk Fleet trial has ended", [
+                "Your trial has ended and the account is suspended: sign-in and installer downloads are off.",
+                "Your devices, groups and settings are kept. Contact your provider to subscribe and reopen it.",
+            ])
+        elif due - now <= timedelta(days=TRIAL_WARN_DAYS) and not t["trial_warning_sent_at"]:
+            _notify_admins(conn, t["id"], f"Your {t['display_name']} RustDesk Fleet trial ends soon", [
+                f"Your trial ends on {due.strftime('%Y-%m-%d')}. After that the account is suspended:"
+                " sign-in and installer downloads stop until you subscribe.",
+                "Contact your provider to subscribe.",
+            ])
+            _set(conn, t["id"], trial_warning_sent_at=_fmt(now))
+            provider_log(conn, "tenant_trial_warning_sent", t["slug"], "scheduled", t["id"])

@@ -7,13 +7,14 @@
 <div class="section">
   <div class="section-head"><h2>Subscription</h2></div>
   {% if subscription.status == "trial" %}
-  <div class="flash warning" style="margin-bottom:12px">This tenant is on a trial. Contact your provider to subscribe, or this tenant and its devices, groups and settings may be removed when the trial ends.</div>
+  {% set _tenant = tenant_of(request) %}
+  <div class="flash warning" style="margin-bottom:12px">{{ _tenant.display_name }} is on a trial{% if _tenant.trial_ends_at %} that ends on {{ _tenant.trial_ends_at | localtime("%Y-%m-%d") }} ({% set _d = _tenant.trial_ends_at | days_left %}{{ _d }} day{{ "s" if _d != 1 }} left){% endif %}. Contact your provider to subscribe. When the trial ends, this tenant is suspended: sign-in and installer downloads stop until it is reactivated.</div>
   {% endif %}
   <div class="stats" style="margin-bottom:0">
     <div class="stat-card">
       <div class="stat-label">Status</div>
       <div style="margin-top:8px"><span class="badge badge-{{ 'pending' if subscription.status == 'trial' else subscription.status }}">{{ 'Trial' if subscription.status == 'trial' else subscription.status | capitalize }}</span></div>
-      <div class="stat-sub">tenant created {{ subscription.created_at | localtime("%Y-%m-%d") }}</div>
+      <div class="stat-sub">{% if subscription.status == "trial" and subscription.trial_ends_at %}ends {{ subscription.trial_ends_at | localtime("%Y-%m-%d") }} · {{ subscription.trial_ends_at | days_left }} days left{% else %}tenant created {{ subscription.created_at | localtime("%Y-%m-%d") }}{% endif %}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Plan</div>

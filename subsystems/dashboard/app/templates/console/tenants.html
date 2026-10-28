@@ -16,7 +16,7 @@
     <tr>
       <td><a href="/tenants/{{ t.id }}">{{ t.display_name }}</a></td>
       <td><code>{{ t.slug }}</code></td>
-      <td>{{ t.status }}</td>
+      <td>{{ t.status }}{% if t.status == "trial" and t.trial_ends_at %} <span class="text-sm text-muted">· ends {{ t.trial_ends_at | localtime("%Y-%m-%d") }}</span>{% endif %}</td>
       <td data-val="{{ t.created_at }}">{{ t.created_at | localtime("%Y-%m-%d") }}</td>
       <td>{{ t.devices }}</td><td>{{ t.technicians }}</td>
       <td>{{ t.relay_status or "—" }} · {{ t.relay_containers }}</td>

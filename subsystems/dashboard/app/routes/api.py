@@ -466,6 +466,11 @@ def _server_health(tenant: Tenant) -> dict:
     memory, disk) are about our server: they are on the provider console's
     Host health page (console/server.py), not here."""
     status = _compute_status(tenant)
+    conn = get_db()
+    hidden = {r[0] for r in conn.execute("SELECT rustdesk_id FROM devices WHERE tenant_id = ? AND hidden = 1",
+                                         (tenant.id,))}
+    conn.close()
+    status = {rid: s for rid, s in status.items() if rid not in hidden}
     online = sum(1 for s in status.values() if s in ("online", "in session"))
     return {
         "containers": _container_states(tenant),

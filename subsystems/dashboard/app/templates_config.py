@@ -57,3 +57,16 @@ def _localtime(dt_str, fmt: str = "%Y-%m-%d %H:%M") -> str:
 
 
 templates.env.filters["localtime"] = _localtime
+
+
+def _days_left(dt_str) -> int:
+    """Whole days from now until a UTC datetime string (0 once it's past)."""
+    try:
+        clean = str(dt_str).replace("T", " ").split(".")[0][:19]
+        dt = datetime.strptime(clean, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except (ValueError, AttributeError):
+        return 0
+    return max(0, -(-int((dt - datetime.now(timezone.utc)).total_seconds()) // 86400))
+
+
+templates.env.filters["days_left"] = _days_left

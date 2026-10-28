@@ -155,7 +155,7 @@ def home(request: Request, tenant: Tenant = Depends(get_tenant)):
     relay = dataclasses.asdict(tenant.relay) if tenant.relay else None
     conn = get_db()
     subscription = conn.execute(
-        "SELECT status, plan, created_at FROM tenants WHERE id = ?", (tenant.id,)
+        "SELECT status, plan, created_at, trial_ends_at FROM tenants WHERE id = ?", (tenant.id,)
     ).fetchone()
     conn.close()
     return templates.TemplateResponse(

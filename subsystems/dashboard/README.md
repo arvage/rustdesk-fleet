@@ -67,7 +67,7 @@ admins; every action lands in the provider audit log.
 | `GET /` | Tenants: name, slug, status, devices, technicians, relay status and version, web domain, certificate expiry, last activity (search, sort) |
 | `GET /tenants/new`, `POST /tenants` | Create a tenant (a job: slug check, tenant, relay, certificate + vhost, PDF guides, first-admin invite) |
 | `GET /tenants/{id}` | Relay ports and key, domains, admins and pending invites, usage (devices, technicians, session hours this and last month, daily history), plan, lifecycle |
-| `POST /tenants/{id}/plan` · `/activate` · `/suspend` · `/reactivate` · `/cancel` · `/extend-grace` · `/purge`, `POST /tenants/{id}/invites/{invite}/resend` | Plan and lifecycle actions (cancel and purge need the slug typed; not for tenant #1) |
+| `POST /tenants/{id}/plan` · `/activate` · `/extend-trial` · `/suspend` · `/reactivate` · `/cancel` · `/extend-grace` · `/purge`, `POST /tenants/{id}/invites/{invite}/resend` | Plan and lifecycle actions (cancel and purge need the slug typed; not for tenant #1) |
 | `GET /relays`, `POST /relays/{tenant}/start\|stop\|restart\|upgrade`, `POST /relays/upgrade-all` | Relay health, versions and operations (upgrade-all goes one relay at a time, stopping at the first failure) |
 | `GET /jobs`, `GET /jobs/{id}` (+ `.json`) | Background jobs and their live progress |
 | `GET /audit` | Provider audit log, filterable by event, tenant, admin, text |

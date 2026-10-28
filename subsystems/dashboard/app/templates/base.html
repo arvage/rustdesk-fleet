@@ -148,7 +148,7 @@
       {% if flash %}<div class="flash {{ flash.type }}">{{ flash.msg }}</div>{% endif %}
       {% set _tenant = tenant_of(request) %}
       {% if current_user and _tenant and _tenant.status == "trial" and request.url.path != "/" %}
-      <div class="flash warning">{{ _tenant.display_name }} is on a trial. Contact your provider to subscribe, or this tenant and its devices, groups and settings may be removed when the trial ends.</div>
+      <div class="flash warning">{{ _tenant.display_name }} is on a trial{% if _tenant.trial_ends_at %} that ends on {{ _tenant.trial_ends_at | localtime("%Y-%m-%d") }} ({% set _d = _tenant.trial_ends_at | days_left %}{{ _d }} day{{ "s" if _d != 1 }} left){% endif %}. Contact your provider to subscribe. When the trial ends, this tenant is suspended: sign-in and installer downloads stop until it is reactivated.</div>
       {% endif %}
       {% block content %}{% endblock %}
     </div>

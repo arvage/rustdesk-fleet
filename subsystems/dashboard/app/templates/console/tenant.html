@@ -63,6 +63,12 @@
 
 <div class="section"><div class="card"><div class="card-body">
   <h2 style="font-size:14px;margin:0 0 10px">Lifecycle</h2>
+  {% if t.trial_ends_at and t.status in ("trial", "suspended") %}
+  <p style="margin:0 0 10px">{% if t.status == "trial" %}Trial ends{% else %}Trial ended{% endif %}
+    <strong>{{ t.trial_ends_at | localtime }}</strong>{% if t.status == "suspended" %}; reactivating puts it back on trial only if you extend the trial first{% endif %}.</p>
+  <form method="post" action="/tenants/{{ t.id }}/extend-trial" style="display:inline-flex;gap:8px;align-items:center;margin-bottom:10px">
+    <input name="days" value="14" size="4"> days <button class="btn btn-ghost btn-sm">Extend trial</button></form><br>
+  {% endif %}
   {% if t.status == "trial" %}
   <form method="post" action="/tenants/{{ t.id }}/activate" style="display:inline" onsubmit="return confirm('Activate {{ t.slug }}? It leaves its trial, and its users stop seeing the trial notice.')">
     <button class="btn btn-primary btn-sm">Activate</button></form>

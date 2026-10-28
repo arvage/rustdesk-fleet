@@ -268,6 +268,24 @@ async def tenant_cancel(request: Request, tenant_id: int, confirm: str = Form(""
     return _queue(request, "cancel_tenant", row, user)
 
 
+@router.post("/tenants/{tenant_id}/extend-trial")
+async def tenant_extend_trial(request: Request, tenant_id: int, days: str = Form("14"),
+                              user: dict = Depends(require_provider)):
+    from app.console import lifecycle
+    row = _lifecycle_target(request, tenant_id)
+    if row is None:
+        return RedirectResponse("/", status_code=303)
+    try:
+        new = lifecycle.extend_trial(tenant_id, int(days) if days.strip().isdigit() else 14, user["email"])
+        msg = f"Trial extended: it ends {new} UTC."
+        if row["status"] == "suspended":
+            msg += " Reactivate the tenant to put it back on trial."
+        _flash(request, "success", msg)
+    except lifecycle.LifecycleError as e:
+        _flash(request, "error", str(e))
+    return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+
+
 @router.post("/tenants/{tenant_id}/extend-grace")
 async def tenant_extend(request: Request, tenant_id: int, days: str = Form("30"),
                         user: dict = Depends(require_provider)):

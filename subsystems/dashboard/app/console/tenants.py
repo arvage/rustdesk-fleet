@@ -64,9 +64,14 @@ def ensure_tables(conn) -> None:
         _rebuild_tenants(conn, cols)
     cols = [r[1] for r in conn.execute("PRAGMA table_info(tenants)")]
     for col, ddl in (("plan", "TEXT NOT NULL DEFAULT ''"), ("cancelled_at", "TEXT"), ("purge_after", "TEXT"),
-                     ("purge_warning_sent_at", "TEXT"), ("purged_at", "TEXT"), ("created_by", "TEXT")):
+                     ("purge_warning_sent_at", "TEXT"), ("purged_at", "TEXT"), ("created_by", "TEXT"),
+                     ("trial_ends_at", "TEXT"), ("trial_warning_sent_at", "TEXT")):
         if col not in cols:
             conn.execute(f"ALTER TABLE tenants ADD COLUMN {col} {ddl}")
+    # Trials from before trial_ends_at existed end TRIAL_DAYS after creation.
+    from app.console.lifecycle import TRIAL_DAYS
+    conn.execute("UPDATE tenants SET trial_ends_at = datetime(created_at, ?) WHERE status = 'trial' AND trial_ends_at IS NULL",
+                 (f"+{TRIAL_DAYS} days",))
     ucols = [r[1] for r in conn.execute("PRAGMA table_info(users)")]
     if "last_sign_in_at" not in ucols:
         conn.execute("ALTER TABLE users ADD COLUMN last_sign_in_at TEXT")
@@ -262,8 +267,10 @@ def create_tenant(job) -> None:
 
         with job.step("Create the tenant"):
             conn = get_db()
-            cur = conn.execute("INSERT INTO tenants (slug, display_name, status, created_by) VALUES (?, ?, 'trial', ?)",
-                               (slug, name, job.created_by))
+            from app.console.lifecycle import TRIAL_DAYS
+            cur = conn.execute("INSERT INTO tenants (slug, display_name, status, created_by, trial_ends_at)"
+                               " VALUES (?, ?, 'trial', ?, datetime('now', ?))",
+                               (slug, name, job.created_by, f"+{TRIAL_DAYS} days"))
             job.tenant_id = cur.lastrowid
             seed_tenant(conn, job.tenant_id)
             conn.commit()

@@ -69,6 +69,7 @@ class Tenant:
     status: str
     relay: Relay | None
     hostname: str = ""      # the domain this request came in on ("" for jobs)
+    trial_ends_at: str | None = None   # UTC, while on trial (or suspended at its end)
 
     @property
     def is_open(self) -> bool:
@@ -105,7 +106,8 @@ def _load(conn, tenant_id: int, hostname: str = "") -> Tenant | None:
         return None
     r = conn.execute("SELECT * FROM relays WHERE tenant_id = ?", (tenant_id,)).fetchone()
     return Tenant(id=t["id"], slug=t["slug"], display_name=t["display_name"], status=t["status"],
-                  relay=_relay_from_row(r) if r else None, hostname=hostname)
+                  relay=_relay_from_row(r) if r else None, hostname=hostname,
+                  trial_ends_at=t["trial_ends_at"] if "trial_ends_at" in t.keys() else None)
 
 
 def load_tenant(tenant_id: int, conn=None) -> Tenant | None:
