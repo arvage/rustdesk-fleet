@@ -225,6 +225,20 @@ async def tenant_suspend(request: Request, tenant_id: int, user: dict = Depends(
     return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
 
 
+@router.post("/tenants/{tenant_id}/activate")
+async def tenant_activate(request: Request, tenant_id: int, user: dict = Depends(require_provider)):
+    from app.console import lifecycle
+    row = _lifecycle_target(request, tenant_id)
+    if row is None:
+        return RedirectResponse("/", status_code=303)
+    try:
+        lifecycle.activate(tenant_id, user["email"])
+        _flash(request, "success", f"{row['slug']} is active. Its trial notice is gone.")
+    except lifecycle.LifecycleError as e:
+        _flash(request, "error", str(e))
+    return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+
+
 @router.post("/tenants/{tenant_id}/reactivate")
 async def tenant_reactivate(request: Request, tenant_id: int, user: dict = Depends(require_provider)):
     row = _lifecycle_target(request, tenant_id)

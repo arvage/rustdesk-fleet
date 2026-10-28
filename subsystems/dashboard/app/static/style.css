@@ -249,6 +249,8 @@ button.nav-item {   /* Sign out is a form button styled as a nav link */
 .flash.success::before { content: "✓"; }
 .flash.error   { background: var(--err-bg); color: var(--err-text); border: 1px solid var(--err-border); }
 .flash.error::before { content: "✕"; }
+.flash.warning { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border); }
+.flash.warning::before { content: "!"; font-weight: 700; }
 
 /* ── Cards ────────────────────────────────────────────────────── */
 .card {

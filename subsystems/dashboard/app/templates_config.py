@@ -20,6 +20,14 @@ templates.env.globals["get_flash"] = _get_flash
 templates.env.globals["get_new_user_pw"] = _get_new_user_pw
 
 
+def _tenant_of(request):
+    from app.tenancy import request_tenant
+    return request_tenant(request)
+
+
+templates.env.globals["tenant_of"] = _tenant_of
+
+
 def _format_rid(rid: str) -> str:
     """Format a RustDesk ID in groups of 3 from the right: '# ### ### ###'."""
     s = str(rid).strip()

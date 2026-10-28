@@ -3,6 +3,26 @@
 {% block page_title %}Server Status{% endblock %}
 
 {% block content %}
+{% if subscription %}
+<div class="section">
+  <div class="section-head"><h2>Subscription</h2></div>
+  {% if subscription.status == "trial" %}
+  <div class="flash warning" style="margin-bottom:12px">This tenant is on a trial. Contact your provider to subscribe, or this tenant and its devices, groups and settings may be removed when the trial ends.</div>
+  {% endif %}
+  <div class="stats" style="margin-bottom:0">
+    <div class="stat-card">
+      <div class="stat-label">Status</div>
+      <div style="margin-top:8px"><span class="badge badge-{{ 'pending' if subscription.status == 'trial' else subscription.status }}">{{ 'Trial' if subscription.status == 'trial' else subscription.status | capitalize }}</span></div>
+      <div class="stat-sub">tenant created {{ subscription.created_at | localtime("%Y-%m-%d") }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Plan</div>
+      <div class="stat-value" style="font-size:16px">{{ subscription.plan or "—" }}</div>
+      <div class="stat-sub">set by your provider</div>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% if server %}
 <div class="section">
   <div class="section-head"><h2>Relay</h2>

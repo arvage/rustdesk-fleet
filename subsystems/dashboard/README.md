@@ -67,7 +67,7 @@ admins; every action lands in the provider audit log.
 | `GET /` | Tenants: name, slug, status, devices, technicians, relay status and version, web domain, certificate expiry, last activity (search, sort) |
 | `GET /tenants/new`, `POST /tenants` | Create a tenant (a job: slug check, tenant, relay, certificate + vhost, PDF guides, first-admin invite) |
 | `GET /tenants/{id}` | Relay ports and key, domains, admins and pending invites, usage (devices, technicians, session hours this and last month, daily history), plan, lifecycle |
-| `POST /tenants/{id}/plan` · `/suspend` · `/reactivate` · `/cancel` · `/extend-grace` · `/purge`, `POST /tenants/{id}/invites/{invite}/resend` | Plan and lifecycle actions (cancel and purge need the slug typed; not for tenant #1) |
+| `POST /tenants/{id}/plan` · `/activate` · `/suspend` · `/reactivate` · `/cancel` · `/extend-grace` · `/purge`, `POST /tenants/{id}/invites/{invite}/resend` | Plan and lifecycle actions (cancel and purge need the slug typed; not for tenant #1) |
 | `GET /relays`, `POST /relays/{tenant}/start\|stop\|restart\|upgrade`, `POST /relays/upgrade-all` | Relay health, versions and operations (upgrade-all goes one relay at a time, stopping at the first failure) |
 | `GET /jobs`, `GET /jobs/{id}` (+ `.json`) | Background jobs and their live progress |
 | `GET /audit` | Provider audit log, filterable by event, tenant, admin, text |
@@ -134,6 +134,7 @@ Staff pages (all require login):
 | `GET /groups`, `POST /groups` | Group list (with live "X / Y online"), create group |
 | `GET /groups/{slug}` | Group detail: devices (sorted by label, with the same **Edit** modal as Devices), Client Settings, branding, installers, download links |
 | `POST /groups/{slug}/edit` | Rename / change slug / unattended password |
+| `POST /groups/{slug}/delete` | Delete a group with no devices, with its installers, links, access grants and icon |
 | `POST /groups/{slug}/client-settings` | Per-group managed client settings (auto-update, remote settings changes) |
 | `POST /groups/{slug}/build`, `POST /groups/{slug}/installers/{id}/delete` | Build / delete installers |
 | `POST /groups/{slug}/installers/{id}/sign` | Sign / re-sign a Windows installer with Azure Trusted Signing (`manage_groups`) |

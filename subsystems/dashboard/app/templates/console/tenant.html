@@ -63,6 +63,10 @@
 
 <div class="section"><div class="card"><div class="card-body">
   <h2 style="font-size:14px;margin:0 0 10px">Lifecycle</h2>
+  {% if t.status == "trial" %}
+  <form method="post" action="/tenants/{{ t.id }}/activate" style="display:inline" onsubmit="return confirm('Activate {{ t.slug }}? It leaves its trial, and its users stop seeing the trial notice.')">
+    <button class="btn btn-primary btn-sm">Activate</button></form>
+  {% endif %}
   {% if t.status in ("trial", "active") %}
   <form method="post" action="/tenants/{{ t.id }}/suspend" style="display:inline" onsubmit="return confirm('Suspend {{ t.slug }}? Its dashboard and download links stop working; its relay keeps running.')">
     <button class="btn btn-ghost btn-sm" style="color:var(--warning)">Suspend</button></form>

@@ -331,6 +331,10 @@ range once, up front; the console shows that range.
 | `cancelled` | sign-in and a read-only **export page** (CSVs of devices, groups, users, sessions, file transfers) for the tenant's admins; everything else "not active" | **stopped** (`docker compose stop`: containers, keys and data kept) | accepted if they arrive, no config pushed |
 | `purged` | gone (its domains are removed: 404) | removed | rejected (unknown host) |
 
+- **Activate** (console): trial → active, once the tenant has subscribed.
+  New tenants start as `trial`. While on trial, the tenant's home page shows
+  its status and plan with a caution, and every other page shows a trial
+  banner; there is no trial end date or automatic expiry yet.
 - **Suspend** (console): immediate. For non-payment and the like.
 - **Reactivate**: from suspended, or from cancelled while `purge_after` is in
   the future. From cancelled the relay is started again with the same keys

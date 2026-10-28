@@ -1,5 +1,6 @@
-"""Tenant lifecycle: suspend, reactivate, cancel, purge (TENANCY.md).
+"""Tenant lifecycle: activate, suspend, reactivate, cancel, purge (TENANCY.md).
 
+- activate:    trial → active, once the tenant has subscribed.
 - suspend:     the dashboard and download links show "not active"; the relay
                keeps running, so devices stay registered for reactivation.
 - reactivate:  from suspended, or from cancelled within the grace period
@@ -70,6 +71,18 @@ def suspend(tenant_id: int, by: str) -> None:
         raise LifecycleError("Only a trial or active tenant can be suspended.")
     _set(conn, tenant_id, status="suspended")
     provider_log(conn, "tenant_suspended", t["slug"], by, tenant_id)
+    conn.close()
+
+
+def activate(tenant_id: int, by: str) -> None:
+    """Trial → active: the tenant has subscribed."""
+    conn = get_db()
+    t = _row(conn, tenant_id)
+    if t is None or t["status"] != "trial":
+        conn.close()
+        raise LifecycleError("Only a trial tenant can be activated.")
+    _set(conn, tenant_id, status="active")
+    provider_log(conn, "tenant_activated", t["slug"], by, tenant_id)
     conn.close()
 
 

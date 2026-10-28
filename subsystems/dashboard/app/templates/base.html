@@ -21,7 +21,7 @@
     window.rdfApplyTheme = apply;
   })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=5">
+  <link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body>
 <div class="shell">
@@ -146,6 +146,10 @@
     <div class="content {% block content_class %}{% endblock %}">
       {% set flash = get_flash(request) %}
       {% if flash %}<div class="flash {{ flash.type }}">{{ flash.msg }}</div>{% endif %}
+      {% set _tenant = tenant_of(request) %}
+      {% if current_user and _tenant and _tenant.status == "trial" and request.url.path != "/" %}
+      <div class="flash warning">{{ _tenant.display_name }} is on a trial. Contact your provider to subscribe, or this tenant and its devices, groups and settings may be removed when the trial ends.</div>
+      {% endif %}
       {% block content %}{% endblock %}
     </div>
   </div>

@@ -153,6 +153,11 @@ def home(request: Request, tenant: Tenant = Depends(get_tenant)):
     from setup_server import get_server_version
     from generate_installer import get_pinned_version
     relay = dataclasses.asdict(tenant.relay) if tenant.relay else None
+    conn = get_db()
+    subscription = conn.execute(
+        "SELECT status, plan, created_at FROM tenants WHERE id = ?", (tenant.id,)
+    ).fetchone()
+    conn.close()
     return templates.TemplateResponse(
         request,
         "home.html",
@@ -161,6 +166,7 @@ def home(request: Request, tenant: Tenant = Depends(get_tenant)):
             "current_user": current_user,
             "current_version": get_server_version(relay),
             "client_version": get_pinned_version(),
+            "subscription": subscription,
         },
     )
 
