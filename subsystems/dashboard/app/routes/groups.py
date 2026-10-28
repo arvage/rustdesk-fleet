@@ -76,9 +76,6 @@ async def groups_create(
     try:
         create_group(current_user["tenant_id"], slug, display_name, unattended_password.strip() or None,
                      current_user["email"])
-        conn = get_db()
-        log_event(conn, "group_created", slug, current_user["email"], tenant_id=current_user["tenant_id"])
-        conn.close()
         _set_flash(request, "success", f"Group '{slug}' created.")
         return RedirectResponse(f"/groups/{slug}", status_code=303)
     except ProvisioningError as e:
@@ -257,6 +254,56 @@ async def group_edit(
     conn.close()
     _set_flash(request, "success", "Group updated.")
     return RedirectResponse(f"/groups/{new_slug}", status_code=303)
+
+
+@router.post("/groups/{slug}/delete")
+async def group_delete(
+    request: Request,
+    slug: str,
+    current_user: dict = Depends(require_auth),
+):
+    """Delete an empty group with its installers, download links, access
+    grants and icon. Devices have to be moved out first; hidden (deleted)
+    devices just lose the group."""
+    require_perm(current_user, "manage_groups")
+    tid = current_user["tenant_id"]
+    conn = get_db()
+    group = _group(conn, tid, slug, "id, display_name")
+    if group is None:
+        conn.close()
+        return _group_not_found(request, slug)
+    gid = group["id"]
+
+    in_use = conn.execute(
+        "SELECT COUNT(*) FROM devices WHERE tenant_id = ? AND group_id = ? AND hidden = 0", (tid, gid)
+    ).fetchone()[0]
+    if in_use:
+        conn.close()
+        _set_flash(request, "error",
+                   f"Move this group's {in_use} device{'s' if in_use != 1 else ''} to another group first.")
+        return RedirectResponse(f"/groups/{slug}", status_code=303)
+
+    files = [r["unsigned_path"] for r in conn.execute(
+        "SELECT unsigned_path FROM installers WHERE tenant_id = ? AND group_id = ? AND unsigned_path IS NOT NULL",
+        (tid, gid))]
+    conn.execute("UPDATE devices SET group_id = NULL WHERE tenant_id = ? AND group_id = ?", (tid, gid))
+    for table in ("installers", "download_links", "user_group_access"):
+        conn.execute(f"DELETE FROM {table} WHERE tenant_id = ? AND group_id = ?", (tid, gid))
+    conn.execute("DELETE FROM client_groups WHERE tenant_id = ? AND id = ?", (tid, gid))
+    log_event(conn, "group_deleted", slug, current_user["email"], tenant_id=tid)
+    conn.commit()
+    conn.close()
+
+    allowed_dir = installers_dir(tid).resolve()
+    for f in files:
+        candidate = Path(f).resolve()
+        if candidate.parent == allowed_dir and candidate.exists():
+            candidate.unlink()
+    import branding
+    branding.delete_icon(tid, gid)
+
+    _set_flash(request, "success", f"Group '{group['display_name']}' deleted.")
+    return RedirectResponse("/groups", status_code=303)
 
 
 # Managed client settings: form field / client_groups column -> label.

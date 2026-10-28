@@ -950,11 +950,21 @@ document.querySelectorAll('#email-link-form, #create-link-modal form').forEach(f
       {% endif %}
       <input type="hidden" name="clear_password" value="">
       <div style="display:flex;gap:8px;justify-content:flex-end">
+        {% if devices %}
+        <button type="button" disabled class="btn btn-ghost" style="color:#EF4444;opacity:.45;cursor:not-allowed"
+                title="Move this group's {{ devices|length }} device{{ 's' if devices|length != 1 }} to another group first">Delete group</button>
+        {% else %}
+        <button type="submit" form="delete-group-form" class="btn btn-ghost" style="color:#EF4444">Delete group</button>
+        {% endif %}
+        <div style="flex:1"></div>
         <button type="button" onclick="document.getElementById('edit-group-modal').style.display='none'"
                 class="btn btn-ghost">Cancel</button>
         <button type="submit" class="btn btn-primary">Save changes</button>
       </div>
     </form>
+    <form id="delete-group-form" method="post" action="/groups/{{ group.slug }}/delete" style="display:none"
+          data-msg="Delete the group {{ group.display_name }}?&#10;&#10;Its installers, download links and icon are deleted too. Clients already installed keep working."
+          onsubmit="return confirm(this.dataset.msg)"></form>
 <script>
 function togglePw() {
   const f = document.getElementById('edit-pw');
