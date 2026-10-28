@@ -172,5 +172,25 @@ def home(request: Request, tenant: Tenant = Depends(get_tenant)):
 
 
 @router.get("/help", response_class=HTMLResponse)
-def help_page(request: Request, current_user: dict = Depends(require_auth)):
-    return templates.TemplateResponse(request, "help.html", {"current_user": current_user})
+def help_page(request: Request, current_user: dict = Depends(require_auth),
+              tenant: Tenant = Depends(get_tenant)):
+    return templates.TemplateResponse(
+        request, "help.html", {"current_user": current_user, "app_settings": _app_settings(tenant)})
+
+
+def _app_settings(tenant: Tenant) -> dict | None:
+    """The tenant's server settings for a technician's own RustDesk app: the
+    same values its installers use."""
+    from generate_installer import InstallerError, server_settings
+    conn = get_db()
+    try:
+        relay = conn.execute("SELECT * FROM relays WHERE tenant_id = ?", (tenant.id,)).fetchone()
+        if relay is None or not relay["pubkey"]:
+            return None
+        s = server_settings(conn, relay)
+    except InstallerError:
+        return None
+    finally:
+        conn.close()
+    return {"id_server": s["@@ID_SERVER@@"], "relay_server": s["@@RELAY_SERVER@@"],
+            "api_server": f"https://{s['@@API_HOST@@']}", "key": relay["pubkey"]}

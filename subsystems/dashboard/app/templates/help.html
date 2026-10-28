@@ -34,6 +34,7 @@
 
 <div class="help-toc">
   <a href="#s1">Signing in</a>
+  <a href="#app">Your RustDesk app</a>
   <a href="#s2">Server Status</a>
   <a href="#s3">Adding devices</a>
   <a href="#s4">Devices</a>
@@ -58,6 +59,28 @@
     <li><strong>First ever visit:</strong> if no account exists, you're sent to a one-time setup page to create the first administrator. It locks permanently afterward.</li>
     <li><strong>Normal sign-in:</strong> email + password. If you've registered a passkey, you'll be prompted for it (or it may replace the password).</li>
     <li>The left sidebar is the navigation. What you see depends on your <strong>role</strong> — a read-only account sees the fleet but no admin tools.</li>
+  </ul>
+</div>
+
+<div class="help-sec" id="app">
+  <h2><span class="n">1b</span> Setting up your RustDesk app</h2>
+  <p><strong>Connect</strong> and <strong>Terminal</strong> open the RustDesk app on your own computer, and that app has to use this account's server. Client installers already have these settings; technicians set them once in their own app:</p>
+  {% if app_settings %}
+  <table class="help-table">
+    {% for label, value in (("ID server", app_settings.id_server), ("Relay server", app_settings.relay_server),
+                            ("API server", app_settings.api_server), ("Key", app_settings.key)) %}
+    <tr><td>{{ label }}</td>
+        <td><code style="word-break:break-all">{{ value }}</code>
+            <button type="button" class="btn-copy" style="margin-left:6px" data-v="{{ value }}" onclick="copyText(this.dataset.v, this)" title="Copy {{ label }}">Copy</button></td></tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="text-muted">This account's server details aren't available yet. Ask your provider.</p>
+  {% endif %}
+  <ul>
+    <li>In RustDesk, open <strong>Settings → Network</strong>, unlock the network settings if asked, and choose <strong>ID/Relay server</strong>.</li>
+    <li>Paste the four values above and click <strong>OK</strong>. The status at the bottom of the main window should change to <strong>Ready</strong>.</li>
+    <li>Your app uses <strong>one server at a time</strong>. If you also support another account with its own server, switch these settings before connecting to its devices: a device on another server shows as "ID does not exist".</li>
   </ul>
 </div>
 
@@ -88,7 +111,7 @@
     <li>Lists every machine with live <strong>online / in&nbsp;session / offline</strong> status, computer, OS, IP and group, sorted by <strong>label</strong> (unlabeled last).</li>
     <li><strong>Recently registered</strong> — devices added in the last 7 days that still need a client group, newest first. <strong>Assign to Group</strong> shows the device's computer name and lets you pick the group and set its label in one step (an unlabeled device's label is prefilled from its computer name, e.g. <code>ws-0001</code> → <code>WS-0001</code>, <code>file-server-01</code> → <code>File Server 01</code>); the device then leaves the panel.</li>
     <li><strong>Filter</strong> with the search box; <strong>ⓘ Details</strong> shows full reported details and recent sessions.</li>
-    <li><strong>Connect</strong> (video icon) launches your local RustDesk app to that device; <strong>Terminal</strong> (<code>&gt;_</code>) opens a RustDesk terminal session.</li>
+    <li><strong>Connect</strong> (video icon) launches your local RustDesk app to that device (set it up first: <a href="#app">Setting up your RustDesk app</a>); <strong>Terminal</strong> (<code>&gt;_</code>) opens a RustDesk terminal session.</li>
     <li><strong>Edit</strong> sets a label and moves the device between groups. <strong>Delete</strong> removes it from the dashboard (use for duplicates/decommissioned machines) — if that client ever communicates again, it reappears automatically.</li>
     <li><strong>Sort &amp; columns</strong> — click any column header to sort (numbers, sizes and durations sort by value); use the <strong>Columns</strong> button to show/hide columns, including the detail columns (User, OS Build, CPU, Cores, Memory, Client Version) that are hidden by default. Choices are remembered per browser.</li>
   </ul>
