@@ -12,7 +12,7 @@
   {% endif %}
   <div class="stats" style="margin-bottom:0">
     <div class="stat-card">
-      <div class="stat-label">Status</div>
+      <div class="stat-label">Subscription</div>
       <div style="margin-top:8px"><span class="badge badge-{{ 'pending' if subscription.status == 'trial' else subscription.status }}">{{ 'Trial' if subscription.status == 'trial' else subscription.status | capitalize }}</span></div>
       <div class="stat-sub">{% if subscription.status == "trial" and subscription.trial_ends_at %}ends {{ subscription.trial_ends_at | localtime("%Y-%m-%d") }} · {{ subscription.trial_ends_at | days_left }} days left{% else %}tenant created {{ subscription.created_at | localtime("%Y-%m-%d") }}{% endif %}</div>
     </div>
