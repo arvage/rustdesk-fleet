@@ -71,7 +71,7 @@ die()  { printf '\033[1;31m[error]\033[0m %s\n' "$*" >&2; exit 1; }
 # ── Preflight ───────────────────────────────────────────────────────────────
 [[ "$(id -u)" -eq 0 ]] && die "Run as a normal sudo user, not root (the dashboard runs as this user)."
 command -v sudo >/dev/null || die "sudo is required."
-sudo -v || die "This user needs sudo privileges."
+sudo -n true 2>/dev/null || sudo -v || die "This user needs sudo privileges."
 
 RUN_USER="$(id -un)"
 REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
