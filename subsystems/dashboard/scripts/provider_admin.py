@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """Manage provider console admins from the server's shell.
 
-    python3 provider_admin.py add EMAIL NAME       # create, print an enrollment link
-    python3 provider_admin.py list
-    python3 provider_admin.py disable EMAIL        # also signs them out
-    python3 provider_admin.py enroll-link EMAIL    # a new one-time link
+    python3 provider_admin.py --domain DOMAIN add EMAIL NAME     # create, print an enrollment link
+    python3 provider_admin.py --domain DOMAIN list
+    python3 provider_admin.py --domain DOMAIN disable EMAIL      # also signs them out
+    python3 provider_admin.py --domain DOMAIN enroll-link EMAIL  # a new one-time link
 
 Enrollment links are one-time and valid for 1 hour: open one on the device
 to sign in from and create a passkey (provider admins have no passwords).
 
 The console host is admin.<PROVIDER_DOMAIN>. The domain comes from
 --domain, else the PROVIDER_DOMAIN environment variable, else
-/etc/rustdesk-fleet/dashboard.env if this user can read it.
+/etc/rustdesk-fleet/dashboard.env if this user can read it (install.sh
+makes it root-only, so pass --domain, before the command).
 Run it as the dashboard's user (it writes the dashboard's database).
 """
 from __future__ import annotations

@@ -836,13 +836,16 @@ and manage tenants (MSPs). Design: [`subsystems/dashboard/TENANCY.md`](subsystem
 4. **The first provider admin.** Provider admins sign in with passkeys only:
 
    ```bash
-   python3 ~/rustdesk-fleet/subsystems/dashboard/scripts/provider_admin.py add you@example.com "Your Name"
+   python3 ~/rustdesk-fleet/subsystems/dashboard/scripts/provider_admin.py --domain rds.example.com add you@example.com "Your Name"
    ```
 
-   It prints a one-time enrollment link (valid 1 hour). Open it on the device
+   `--domain` goes before the command. It's needed because
+   `/etc/rustdesk-fleet/dashboard.env` is readable by root only, so the script
+   can't take `PROVIDER_DOMAIN` from it (setting `PROVIDER_DOMAIN` in the
+   environment works too). It prints a one-time enrollment link (valid 1 hour). Open it on the device
    you'll sign in from and create a passkey. More admins: invite them from the
-   console (Provider admins), or `provider_admin.py enroll-link EMAIL` for a
-   new link, `disable EMAIL`, `list`.
+   console (Provider admins), or `provider_admin.py --domain rds.example.com enroll-link EMAIL`
+   for a new link, `disable EMAIL`, `list`.
 
 5. **Provider email.** Console → Settings: SMTP for provider alerts (to every
    provider admin), console invitations and emails to tenants' admins;
@@ -892,7 +895,7 @@ shows hbbs port **21116** (the rendezvous port; 21115 was the NAT-test port).
    `./install.sh --provider-only --provider-domain rds.example.com --email you@example.com`.
    It restarts the dashboard, which runs the migrations (provider tables,
    tenants status `purged`, relay port blocks, tenant #1's hbbs port fix).
-5. `python3 subsystems/dashboard/scripts/provider_admin.py add you@example.com "Your Name"`,
+5. `python3 subsystems/dashboard/scripts/provider_admin.py --domain rds.example.com add you@example.com "Your Name"`,
    enroll your passkey, sign in to `https://admin.rds.example.com/`, set
    Settings (SMTP, Let's Encrypt email).
 6. Check: tenant #1's site and sign-in work without signing in again,

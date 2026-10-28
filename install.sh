@@ -170,7 +170,7 @@ EOF
   else
     warn "Couldn't set up https://$console/ yet (DNS for *.$PROVIDER_DOMAIN must point here, port 80 open). Re-run with --provider-only."
   fi
-  info "Create the first provider admin:  python3 $DASH_DIR/scripts/provider_admin.py add you@example.com 'Your Name'"
+  info "Create the first provider admin:  python3 $DASH_DIR/scripts/provider_admin.py --domain $PROVIDER_DOMAIN add you@example.com 'Your Name'"
 }
 
 if [[ $PROVIDER_ONLY -eq 1 ]]; then
