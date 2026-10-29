@@ -27,8 +27,11 @@ def render_http_vhost(tmp_path: Path, client_port: int = 0) -> str:
     lines = INSTALL_SH.read_text().splitlines()
     start = next(i for i, l in enumerate(lines) if l.startswith("client_port_block() {"))
     end = next(i for i, l in enumerate(lines) if l == 'case "$TLS_MODE" in')
+    # dash_locations sits earlier (the --provider-only upgrade uses it too).
+    d0 = next(i for i, l in enumerate(lines) if l.startswith("dash_locations() {"))
+    d1 = next(i for i in range(d0, len(lines)) if lines[i] == "}")
     fns = tmp_path / "vhost_fns.sh"
-    fns.write_text("\n".join(lines[start:end]) + "\n")
+    fns.write_text("\n".join(lines[d0:d1 + 1] + lines[start:end]) + "\n")
     vhost = tmp_path / "vhost.conf"
     script = (f'sudo() {{ "$@"; }}; HOST={HOST}; CLIENT_PORT={client_port}; VHOST="{vhost}"; '
               f'source "{fns}"; write_http_vhost')
