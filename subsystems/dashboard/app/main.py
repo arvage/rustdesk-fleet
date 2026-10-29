@@ -26,6 +26,7 @@ from app.routes.email_templates import router as email_templates_router
 from app.routes.timeline import router as timeline_router
 from app.routes.invites import router as invites_router
 from app.routes.export import router as export_router
+from app.routes.support import router as support_router
 from app.deps import run_migrations
 from app.security import TENANT_COOKIE
 from app.tenancy import TenantMiddleware, UnknownTenant
@@ -43,8 +44,13 @@ class _QuietClientReports(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
         # uvicorn.access args: (client_addr, method, full_path, http_version, status_code)
-        if isinstance(args, tuple) and len(args) >= 3 and str(args[2]).split("?", 1)[0] in self._PATHS:
-            return False
+        if isinstance(args, tuple) and len(args) >= 3:
+            path = str(args[2]).split("?", 1)[0]
+            if path in self._PATHS:
+                return False
+            if path == "/support/enter":
+                # The query is a one-time sign-in token: log the path only.
+                record.args = (args[0], args[1], path, *args[3:])
         return True
 
 
@@ -158,3 +164,4 @@ app.include_router(email_templates_router)
 app.include_router(timeline_router)
 app.include_router(invites_router)
 app.include_router(export_router)
+app.include_router(support_router)

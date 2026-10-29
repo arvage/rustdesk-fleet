@@ -24,7 +24,9 @@ SOURCES = sorted([*(ROOT / "dashboard" / "app").rglob("*.py"), *(ROOT / "single-
 SKIP_FILES = {ROOT / "dashboard" / "app" / "tenant_migration.py",
               *(ROOT / "dashboard" / "app" / "console").rglob("*.py")}
 
-TABLES = set(TENANT_TABLES)
+from app.support import SUPPORT_TABLES  # noqa: E402
+
+TABLES = set(TENANT_TABLES) | set(SUPPORT_TABLES)
 _DML = re.compile(r"\b(SELECT|INSERT|UPDATE|DELETE)\b", re.I)
 _TABLE_REF = re.compile(r'\b(?:FROM|JOIN|INTO|UPDATE)\s+"?(\w+)"?', re.I)
 _JOIN = re.compile(r'\bJOIN\s+"?(\w+)"?(?:\s+(?:AS\s+)?\w+)?\s+ON\b(.*?)(?=\bLEFT\b|\bJOIN\b|\bWHERE\b|\bGROUP\b|\bORDER\b|\bLIMIT\b|\)|$)',

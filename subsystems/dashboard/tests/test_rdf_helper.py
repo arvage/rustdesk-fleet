@@ -132,12 +132,14 @@ def test_the_vhost_passes_nginx_t(tmp_path):
     assert H.main(["write-vhost", "acme.rds.example.com"], c) == 0
     # Unprivileged nginx -t can't bind 443: test the same file on a high port.
     v = tmp_path / "vhosts" / "acme.rds.example.com.conf"
-    v.write_text(v.read_text().replace("listen 443 ssl;", "listen 127.0.0.1:18443 ssl;").replace("    listen [::]:443 ssl;\n", ""))
+    v.write_text(v.read_text().replace("listen 443 ssl;", "listen 127.0.0.1:18443 ssl;").replace("    listen [::]:443 ssl;\n", "")
+                 .replace("/var/log/nginx/access.log", str(tmp_path / "access.log")))
     t = tmp_path
     (t / "nginx.conf").write_text(
         f"pid {t}/nginx.pid; error_log {t}/err.log;\nevents {{}}\n"
         f"http {{ access_log off; client_body_temp_path {t}; proxy_temp_path {t}; fastcgi_temp_path {t}; uwsgi_temp_path {t}; "
         f"scgi_temp_path {t}; limit_req_zone $binary_remote_addr zone=rdf_signin:1m rate=30r/m; "
+        f"log_format rdf_noquery '$remote_addr $request_method $uri $status'; "
         f"include {t}/vhosts/*.conf; }}\n")
     r = subprocess.run([nginx, "-t", "-p", str(t), "-c", str(t / "nginx.conf"), "-e", str(t / "err.log")],
                        capture_output=True, text=True)

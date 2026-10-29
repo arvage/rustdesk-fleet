@@ -1,0 +1,11 @@
+{% extends "console/base.html" %}
+{% block title %}Opening {{ slug }} — Provider console{% endblock %}
+{% block page_title %}Opening {{ slug }}'s dashboard{% endblock %}
+{% block content %}
+<div class="section"><div class="card"><div class="card-body">
+  <p style="margin:0 0 10px">Signing you in to {{ slug }}'s dashboard as provider support…</p>
+  <p class="text-sm text-muted" style="margin:0">If nothing happens, <a id="support-go" href="{{ url }}">continue</a>.
+    The link works once, within a minute.</p>
+</div></div></div>
+<script nonce="{{ request.state.csp_nonce }}">location.replace(document.getElementById('support-go').href);</script>
+{% endblock %}

@@ -13,6 +13,7 @@ from app.deps import (
 )
 from app.notifications import fire_notification
 from app.permissions import require_perm, user_can
+from app.support import can_see_passwords
 from app.routes.links import DEFAULT_EXPIRY, EXPIRY_OPTIONS, installers_dir, latest_installers, link_state
 from app.tenancy import Tenant, get_tenant
 from app.templates_config import templates
@@ -74,6 +75,8 @@ async def groups_create(
     require_perm(current_user, "manage_groups")
     from setup_server import create_group, ProvisioningError
     try:
+        if not can_see_passwords(current_user):
+            unattended_password = ""     # support without the tenant's say-so can't set one
         create_group(current_user["tenant_id"], slug, display_name, unattended_password.strip() or None,
                      current_user["email"])
         _set_flash(request, "success", f"Group '{slug}' created.")
@@ -182,9 +185,11 @@ async def group_detail(
             "default_expiry": DEFAULT_EXPIRY,
             "current_user": current_user,
             "has_password": bool(group["unattended_password"]),
-            # Only managers get the password itself (copy badge, edit form).
+            # Only managers get the password itself (copy badge, edit form),
+            # and provider support only if the tenant's grant includes it.
+            "can_see_password": user_can(current_user, "manage_groups") and can_see_passwords(current_user),
             "unattended_password": (group["unattended_password"] or "")
-                                   if user_can(current_user, "manage_groups") else "",
+                                   if user_can(current_user, "manage_groups") and can_see_passwords(current_user) else "",
             "signing_enabled": signing_enabled,
             "brand_app_name": group["brand_app_name"] or "",
             "brand_icon_v": brand_icon_v,
@@ -207,6 +212,9 @@ async def group_edit(
     new_slug = new_slug.strip().lower()
     display_name = display_name.strip()
     unattended_password = unattended_password.strip()
+    if not can_see_passwords(current_user):
+        # Provider support without the tenant's say-so: the password stays as it is.
+        unattended_password, clear_password = "", ""
 
     conn = get_db()
     group = _group(conn, tid, slug, "id, unattended_password")

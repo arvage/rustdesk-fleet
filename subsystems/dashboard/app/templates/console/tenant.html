@@ -62,6 +62,34 @@
 </div></div></div>
 
 <div class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 10px">Support access</h2>
+  {% if grant %}
+  <p style="margin:0 0 6px">Granted by {{ grant.granted_by_email }} until <strong>{{ grant.ends_at | localtime }}</strong>.
+    Unattended passwords: {{ "included" if grant.include_passwords else "not included" }}.</p>
+  {% if grant.note %}<p class="text-sm text-muted" style="margin:0 0 8px">Note: {{ grant.note }}</p>{% endif %}
+  {% if t.status in ("trial", "active") %}
+  <form method="post" action="/tenants/{{ t.id }}/support/open" style="display:flex;gap:8px;align-items:center;margin-top:10px">
+    <input name="reason" required maxlength="300" placeholder="Reason (shown to the tenant)" style="min-width:320px">
+    <button class="btn btn-primary btn-sm">Open dashboard</button>
+  </form>
+  <p class="text-sm text-muted" style="margin:6px 0 0">Signs you in to their dashboard as provider support for up to 4 hours (or until the grant ends). The tenant's admins are emailed and see everything you do in their Logs.</p>
+  {% else %}
+  <p class="text-sm text-muted" style="margin:0">The tenant is {{ t.status }}, so support can't sign in.</p>
+  {% endif %}
+  {% else %}
+  <p class="text-sm text-muted" style="margin:0">Not granted. The tenant's admins grant it on their Support access page.</p>
+  {% endif %}
+  {% if support_sessions %}
+  <table class="help-table" style="margin-top:10px">
+    {% for s in support_sessions %}
+    <tr><td>{{ s.started_at | localtime }} · {{ s.provider_email }}</td>
+        <td>{{ s.reason }} — {% if s.ended_at %}ended {{ s.ended_at | localtime }} ({{ s.end_reason }}){% else %}active{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div></div></div>
+
+<div class="section"><div class="card"><div class="card-body">
   <h2 style="font-size:14px;margin:0 0 10px">Lifecycle</h2>
   {% if t.trial_ends_at and t.status in ("trial", "suspended") %}
   <p style="margin:0 0 10px">{% if t.status == "trial" %}Trial ends{% else %}Trial ended{% endif %}

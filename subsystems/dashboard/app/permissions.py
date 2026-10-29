@@ -35,6 +35,8 @@ CAPABILITIES = [
      "Create, edit and delete user accounts, group access and passkeys", "Administration"),
     ("manage_roles", "Manage roles & permissions",
      "Create and edit permission levels", "Administration"),
+    ("manage_support_access", "Manage support access",
+     "Grant, change and revoke provider support access to this dashboard", "Administration"),
 ]
 CAP_KEYS = [c[0] for c in CAPABILITIES]
 CAP_LABELS = {c[0]: c[1] for c in CAPABILITIES}

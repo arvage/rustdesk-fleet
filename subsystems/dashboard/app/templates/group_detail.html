@@ -4,7 +4,7 @@
 {% block topbar_actions %}
   <span class="badge badge-{{ group.status }}">{{ group.status }}</span>
   {% if has_password %}
-  {% set pw_copyable = 'manage_groups' in (current_user.permissions or []) %}
+  {% set pw_copyable = can_see_password %}
   {% set pw_style = "background:var(--info-bg);color:var(--link);border:1px solid var(--info-border)" %}
   {% if pw_copyable %}
   <button type="button" class="badge" style="{{ pw_style }};font-family:inherit;cursor:pointer"
@@ -920,6 +920,7 @@ document.querySelectorAll('#email-link-form, #create-link-modal form').forEach(f
         <label for="edit-name">Display Name</label>
         <input type="text" id="edit-name" name="display_name" value="{{ group.display_name }}" required style="width:100%">
       </div>
+      {% if can_see_password %}
       <div class="field" style="margin-bottom:6px">
         <label for="edit-pw">Unattended Access Password</label>
         <div style="display:flex;gap:6px;align-items:center">
@@ -950,6 +951,9 @@ document.querySelectorAll('#email-link-form, #create-link-modal form').forEach(f
       </div>
       {% else %}
       <div style="margin-bottom:18px"></div>
+      {% endif %}
+      {% else %}
+      <p class="hint" style="margin:0 0 18px">The unattended password is hidden: this support session wasn't granted access to it.</p>
       {% endif %}
       <input type="hidden" name="clear_password" value="">
       <div style="display:flex;gap:8px;justify-content:flex-end">

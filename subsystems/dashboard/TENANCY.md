@@ -47,6 +47,9 @@ There are no exceptions: child tables such as `webauthn_credentials` and
 | `email_templates` | tenant | direct | `(tenant_id, key)` |
 | `email_design` | tenant | direct; one row per tenant | `tenant_id` (unique; replaces `id = 1`) |
 | `provisioning_events` (audit log) | tenant, **nullable** | direct; `NULL` = a provider event | — |
+| `support_grants` | tenant | direct (phase 1c: the tenant's consent to provider support access) | one active grant per tenant (by `revoked_at IS NULL` and `ends_at`) |
+| `support_tokens` | tenant | direct (single-use console sign-in links, stored hashed; looked up with `tenant_id`) | `token_hash` |
+| `support_sessions` | tenant | direct (`provider_user_id` points at the provider's own table) | — |
 
 Composite foreign keys such as `(tenant_id, group_id) REFERENCES
 client_groups(tenant_id, id)` mean the database itself refuses a row that

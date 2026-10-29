@@ -162,6 +162,10 @@ def tenant_detail(request: Request, tenant_id: int, user: dict = Depends(require
              AND NOT EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = i.tenant_id AND u.email = i.email)
            ORDER BY i.id DESC""", (tenant_id,)).fetchall()
     use = usage(conn, tenant_id)
+    from app import support
+    grant = support.active_grant(conn, tenant_id)
+    support_sessions = conn.execute("SELECT * FROM support_sessions WHERE tenant_id = ? ORDER BY id DESC LIMIT 5",
+                                    (tenant_id,)).fetchall()
     job_rows = conn.execute("SELECT id, kind, status, created_at FROM provider_jobs WHERE tenant_id = ?"
                             " ORDER BY id DESC LIMIT 10", (tenant_id,)).fetchall()
     conn.close()
@@ -172,7 +176,46 @@ def tenant_detail(request: Request, tenant_id: int, user: dict = Depends(require
         "containers": relays.health(tenant) if relay else {}, "domains": domains, "admins": admins,
         "invites": invites, "usage": use, "jobs": job_rows, "now": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         "new_invite": request.session.pop("new_invite_link", None),
+        "grant": grant, "support_sessions": support_sessions,
     })
+
+
+@router.post("/tenants/{tenant_id}/support/open")
+async def tenant_support_open(request: Request, tenant_id: int, reason: str = Form(""),
+                              user: dict = Depends(require_provider)):
+    """Sign this provider admin in to the tenant's dashboard: only while the
+    tenant has granted support access, with a reason, through a single-use
+    token valid for 60 seconds (app/support.py)."""
+    from app import support
+    reason = reason.strip()
+    conn = get_db()
+    try:
+        t = conn.execute("SELECT id, slug, status FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+        if t is None or t["status"] not in ("trial", "active"):
+            _flash(request, "error", "That tenant isn't open, so support can't sign in.")
+            return RedirectResponse(f"/tenants/{tenant_id}" if t else "/", status_code=303)
+        grant = support.active_grant(conn, tenant_id)
+        if grant is None:
+            _flash(request, "error", "The tenant hasn't granted support access.")
+            return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+        if not reason:
+            _flash(request, "error", "Give a reason for opening the tenant's dashboard.")
+            return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+        domain = conn.execute("SELECT hostname FROM tenant_domains WHERE tenant_id = ? ORDER BY is_primary DESC, id"
+                              " LIMIT 1", (tenant_id,)).fetchone()
+        if domain is None:
+            _flash(request, "error", "The tenant has no web domain.")
+            return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+        token = support.issue_token(conn, tenant_id, grant["id"], user["id"], reason)
+        provider_log(conn, "support_token_issued", f"{t['slug']}; reason: {reason[:300]}", user["email"], tenant_id)
+    finally:
+        conn.close()
+    # A page that moves on with script rather than a redirect: the console's
+    # CSP (form-action 'self') would block a form post redirecting elsewhere.
+    url = f"https://{domain['hostname']}/support/enter?token={token}"
+    return templates.TemplateResponse(request, "console/support_open.html",
+                                      {"current_user": user, "url": url, "slug": t["slug"]},
+                                      headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
 @router.post("/tenants/{tenant_id}/plan")

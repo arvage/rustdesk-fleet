@@ -56,6 +56,11 @@ def _set(conn, tenant_id: int, **cols) -> None:
     conn.execute(f"UPDATE tenants SET {sets}, updated_at = datetime('now') WHERE id = ?", (*cols.values(), tenant_id))
     conn.commit()
     invalidate_cache()
+    if cols.get("status") in ("suspended", "cancelled", "purged"):
+        # A closed tenant's support sessions end now (and its grant can't be
+        # used while it's closed: app/support.py checks the tenant).
+        from app import support
+        support.end_all_sessions(tenant_id, f"tenant {cols['status']}")
 
 
 def guard(tenant_id: int, action: str) -> None:

@@ -80,6 +80,8 @@ def test_a_cross_origin_post_with_a_valid_session_changes_nothing(two_tenants):
 # GET routes that change state on purpose, with the reason.
 GET_WRITES_ALLOWED = {
     "/d/{token}/{platform}": "a client downloading an installer: counts the link use and logs the download",
+    "/support/enter": "provider support's way in: spends a single-use 60-second token from the console and starts"
+                      " a support session (a cross-origin POST from the console would be refused)",
 }
 
 CONSOLE_PARAMS = {"tenant_id": 2, "job_id": 1, "token": "no-such-token"}

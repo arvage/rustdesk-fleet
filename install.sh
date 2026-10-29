@@ -167,9 +167,46 @@ PY
   done <<< "$rows"
 }
 
+# http-level log format for /support/enter (dash_locations): the request
+# line without its query string, which holds a one-time sign-in token.
+write_log_format() {
+  sudo tee /etc/nginx/conf.d/rdf-log-format.conf >/dev/null <<'NGX'
+# RustDesk Fleet (install.sh): access-log format without the query string.
+log_format rdf_noquery '$remote_addr - $remote_user [$time_local] "$request_method $uri $server_protocol" '
+                       '$status $body_bytes_sent "$http_referer" "$http_user_agent"';
+NGX
+}
+
+# Vhosts written before phase 1c lack the /support/enter location: add it to
+# the dashboard's own vhost and re-render the helper's (tenants, console).
+refresh_vhosts() {
+  local f block
+  block="$(dash_locations | sed -n '/# Support sign-in links/,/^    }$/p')"
+  for f in /etc/nginx/sites-available/*; do
+    sudo grep -q 'proxy_pass         http://127.0.0.1:8000' "$f" 2>/dev/null || continue
+    sudo grep -q 'location = /support/enter' "$f" && continue
+    printf '%s\n' "$block" | sudo python3 -c '
+import sys
+from pathlib import Path
+p, block = Path(sys.argv[1]), sys.stdin.read()
+text = p.read_text()
+i = text.find("location = /login {")
+if i >= 0:
+    i = text.rfind("\n", 0, i) + 1
+    p.write_text(text[:i] + block + text[i:])
+' "$f"
+    info "Added the /support/enter location to $f."
+  done
+  for f in "$TENANT_VHOST_DIR"/*.conf; do
+    [[ -e "$f" ]] || continue
+    sudo "$HELPER" write-vhost "$(basename "$f" .conf)" >/dev/null || warn "Couldn't re-render $f."
+  done
+}
+
 provider_setup() {
   log "Setting up the provider console pieces"
   install_helper
+  write_log_format
   drop_docker_group
   secure_relay_compose
   [[ $DOCKER_GROUP_DROPPED -eq 1 ]] && sudo systemctl restart rustdesk-dashboard.service
@@ -208,6 +245,7 @@ server {
 }
 include $TENANT_VHOST_DIR/*.conf;
 EOF
+  refresh_vhosts
   reload_nginx_checked
   sudo systemctl restart rustdesk-dashboard.service
   local console="admin.$PROVIDER_DOMAIN"
@@ -498,6 +536,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now rustdesk-backup.timer
 
 # ── 9. nginx + TLS ───────────────────────────────────────────────────────────
+write_log_format   # dash_locations logs /support/enter with it
 log "Configuring nginx"
 VHOST="/etc/nginx/sites-available/rustdesk-fleet"
 
@@ -539,6 +578,18 @@ NGX
 # the port-21114 block may set it.
 dash_locations() {
   cat <<'NGX'
+    # Support sign-in links carry a one-time token in the query: log the path
+    # only (log_format rdf_noquery, conf.d/rdf-log-format.conf).
+    location = /support/enter {
+        access_log /var/log/nginx/access.log rdf_noquery;
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  "";
+        proxy_read_timeout 60s;
+    }
     location = /login {
         limit_req        zone=rdf_signin burst=20 nodelay;
         limit_req_status 429;

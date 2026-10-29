@@ -63,7 +63,7 @@
         </a>
       </div>
       {% set p = (current_user.permissions if current_user else []) or [] %}
-      {% if current_user and ('manage_system' in p or 'manage_users' in p or 'manage_roles' in p or 'manage_notifications' in p) %}
+      {% if current_user and ('manage_system' in p or 'manage_users' in p or 'manage_roles' in p or 'manage_notifications' in p or 'manage_support_access' in p) %}
       <div class="nav-section">
         <div class="nav-label">Admin</div>
         <a href="/admin" class="nav-item {% if request.url.path == '/admin' or (request.url.path.startswith('/admin/') and not request.url.path.startswith('/admin/reports') and not request.url.path.startswith('/admin/emails')) %}active{% endif %}">
@@ -90,14 +90,22 @@
           Email templates
         </a>
         {% endif %}
+        {% if 'manage_support_access' in p %}
+        <a href="/admin/support" class="nav-item {% if request.url.path.startswith('/admin/support') %}active{% endif %}">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><path d="M4.9 4.9l4.3 4.3M14.8 14.8l4.3 4.3M14.8 9.2l4.3-4.3M4.9 19.1l4.3-4.3"/></svg>
+          Support access
+        </a>
+        {% endif %}
       </div>
       {% endif %}
       <div class="nav-section" style="margin-bottom:0">
         <div class="nav-label">Account</div>
+        {% if not (current_user and current_user.is_support) %}
         <a href="/account" class="nav-item {% if request.url.path == '/account' %}active{% endif %}">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
           My Account
         </a>
+        {% endif %}
         <a href="/help" class="nav-item {% if request.url.path == '/help' %}active{% endif %}">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
           Help
@@ -145,6 +153,12 @@
     <div class="content {% block content_class %}{% endblock %}">
       {% set flash = get_flash(request) %}
       {% if flash %}<div class="flash {{ flash.type }}">{{ flash.msg }}</div>{% endif %}
+      {% if current_user and current_user.is_support %}
+      <div class="flash warning support-banner" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="flex:1">Provider support ({{ current_user.support_name }}) is signed in. Access ends at {{ current_user.support_ends_at | localtime }}.</span>
+        <form method="post" action="/support/end" style="margin:0"><button type="submit" class="btn btn-ghost btn-sm">End session</button></form>
+      </div>
+      {% endif %}
       {% set _tenant = tenant_of(request) %}
       {% if current_user and _tenant and _tenant.status == "trial" and request.url.path != "/" %}
       <div class="flash warning">{{ _tenant.display_name }} is on a trial{% if _tenant.trial_ends_at %} that ends on {{ _tenant.trial_ends_at | localtime("%Y-%m-%d") }} ({% set _d = _tenant.trial_ends_at | days_left %}{{ _d }} day{{ "s" if _d != 1 }} left){% endif %}. Contact your provider to subscribe. When the trial ends, this tenant is suspended: sign-in and installer downloads stop until it is reactivated.</div>

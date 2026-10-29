@@ -90,7 +90,8 @@ def run_once() -> None:
     for step in (lambda: record_usage(today - timedelta(days=1)) if _missing(today - timedelta(days=1)) else None,
                  lambda: record_usage(today),
                  refresh_cert_expiry,
-                 _lifecycle):
+                 _lifecycle,
+                 _support_expiry):
         try:
             step()
         except Exception:
@@ -102,6 +103,11 @@ def _missing(day: date) -> bool:
     row = conn.execute("SELECT 1 FROM tenant_usage_daily WHERE day = ? LIMIT 1", (day.isoformat(),)).fetchone()
     conn.close()
     return row is None
+
+
+def _support_expiry() -> None:
+    from app import support
+    support.sweep()
 
 
 def _lifecycle() -> None:

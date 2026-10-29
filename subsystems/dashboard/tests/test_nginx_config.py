@@ -53,7 +53,7 @@ def test_only_the_legacy_listener_sets_the_listener_header(tmp_path):
     conf = render_http_vhost(tmp_path, client_port=1)
     main, legacy = conf.split("listen 21114;")
     # Every proxied dashboard location drops a client-sent copy...
-    assert main.count("proxy_pass") == main.count('proxy_set_header   X-Fleet-Listener  "";') == 4
+    assert main.count("proxy_pass") == main.count('proxy_set_header   X-Fleet-Listener  "";') == 5
     assert "legacy-api" not in main
     # ...and the 21114 block sets its own value, overriding any sent.
     assert legacy.count("proxy_pass") == legacy.count("proxy_set_header   X-Fleet-Listener  legacy-api;") == 1
@@ -101,12 +101,14 @@ def nginx_urls(tmp_path):
     vhost = vhost.replace("listen 80;", f"listen 127.0.0.1:{port};")
     vhost = vhost.replace("listen 21114;", f"listen 127.0.0.1:{legacy_port};").replace("listen [::]:21114;", "")
     vhost = vhost.replace("http://127.0.0.1:8000", f"http://127.0.0.1:{upstream.server_port}")
+    vhost = vhost.replace("/var/log/nginx/access.log", str(tmp_path / "access.log"))
     (tmp_path / "site.conf").write_text(vhost)
     t = tmp_path
     (t / "nginx.conf").write_text(
         f"daemon off; pid {t}/nginx.pid; error_log {t}/error.log;\n"
         "events {}\n"
-        f"http {{ access_log off; client_body_temp_path {t}; proxy_temp_path {t}; "
+        f"http {{ access_log off; log_format rdf_noquery '$request_method $uri $status'; "
+        f"client_body_temp_path {t}; proxy_temp_path {t}; "
         f"fastcgi_temp_path {t}; uwsgi_temp_path {t}; scgi_temp_path {t}; include {t}/site.conf; }}\n"
     )
     proc = subprocess.Popen([nginx, "-e", str(t / "error.log"), "-p", str(t), "-c", str(t / "nginx.conf")],
@@ -190,3 +192,11 @@ def test_legacy_listener_sets_the_header(nginx_urls):
     assert _request(legacy + "/api/audit/conn", "POST", {"Host": "203.0.113.9"}) == (200, "legacy-api")
     # Only the device API is exposed there.
     assert _request(legacy + "/login")[0] == 404
+
+
+def test_support_enter_is_logged_without_its_query(nginx_url, tmp_path):
+    """/support/enter?token=… must reach the app, and nginx logs only the path."""
+    status = _status(nginx_url + "/support/enter?token=SECRET-TOKEN-123")
+    assert status != 404
+    log = (tmp_path / "access.log").read_text()
+    assert "/support/enter" in log and "SECRET-TOKEN-123" not in log

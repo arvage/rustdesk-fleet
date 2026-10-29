@@ -609,5 +609,7 @@ def run_migrations(db_path=None) -> None:
     _tenants.ensure_tables(conn)
     from app.console import maintenance as _maintenance
     _maintenance.ensure_table(conn)
+    from app import support as _support
+    _support.ensure_tables(conn)
 
     conn.close()

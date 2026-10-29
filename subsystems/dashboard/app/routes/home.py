@@ -147,7 +147,8 @@ LANDING_PAGE = Path(__file__).resolve().parents[4] / "site" / "index.html"
 @router.get("/", response_class=HTMLResponse)
 def home(request: Request, tenant: Tenant = Depends(get_tenant)):
     # Unknown hosts never get here (TenantMiddleware answers 404).
-    if _users_exist(tenant) and not request.session.get("user_id") and LANDING_PAGE.is_file():
+    signed_in = request.session.get("user_id") or request.session.get("support_session_id")
+    if _users_exist(tenant) and not signed_in and LANDING_PAGE.is_file():
         return FileResponse(LANDING_PAGE, media_type="text/html")
     current_user = require_auth(request)
     from setup_server import get_server_version

@@ -45,7 +45,8 @@ TENANT_EXTRA_SQL = """
 """
 
 # Everything a tenant owns, children first (for undo and purge).
-OWNED_TABLES = ["tenant_invites", *reversed(list(TENANT_TABLES))]
+OWNED_TABLES = ["support_tokens", "support_sessions", "support_grants", "tenant_invites",
+                *reversed(list(TENANT_TABLES))]
 
 
 class CreateError(jobs.JobFailed):

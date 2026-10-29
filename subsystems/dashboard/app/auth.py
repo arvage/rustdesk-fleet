@@ -107,6 +107,16 @@ def require_auth(request: Request) -> dict:
         if tenant.id == LEGACY_TENANT_ID:
             raise _SetupRedirect()
         raise _AuthRedirect()
+    if request.session.get("support_session_id"):
+        # Provider support, signed in with the tenant's consent (app/support.py).
+        from app import support
+        user = support.session_user(request.session, tenant)
+        if user is None:
+            request.session.clear()
+            raise _AuthRedirect()
+        if support.forbidden_path(request.url.path):
+            raise PermissionError("Provider support can't use this page.")
+        return user
     user_id = request.session.get("user_id")
     if not user_id:
         raise _AuthRedirect()
