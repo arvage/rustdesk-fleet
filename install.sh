@@ -175,9 +175,10 @@ PY
 # the port-21114 block may set it.
 dash_locations() {
   cat <<'NGX'
-    # Support sign-in links carry a one-time token in the query: log the path
-    # only (log_format rdf_noquery, conf.d/rdf-log-format.conf).
-    location = /support/enter {
+    # Support sign-in links and custom-domain sign-in handoffs carry a
+    # one-time token in the query: log the path only (log_format rdf_noquery,
+    # conf.d/rdf-log-format.conf).
+    location ~ ^/(support/enter|login/handoff)$ {
         access_log /var/log/nginx/access.log rdf_noquery;
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host              $host;
@@ -285,25 +286,35 @@ server {
 NGX
 }
 
-# Vhosts written before phase 1c lack the /support/enter location: add it to
-# the dashboard's own vhost and re-render the helper's (tenants, console).
+# Vhosts written before phase 1d lack the location that logs one-time
+# sign-in tokens' paths without the query (/support/enter since phase 1c,
+# /login/handoff since 1d): add it to the dashboard's own vhost, replacing
+# the 1c one, and re-render the helper's (tenants, console, custom domains).
 refresh_vhosts() {
   local f block
   block="$(dash_locations | sed -n '/# Support sign-in links/,/^    }$/p')"
   for f in /etc/nginx/sites-available/*; do
+    case "$f" in *.bak*|*~|*.dpkg-*) continue;; esac      # backups, not live
     sudo grep -q 'proxy_pass         http://127.0.0.1:8000' "$f" 2>/dev/null || continue
-    sudo grep -q 'location = /support/enter' "$f" && continue
-    printf '%s\n' "$block" | sudo python3 -c '
-import sys
+    sudo grep -qF 'location ~ ^/(support/enter|login/handoff)$' "$f" && continue
+    if printf '%s\n' "$block" | sudo python3 -c '
+import re, sys
 from pathlib import Path
 p, block = Path(sys.argv[1]), sys.stdin.read()
 text = p.read_text()
-i = text.find("location = /login {")
-if i >= 0:
+old = re.search(r"    # Support sign-in links carry.*?location = /support/enter \{.*?\n    \}\n", text, re.S)
+if old:
+    text = text[:old.start()] + block + text[old.end():]
+else:
+    i = text.find("location = /login {")
+    if i < 0:
+        sys.exit(1)
     i = text.rfind("\n", 0, i) + 1
-    p.write_text(text[:i] + block + text[i:])
-' "$f"
-    info "Added the /support/enter location to $f."
+    text = text[:i] + block + text[i:]
+p.write_text(text)
+' "$f"; then
+      info "Updated the sign-in token location in $f."
+    fi
   done
   for f in "$TENANT_VHOST_DIR"/*.conf; do
     [[ -e "$f" ]] || continue

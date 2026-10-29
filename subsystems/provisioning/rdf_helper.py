@@ -71,9 +71,10 @@ DOMAIN_RE = re.compile(r"^(?=.{4,200}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a
 
 # The dashboard's nginx locations: the same as install.sh's dash_locations
 # (a test checks they stay identical).
-DASH_LOCATIONS = """    # Support sign-in links carry a one-time token in the query: log the path
-    # only (log_format rdf_noquery, conf.d/rdf-log-format.conf).
-    location = /support/enter {
+DASH_LOCATIONS = """    # Support sign-in links and custom-domain sign-in handoffs carry a
+    # one-time token in the query: log the path only (log_format rdf_noquery,
+    # conf.d/rdf-log-format.conf).
+    location ~ ^/(support/enter|login/handoff)$ {
         access_log /var/log/nginx/access.log rdf_noquery;
         proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host              $host;

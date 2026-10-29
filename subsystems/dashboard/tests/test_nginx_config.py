@@ -203,3 +203,11 @@ def test_support_enter_is_logged_without_its_query(nginx_url, tmp_path):
     assert status != 404
     log = (tmp_path / "access.log").read_text()
     assert "/support/enter" in log and "SECRET-TOKEN-123" not in log
+
+
+def test_handoff_tokens_are_logged_without_the_query(nginx_url, tmp_path):
+    """/login/handoff?token=… (phase 1d) too."""
+    status = _status(nginx_url + "/login/handoff?token=HANDOFF-SECRET-456")
+    assert status != 404
+    log = (tmp_path / "access.log").read_text()
+    assert "/login/handoff" in log and "HANDOFF-SECRET-456" not in log

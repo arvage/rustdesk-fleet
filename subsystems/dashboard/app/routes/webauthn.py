@@ -27,10 +27,14 @@ def _set_flash(request: Request, type_: str, msg: str) -> None:
     request.session["flash"] = {"type": type_, "msg": msg}
 
 
-def _credential_descriptors(conn, tenant_id: int, user_id: int) -> list[PublicKeyCredentialDescriptor]:
+def _credential_descriptors(conn, tenant_id: int, user_id: int, rp_id: str | None = None
+                            ) -> list[PublicKeyCredentialDescriptor]:
+    """The user's passkeys (only those for rp_id, when given; one with no
+    rp_id predates phase 1d and was made on the tenant's own host)."""
     rows = conn.execute(
-        "SELECT credential_id FROM webauthn_credentials WHERE user_id = ? AND tenant_id = ?",
-        (user_id, tenant_id),
+        "SELECT credential_id FROM webauthn_credentials WHERE user_id = ? AND tenant_id = ?"
+        + (" AND (rp_id = ? OR rp_id IS NULL)" if rp_id else ""),
+        (user_id, tenant_id, *([rp_id] if rp_id else [])),
     ).fetchall()
     return [PublicKeyCredentialDescriptor(id=base64url_to_bytes(r["credential_id"])) for r in rows]
 
@@ -95,8 +99,8 @@ async def passkey_register_complete(request: Request, current_user: dict = Depen
     conn = get_db()
     conn.execute(
         "INSERT INTO webauthn_credentials "
-        "(tenant_id, user_id, credential_id, public_key, sign_count, transports, nickname) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "(tenant_id, user_id, credential_id, public_key, sign_count, transports, nickname, rp_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             tid,
             current_user["id"],
@@ -105,6 +109,7 @@ async def passkey_register_complete(request: Request, current_user: dict = Depen
             verification.sign_count,
             json.dumps(transports),
             nickname or "Passkey",
+            get_rp_id(request),
         ),
     )
     log_event(conn, "passkey_registered", nickname or "Passkey", current_user["email"], tenant_id=tid)
@@ -238,13 +243,14 @@ async def login_webauthn_begin(request: Request, tenant: Tenant = Depends(get_te
     if wait:
         return JSONResponse({"error": ratelimit.locked_message(wait)}, status_code=429)
 
+    rp_id = get_rp_id(request)
     conn = get_db()
-    allow = _credential_descriptors(conn, tenant.id, user_id)
+    allow = _credential_descriptors(conn, tenant.id, user_id, rp_id)
     conn.close()
     if not allow:
         return JSONResponse({"error": "No passkeys registered for this account."}, status_code=400)
 
-    options = generate_authentication_options(rp_id=get_rp_id(request), allow_credentials=allow)
+    options = generate_authentication_options(rp_id=rp_id, allow_credentials=allow)
     request.session["webauthn_challenge"] = bytes_to_base64url(options.challenge)
     request.session["webauthn_challenge_purpose"] = "login"
     return Response(content=options_to_json(options), media_type="application/json")
@@ -270,7 +276,7 @@ async def login_webauthn_complete(request: Request, tenant: Tenant = Depends(get
 
     conn = get_db()
     cred_row = conn.execute(
-        "SELECT id, public_key, sign_count FROM webauthn_credentials "
+        "SELECT id, public_key, sign_count, rp_id FROM webauthn_credentials "
         "WHERE credential_id = ? AND user_id = ? AND tenant_id = ?",
         (posted_cred_id, user_id, tenant.id),
     ).fetchone()
@@ -283,7 +289,7 @@ async def login_webauthn_complete(request: Request, tenant: Tenant = Depends(get
         verification = verify_authentication_response(
             credential=body,
             expected_challenge=base64url_to_bytes(challenge),
-            expected_rp_id=get_rp_id(request),
+            expected_rp_id=cred_row["rp_id"] or get_rp_id(request),
             expected_origin=get_origin(request),
             credential_public_key=cred_row["public_key"],
             credential_current_sign_count=cred_row["sign_count"],
@@ -307,4 +313,85 @@ async def login_webauthn_complete(request: Request, tenant: Tenant = Depends(get
     conn.close()
 
     sign_in(request, user)
-    return JSONResponse({"ok": True})
+    from app.auth import after_sign_in
+    return JSONResponse({"ok": True, "next": after_sign_in(request)})
+
+
+# ── Custom domains: related origins and the sign-in handoff ─────────────────
+
+@router.get("/.well-known/webauthn")
+def well_known_webauthn(request: Request, tenant: Tenant = Depends(get_tenant)):
+    """WebAuthn Related Origin Requests: the tenant's served custom domains may
+    use passkeys whose RP ID is this host (its own). Only on that host."""
+    from app import domains
+    conn = get_db()
+    home = domains.home_host(conn, tenant.id)
+    hosts = domains.served_custom_hosts(conn, tenant.id)
+    conn.close()
+    if tenant.hostname != home:
+        return Response(status_code=404)
+    return JSONResponse({"origins": [f"https://{h}" for h in hosts]}, headers={"Cache-Control": "max-age=300"})
+
+
+def _handoff_page(message: str, status: int = 403) -> HTMLResponse:
+    from html import escape
+    return HTMLResponse(
+        "<!doctype html><meta charset='utf-8'><title>Sign in</title>"
+        "<body style='font-family:system-ui,sans-serif;text-align:center;padding:4rem'>"
+        f"<h1>Can't sign in here</h1><p>{escape(message)}</p><p><a href='/login'>Sign in</a></p></body>",
+        status_code=status, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
+@router.get("/login/handoff/start")
+def handoff_start(request: Request, to: str = "", tenant: Tenant = Depends(get_tenant)):
+    """On the tenant's own host: remember which custom domain to go back to,
+    then sign in as usual (after_sign_in() sends the user on)."""
+    from app import domains, handoff
+    conn = get_db()
+    home = domains.home_host(conn, tenant.id)
+    ok = tenant.hostname == home and handoff.valid_target(conn, tenant.id, to)
+    conn.close()
+    if not ok:
+        return RedirectResponse("/login", status_code=303)
+    request.session["handoff_to"] = to
+    if request.session.get("user_id") and not request.session.get("support_session_id"):
+        return RedirectResponse("/login/handoff/go", status_code=303)
+    request.session.pop("user_id", None)
+    return RedirectResponse("/login", status_code=303)
+
+
+@router.get("/login/handoff/go")
+def handoff_go(request: Request, tenant: Tenant = Depends(get_tenant), current_user: dict = Depends(require_auth)):
+    """Signed in on the own host: a single-use, 60-second token for the custom
+    domain, which spends it at /login/handoff. A GET that writes on purpose
+    (the redirect chain is GETs); the token never appears in logs."""
+    from app import handoff
+    to = request.session.pop("handoff_to", "")
+    if not to or current_user.get("is_support"):
+        return RedirectResponse("/", status_code=303)
+    try:
+        token = handoff.issue(tenant.id, current_user["id"], to)
+    except handoff.HandoffError:
+        return RedirectResponse("/", status_code=303)
+    return RedirectResponse(f"https://{to}/login/handoff?token={token}", status_code=303,
+                            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
+@router.get("/login/handoff")
+def handoff_enter(request: Request, token: str = "", tenant: Tenant = Depends(get_tenant)):
+    """On the custom domain: spend the token and sign the user in. The
+    redirect to / takes it out of the address bar and history."""
+    from app import handoff
+    try:
+        user = handoff.spend(tenant.id, tenant.hostname, token)
+    except handoff.HandoffError as e:
+        # A stale or broken link signs nobody out: whoever is signed in stays.
+        return _handoff_page(str(e))
+    request.session.clear()
+    sign_in(request, user)
+    conn = get_db()
+    log_event(conn, "login_handoff", f"passkey sign-in on {tenant.hostname} via {get_rp_id(request)}", user["email"],
+              tenant_id=tenant.id)
+    conn.commit()
+    conn.close()
+    return RedirectResponse("/", status_code=303, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})

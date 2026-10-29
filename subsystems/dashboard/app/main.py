@@ -49,7 +49,7 @@ class _QuietClientReports(logging.Filter):
             path = str(args[2]).split("?", 1)[0]
             if path in self._PATHS:
                 return False
-            if path == "/support/enter":
+            if path in ("/support/enter", "/login/handoff"):
                 # The query is a one-time sign-in token: log the path only.
                 record.args = (args[0], args[1], path, *args[3:])
         return True

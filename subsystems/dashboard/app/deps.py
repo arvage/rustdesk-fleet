@@ -613,5 +613,8 @@ def run_migrations(db_path=None) -> None:
     _support.ensure_tables(conn)
     from app import domains as _domains
     _domains.ensure_columns(conn)
+    from app import handoff as _handoff, webauthn_config as _webauthn
+    _handoff.ensure_table(conn)
+    _webauthn.ensure_rp_column(conn)
 
     conn.close()

@@ -33,7 +33,7 @@ There are no exceptions: child tables such as `webauthn_credentials` and
 | `download_links` | tenant | direct (group via `(tenant_id, group_id)`) | `token` (global: random, looked up together with `tenant_id`) |
 | `users` | tenant | direct | `(tenant_id, email)`; `(tenant_id, id)` |
 | `user_group_access` | tenant | direct (user and group via composite keys) | `(user_id, group_id)` |
-| `webauthn_credentials` | tenant | direct (user via `(tenant_id, user_id)`) | `credential_id` (global: authenticator-generated) |
+| `webauthn_credentials` | tenant | direct (user via `(tenant_id, user_id)`); `rp_id` = the tenant's own host (phase 1d) | `credential_id` (global: authenticator-generated) |
 | `roles` | tenant | direct | `(tenant_id, key)` |
 | `device_info` | tenant | direct | `(tenant_id, rustdesk_id)` |
 | `device_sessions` | tenant | direct | — |
@@ -50,6 +50,7 @@ There are no exceptions: child tables such as `webauthn_credentials` and
 | `support_grants` | tenant | direct (phase 1c: the tenant's consent to provider support access) | one active grant per tenant (by `revoked_at IS NULL` and `ends_at`) |
 | `support_tokens` | tenant | direct (single-use console sign-in links, stored hashed; looked up with `tenant_id`) | `token_hash` |
 | `support_sessions` | tenant | direct (`provider_user_id` points at the provider's own table) | — |
+| `login_handoffs` | tenant | direct (phase 1d: single-use passkey sign-in handoffs to a custom domain, stored hashed; user via `(tenant_id, user_id)`) | `token_hash` |
 
 Composite foreign keys such as `(tenant_id, group_id) REFERENCES
 client_groups(tenant_id, id)` mean the database itself refuses a row that
@@ -163,6 +164,62 @@ never strands devices. Tenant #1 keeps its single name for both (kind
 
 `tenant_domains.kind` `custom` (a tenant's CNAME) is phase 1d;
 `verified_at`, `tls_status` and `cert_expires_at` are already there for it.
+
+## Passkeys on custom domains
+
+A passkey is bound to an RP ID (a domain). **A tenant's RP ID is always its
+own host**: its provider subdomain `<slug>.<PROVIDER_DOMAIN>`, or tenant #1's
+legacy host. That's true whichever host the user is on
+(`webauthn_config.rp_id_for`). Each credential row records the RP ID it was
+made for (`webauthn_credentials.rp_id`; rows from before phase 1d were all
+made on the own host and were backfilled with it). Losing a custom domain
+therefore never loses a passkey, and tenant #1's RP ID (`rds.pacificmit.com`
+on the live box) and existing passkeys don't change.
+
+On a custom domain the browser is asked for a credential whose RP ID is
+another site. That works through **WebAuthn Related Origin Requests**
+(WebAuthn Level 3, "Related Origins Validation"). The own host serves
+`/.well-known/webauthn` (`application/json`), listing the tenant's served
+custom domains (`active` or `dns_broken`, not being removed) as
+`{"origins": ["https://rds.abc.example", …]}`. A browser that supports it
+fetches that file when `navigator.credentials.get()` or `.create()` names an
+RP ID the page's origin doesn't belong to, and allows the call if the origin
+is listed. The server verifies the assertion against the credential's RP ID
+and the custom domain's origin.
+
+What works where (checked October 2026):
+
+| Browser | Related origins | On a custom domain |
+|---|---|---|
+| Chrome, Edge 128+ (desktop and Android; August 2024) | yes | passkey works directly |
+| Safari 18+ (macOS 15, iOS/iPadOS 18; September 2024) | yes | passkey works directly |
+| Firefox 152+ (desktop and Android; Mozilla bug 2010193) | yes | passkey works directly |
+| Older versions of these, and some password-manager extensions that take over WebAuthn | no | handoff |
+
+Chrome honours at most **5 distinct registrable-domain labels** in the
+list (`abc.example` and `abc.co.uk` are both "abc"); entries beyond that are
+ignored. `MAX_CUSTOM_DOMAINS` defaults to 3, well under it.
+
+**The handoff** (`app/handoff.py`) is for browsers without related origins.
+The passkey step on a custom domain asks
+`PublicKeyCredential.getClientCapabilities()` where it exists and hands off
+at once if `relatedOrigins` is false. Otherwise it tries, and a
+`SecurityError` means no support, so it hands off then:
+
+1. The custom domain sends the browser to
+   `https://<own host>/login/handoff/start?to=<custom domain>` (only a served
+   custom domain of the same tenant is accepted).
+2. The user signs in there as usual (or is already signed in).
+3. `/login/handoff/go` issues a token: random, stored hashed, valid 60
+   seconds, single use, bound to that tenant, user and custom domain. It
+   redirects to `https://<custom domain>/login/handoff?token=…`, which spends
+   it, signs the user in and redirects to `/`.
+
+The token's path is logged without its query (the uvicorn access-log filter
+and the nginx `rdf_noquery` location). Password sign-in works on a custom
+domain directly. Adding a passkey on a custom domain in a browser without
+related origins tells the user to add it on the own host, where it then
+works everywhere.
 
 ## How the RustDesk client finds its API server
 

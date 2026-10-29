@@ -71,7 +71,11 @@ def sign_in(request: Request, user) -> None:
     if user["tenant_id"] != tenant.id:
         raise _AuthRedirect()
     ratelimit.clear_email(_email_key(tenant, user["email"]))
+    handoff_to = request.session.get("handoff_to")
     request.session.clear()
+    if handoff_to:
+        # Signing in on the tenant's own host for a custom domain (handoff.py).
+        request.session["handoff_to"] = handoff_to
     request.session["user_id"] = user["id"]
     request.session["session_version"] = user["session_version"]
     conn = get_db()
@@ -305,7 +309,13 @@ async def login_post(
         return RedirectResponse("/login/webauthn", status_code=303)
 
     sign_in(request, user)
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(after_sign_in(request), status_code=303)
+
+
+def after_sign_in(request: Request) -> str:
+    """Where a fresh sign-in goes: back to the custom domain that sent the
+    user here to sign in (handoff.py), else the dashboard."""
+    return "/login/handoff/go" if request.session.get("handoff_to") else "/"
 
 
 @router.post("/logout")

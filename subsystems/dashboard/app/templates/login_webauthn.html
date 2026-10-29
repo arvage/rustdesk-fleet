@@ -52,6 +52,26 @@ function bufToB64url(buf) {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+// On a custom domain, passkeys belong to the account's own host. Browsers
+// without WebAuthn Related Origin Requests can't use them here: sign in on
+// that host instead, which sends you back signed in (app/handoff.py).
+const HANDOFF = {% if passkey_home(request) %}"https://{{ passkey_home(request) }}/login/handoff/start?to={{ tenant_of(request).hostname | urlencode }}"{% else %}""{% endif %};
+
+async function relatedOriginsUnsupported() {
+  try {
+    if (PublicKeyCredential.getClientCapabilities) {
+      const caps = await PublicKeyCredential.getClientCapabilities();
+      return caps.relatedOrigins === false;
+    }
+  } catch (e) {}
+  return false;     // unknown: try, and hand off on a SecurityError
+}
+
+function handOff() {
+  document.getElementById('status-text').textContent = 'Taking you to sign in with your passkey…';
+  window.location.href = HANDOFF;
+}
+
 function showError(msg) {
   const box = document.getElementById('error-box');
   box.textContent = msg;
@@ -67,6 +87,11 @@ async function runCeremony() {
 
   if (!window.PublicKeyCredential) {
     showError('This browser does not support passkeys/security keys.');
+    return;
+  }
+
+  if (HANDOFF && await relatedOriginsUnsupported()) {
+    handOff();
     return;
   }
 
@@ -102,8 +127,12 @@ async function runCeremony() {
     const result = await completeResp.json();
     if (!completeResp.ok || !result.ok) throw new Error(result.error || 'Could not verify passkey.');
 
-    window.location.href = '/';
+    window.location.href = result.next || '/';
   } catch (err) {
+    if (HANDOFF && err.name === 'SecurityError') {
+      handOff();
+      return;
+    }
     showError(err.message || 'Passkey sign-in failed.');
   }
 }

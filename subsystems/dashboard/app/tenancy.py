@@ -332,7 +332,8 @@ class TenantMiddleware:
 
 def _export_allowed(path: str) -> bool:
     """Paths a cancelled tenant can still reach: sign-in and the export page."""
-    return (path in ("/", "/login", "/logout", "/export") or path.startswith(("/login/webauthn", "/static/", "/export/")))
+    return (path in ("/", "/login", "/logout", "/export", "/.well-known/webauthn")
+            or path.startswith(("/login/webauthn", "/login/handoff", "/static/", "/export/")))
 
 
 async def _redirect(send, location: str) -> None:

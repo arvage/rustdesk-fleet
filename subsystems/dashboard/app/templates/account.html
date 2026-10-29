@@ -193,6 +193,15 @@ document.getElementById('add-passkey-btn').addEventListener('click', async () =>
 
     window.location.reload();
   } catch (err) {
+    {% if passkey_home(request) %}
+    if (err.name === 'SecurityError') {
+      // A browser without Related Origin Requests can't add one on a custom domain.
+      errBox.textContent = 'This browser can only add passkeys at https://{{ passkey_home(request) }}/account. ' +
+        'Add it there and it will work here too.';
+      errBox.style.display = 'block';
+      return;
+    }
+    {% endif %}
     errBox.textContent = err.message || 'Passkey registration failed.';
     errBox.style.display = 'block';
   }

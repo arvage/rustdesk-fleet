@@ -82,6 +82,10 @@ GET_WRITES_ALLOWED = {
     "/d/{token}/{platform}": "a client downloading an installer: counts the link use and logs the download",
     "/support/enter": "provider support's way in: spends a single-use 60-second token from the console and starts"
                       " a support session (a cross-origin POST from the console would be refused)",
+    "/login/handoff/go": "custom-domain passkey handoff (phase 1d): on the tenant's own host, signed in, issues the"
+                         " single-use 60-second token for the custom domain; a redirect chain of GETs",
+    "/login/handoff": "custom-domain passkey handoff (phase 1d): spends that token and signs the user in on the"
+                      " custom domain",
 }
 
 CONSOLE_PARAMS = {"tenant_id": 2, "job_id": 1, "token": "no-such-token"}

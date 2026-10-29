@@ -70,3 +70,18 @@ def _days_left(dt_str) -> int:
 
 
 templates.env.filters["days_left"] = _days_left
+
+
+def _passkey_home(request) -> str:
+    """On a tenant's custom domain: its own host, where its passkeys belong
+    (webauthn_config.rp_id_for) and where a browser without Related Origin
+    Requests signs in or adds a passkey. "" on the own host itself."""
+    tenant = _tenant_of(request)
+    if tenant is None or not tenant.hostname:
+        return ""
+    from app.webauthn_config import rp_id_for
+    home = rp_id_for(tenant.id)
+    return home if home and home != tenant.hostname else ""
+
+
+templates.env.globals["passkey_home"] = _passkey_home
