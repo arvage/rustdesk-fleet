@@ -34,6 +34,9 @@ ORIGIN_EXEMPT_PATHS = {
     # RustDesk clients: no cookies, no browser; each report is checked
     # against the tenant's hbbs peer table (routes/client_api.py).
     **{p: "device API" for p in DEVICE_API_PATHS},
+    # Phase 2: Stripe's webhook (public host). No cookies; every request is
+    # checked against its Stripe-Signature with STRIPE_WEBHOOK_SECRET.
+    "/stripe/webhook": "Stripe webhook: signed by Stripe, no cookies",
     # Browsers post CSP violation reports here without cookies; the body is
     # only logged (rate-limited, size-capped), nothing changes.
     "/csp-report": "CSP violation reports",

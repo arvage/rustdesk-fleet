@@ -120,6 +120,7 @@ async def startup():
         logging.getLogger(__name__).warning("Closed %s to other users (mode 750).", paths.DATA_DIR)
     # Provider console jobs (tenant creation, relay operations, purges).
     from app.console import jobs, lifecycle, relays, tenants  # noqa: F401  (registers job handlers)
+    from app import billing  # noqa: F401  (the stripe_event job)
     jobs.start_worker()
     from app.console import maintenance
     maintenance.start()

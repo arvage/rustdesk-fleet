@@ -201,3 +201,18 @@ def status(ref: str):
     if row is None:
         return JSONResponse({"status": "unknown"}, status_code=404)
     return JSONResponse(_state(row))
+
+
+@public_app.post("/stripe/webhook")
+async def stripe_webhook(request: Request):
+    """Stripe's events (app/billing.py): signature-checked, recorded once,
+    processed in the background. 2xx at once; 400 for anything else."""
+    from app import billing
+    if int(request.headers.get("content-length") or 0) > billing.MAX_BODY:
+        return JSONResponse({"error": "too large"}, status_code=400)
+    body = await request.body()
+    try:
+        result = billing.receive(body, request.headers.get("stripe-signature", ""))
+    except billing.WebhookRejected as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"received": True, "result": result})

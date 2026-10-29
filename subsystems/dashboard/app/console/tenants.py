@@ -239,6 +239,9 @@ def undo_creation(tenant_id: int | None, slug: str) -> list[str]:
     shutil.rmtree(tenant_files_dir(tenant_id), ignore_errors=True)
     conn.execute("UPDATE relay_port_blocks SET note = 'unused: tenant creation failed' WHERE tenant_id = ?", (tenant_id,))
     delete_tenant_rows(conn, tenant_id, keep_provider_events=True)
+    for table in ("billing_subscriptions", "billing_customers"):
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (table,)).fetchone():
+            conn.execute(f"DELETE FROM {table} WHERE tenant_id = ?", (tenant_id,))
     # The audit trail of the attempt stays in the provider log, but without
     # pointing at a tenant row that no longer exists.
     conn.execute("UPDATE provisioning_events SET tenant_id = NULL WHERE tenant_id = ?", (tenant_id,))
@@ -252,6 +255,9 @@ def undo_creation(tenant_id: int | None, slug: str) -> list[str]:
 
 def _recover(job) -> None:
     problems = undo_creation(job.tenant_id, job.params["slug"])
+    if job.params.get("signup_id"):
+        from app import billing
+        billing.creation_failed(job.params["signup_id"], "interrupted by a restart")
     if problems:
         raise RuntimeError("; ".join(problems))
 
@@ -262,11 +268,12 @@ def _recover(job) -> None:
 def create_tenant(job) -> None:
     p = job.params
     slug, name, email, admin_name = p["slug"], p["name"].strip(), p["admin_email"].strip().lower(), p.get("admin_name", "")
+    signup_id = p.get("signup_id")      # self-service sign-up (app/billing.py), paid for in Stripe
     host = settings.tenant_web_host(slug)
     try:
         with job.step("Check the slug"):
             conn = get_db()
-            errors = validate(conn, name, slug, email)
+            errors = validate(conn, name, slug, email, signup_id)
             conn.close()
             if errors:
                 raise CreateError(" ".join(errors))
@@ -274,9 +281,14 @@ def create_tenant(job) -> None:
         with job.step("Create the tenant"):
             conn = get_db()
             from app.console.lifecycle import TRIAL_DAYS
-            cur = conn.execute("INSERT INTO tenants (slug, display_name, status, created_by, trial_ends_at)"
-                               " VALUES (?, ?, 'trial', ?, datetime('now', ?))",
-                               (slug, name, job.created_by, f"+{TRIAL_DAYS} days"))
+            if signup_id:
+                # Stripe runs the trial; the sync after creation sets status and dates.
+                cur = conn.execute("INSERT INTO tenants (slug, display_name, status, created_by, billing_mode)"
+                                   " VALUES (?, ?, 'trial', ?, 'stripe')", (slug, name, job.created_by))
+            else:
+                cur = conn.execute("INSERT INTO tenants (slug, display_name, status, created_by, trial_ends_at,"
+                                   " billing_mode) VALUES (?, ?, 'trial', ?, datetime('now', ?), 'manual')",
+                                   (slug, name, job.created_by, f"+{TRIAL_DAYS} days"))
             job.tenant_id = cur.lastrowid
             seed_tenant(conn, job.tenant_id)
             conn.commit()
@@ -320,15 +332,32 @@ def create_tenant(job) -> None:
             except Exception as e:
                 raise CreateError(f"Couldn't build the PDF guides: {e}")
 
-        with job.step(f"Invite {email}") as st:
-            conn = get_db()
-            link = create_invite(conn, job.tenant_id, slug, email, admin_name, job.created_by)
-            conn.close()
-            ok, err = email_invite(email, name, link)
-            st["detail"] = (f"emailed; link: {link}" if ok else f"not emailed ({err}); send them this link: {link}")
+        if signup_id:
+            with job.step(f"Create the admin account {email}"):
+                conn = get_db()
+                su = conn.execute("SELECT * FROM signups WHERE id = ?", (signup_id,)).fetchone()
+                conn.execute("INSERT INTO users (tenant_id, email, display_name, role, password_hash)"
+                             " VALUES (?, ?, ?, 'admin', ?)", (job.tenant_id, email, admin_name, su["password_hash"]))
+                conn.commit()
+                conn.close()
+            with job.step("Link the Stripe subscription"):
+                from app import billing
+                billing.creation_finished(signup_id, job.tenant_id)
+            with job.step(f"Email {email}") as st:
+                from app import billing_emails
+                ok, err = billing_emails.welcome(job.tenant_id, email, admin_name, f"https://{host}/login")
+                st["detail"] = "emailed" if ok else f"not emailed ({err})"
+        else:
+            with job.step(f"Invite {email}") as st:
+                conn = get_db()
+                link = create_invite(conn, job.tenant_id, slug, email, admin_name, job.created_by)
+                conn.close()
+                ok, err = email_invite(email, name, link)
+                st["detail"] = (f"emailed; link: {link}" if ok else f"not emailed ({err}); send them this link: {link}")
 
         conn = get_db()
-        provider_log(conn, "tenant_created", f"{slug} ({name}) admin={email}", job.created_by, job.tenant_id)
+        provider_log(conn, "tenant_created", f"{slug} ({name}) admin={email}" + (" (sign-up)" if signup_id else ""),
+                     job.created_by, job.tenant_id)
         conn.close()
     except BaseException as e:
         job.note("Undo what was done", "running")
@@ -339,4 +368,7 @@ def create_tenant(job) -> None:
         conn = get_db()
         provider_log(conn, "tenant_create_failed", f"{slug}: {str(e)[:300]}", job.created_by)
         conn.close()
+        if signup_id:
+            from app import billing
+            billing.creation_failed(signup_id, str(e) or type(e).__name__)
         raise

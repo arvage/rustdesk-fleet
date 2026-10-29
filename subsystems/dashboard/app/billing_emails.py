@@ -12,3 +12,11 @@ def verify_email(signup_row, link: str) -> tuple[bool, str]:
          "Open the link below within 24 hours to confirm this address and enter payment details for your trial. "
          "If you didn't sign up, ignore this email."],
         link, "Confirm my email"), event="signup_verify_email")
+
+
+def welcome(tenant_id: int, email: str, name: str, login_url: str) -> tuple[bool, str]:
+    return mail.send([email], "Your RustDesk Fleet account is ready", mail.simple_html(
+        "Your account is ready",
+        [f"Hi {name}, your RustDesk Fleet dashboard is ready. Sign in with the email and password you chose.",
+         "Your free trial has started; you can see its end date and manage billing under Admin → Billing."],
+        login_url, "Sign in"), event="signup_welcome_email")
