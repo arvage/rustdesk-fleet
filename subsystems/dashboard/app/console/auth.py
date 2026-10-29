@@ -1,7 +1,7 @@
 """Provider console sign-in: passkeys only, no passwords.
 
 Provider accounts (provider_users) are separate from every tenant's users.
-Sessions use their own cookie (rdf_provider_session, set by the console
+Sessions use their own cookie (__Host-rdf_provider_session, set by the console
 app's SessionMiddleware), hold only the provider user id and
 session_version, and are checked against the database on every request,
 like tenant sessions (phase 0). The WebAuthn RP ID is the console host.

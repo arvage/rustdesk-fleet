@@ -27,6 +27,7 @@ from app.routes.timeline import router as timeline_router
 from app.routes.invites import router as invites_router
 from app.routes.export import router as export_router
 from app.deps import run_migrations
+from app.security import TENANT_COOKIE
 from app.tenancy import TenantMiddleware, UnknownTenant
 
 app = FastAPI(docs_url=None, redoc_url=None)
@@ -84,9 +85,11 @@ def _session_max_age() -> int:
 app.add_middleware(
     SessionMiddleware,
     secret_key=_session_secret(),
-    session_cookie="rdf_session",
+    session_cookie=TENANT_COOKIE,
     max_age=_session_max_age(),
+    path="/",
     https_only=True,
+    # lax, not strict: download and invite links arrive from email.
     same_site="lax",
 )
 

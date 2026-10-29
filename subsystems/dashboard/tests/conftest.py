@@ -155,7 +155,7 @@ def provider_client(email: str = "ops@example.com") -> TestClient:
     uid = row["id"] if row else add_provider_user(conn, email, email.split("@")[0])
     conn.close()
     c = new_client(CONSOLE_HOST)
-    c.cookies.set("rdf_provider_session",
+    c.cookies.set("__Host-rdf_provider_session",
                   forge_session({"provider_user_id": uid, "provider_sv": 1}, "provider-console:" + SESSION_SECRET))
     return c
 

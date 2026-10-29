@@ -61,8 +61,8 @@ def test_enrollment_link_is_one_time_and_signs_in(fake_webauthn):
     uid, token = provider()
     c = enroll(token)
     assert c.get("/admins").status_code == 200
-    assert "rdf_provider_session" in c.cookies
-    assert "rdf_session" not in c.cookies
+    assert "__Host-rdf_provider_session" in c.cookies
+    assert "__Host-rdf_session" not in c.cookies
     assert [tuple(r) for r in db_rows("SELECT provider_user_id, credential_id FROM provider_webauthn_credentials")] == [(uid, "cred0001")]
     # Used: the link is dead now.
     assert new_client(CONSOLE_HOST).get(f"/enroll/{token}").status_code == 404
@@ -107,12 +107,12 @@ def test_tenant_and_provider_sessions_never_mix(fake_webauthn, admin):
     tenant = signed_in(admin)
     # A tenant cookie gives nothing on the console...
     c = new_client(CONSOLE_HOST)
-    c.cookies.set("rdf_session", tenant.cookies.get("rdf_session"))
-    c.cookies.set("rdf_provider_session", tenant.cookies.get("rdf_session"))
+    c.cookies.set("__Host-rdf_session", tenant.cookies.get("__Host-rdf_session"))
+    c.cookies.set("__Host-rdf_provider_session", tenant.cookies.get("__Host-rdf_session"))
     assert c.get("/admins", follow_redirects=False).headers["location"] == "/login"
     # ...and a provider cookie gives nothing on a tenant host.
     t = new_client(HOST)
-    t.cookies.set("rdf_session", console.cookies.get("rdf_provider_session"))
+    t.cookies.set("__Host-rdf_session", console.cookies.get("__Host-rdf_provider_session"))
     assert t.get("/devices", follow_redirects=False).headers["location"] == "/login"
 
 

@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import settings
+from app.security import PROVIDER_COOKIE
 from app.console.auth import ProviderAuthRedirect, router as auth_router
 from app.console.routes import router as console_router
 from app.console.server import router as server_router
@@ -29,10 +30,11 @@ def _secret() -> str:
 console_app.add_middleware(
     SessionMiddleware,
     secret_key=_secret(),
-    session_cookie="rdf_provider_session",
+    session_cookie=PROVIDER_COOKIE,
     max_age=settings.provider_session_max_age(),
+    path="/",
     https_only=True,
-    same_site="lax",
+    same_site="strict",
 )
 @console_app.middleware("http")
 async def _mark(request: Request, call_next):

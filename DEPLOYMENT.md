@@ -909,6 +909,13 @@ Rollback: stop the dashboard, restore `~/fleet-pre-1b.sqlite3`, check out the
 previous commit, remove `/etc/nginx/conf.d/rdf-provider.conf` and
 `/etc/nginx/rdf-tenants/`, reload nginx, start the dashboard.
 
+### Upgrading the live box to phase 1c
+
+- **Everyone is signed out once.** The session cookies are renamed to
+  `__Host-rdf_session` and `__Host-rdf_provider_session` (host-only, so a
+  sibling subdomain can't plant one), so existing sessions are dropped.
+  Tenant users and provider admins sign in again; nothing else changes.
+
 ### End-to-end checklist (after deploy)
 
 1. Console → New tenant: a test tenant (`e2etest`), with your own email as

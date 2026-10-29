@@ -208,9 +208,9 @@ def test_the_same_email_can_be_a_user_of_both_tenants(two_tenants):
 
 def test_a_session_cookie_from_a_is_rejected_on_bs_host(two_tenants):
     a_client = signed_in_at(two_tenants["a"]["admin"], HOST)
-    cookie = a_client.cookies.get("rdf_session")
+    cookie = a_client.cookies.get("__Host-rdf_session")
     b_client = new_client(HOST_B)
-    b_client.cookies.set("rdf_session", cookie)
+    b_client.cookies.set("__Host-rdf_session", cookie)
     r = b_client.get("/devices", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/login"
     # The session was cleared, not just refused once.
@@ -242,9 +242,9 @@ def test_a_pending_passkey_sign_in_doesnt_carry_to_another_tenant(two_tenants):
     conn.close()
     c = new_client(HOST)
     assert c.post("/login", data={"email": u["email"], "password": ""}, follow_redirects=False).headers["location"] == "/login/webauthn"
-    cookie = c.cookies.get("rdf_session")
+    cookie = c.cookies.get("__Host-rdf_session")
     other = new_client(HOST_B)
-    other.cookies.set("rdf_session", cookie)
+    other.cookies.set("__Host-rdf_session", cookie)
     assert other.post("/login/webauthn/begin").status_code == 400
     assert other.get("/login/webauthn", follow_redirects=False).headers["location"] == "/login"
     # At home the passkey step goes ahead, with the home domain as the RP ID.

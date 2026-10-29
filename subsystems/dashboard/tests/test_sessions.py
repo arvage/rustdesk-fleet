@@ -91,12 +91,12 @@ def test_cookie_without_session_version_is_rejected(admin, client):
     # What a cookie issued before this change looks like.
     old = forge_session({"user_id": admin["id"], "user_role": "admin",
                          "user_name": "admin", "user_email": admin["email"]})
-    client.cookies.set("rdf_session", old)
+    client.cookies.set("__Host-rdf_session", old)
     assert get_status(client, SIGNED_IN_PAGE) == SIGNED_OUT
 
 
 def test_cookie_with_current_version_is_accepted(admin, client):
     # Positive control for the forged-cookie test above.
     good = forge_session({"user_id": admin["id"], "session_version": 1})
-    client.cookies.set("rdf_session", good)
+    client.cookies.set("__Host-rdf_session", good)
     assert get_status(client, SIGNED_IN_PAGE)[0] == 200

@@ -111,7 +111,7 @@ dashboard now shows only what any tenant sees.
 `admin.<PROVIDER_DOMAIN>` is served by a separate app (`app/console/`), not
 by tenant routes: `tenant_for_request()` returns `CONSOLE` for that host and
 `TenantMiddleware` hands the request to the console app, which has its own
-routes and session cookie (`rdf_provider_session`, signed with a different
+routes and session cookie (`__Host-rdf_provider_session`, signed with a different
 key). No tenant route answers there and no console route answers on a
 tenant host (`tests/test_console_separation.py`). Optional
 `PROVIDER_ALLOWED_IPS` restricts the console by IP.

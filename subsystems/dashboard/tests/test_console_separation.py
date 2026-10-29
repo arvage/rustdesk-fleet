@@ -31,7 +31,7 @@ def test_no_console_route_answers_on_a_tenant_host(two_tenants):
     for host, user in ((HOST, two_tenants["a"]["admin"]), (HOST_B, two_tenants["b"]["admin"])):
         for client in (new_client(host), signed_in_at(user, host)):
             # Even with a provider cookie in the jar, nothing on a tenant host is the console.
-            client.cookies.set("rdf_provider_session", provider_client().cookies.get("rdf_provider_session"))
+            client.cookies.set("__Host-rdf_provider_session", provider_client().cookies.get("__Host-rdf_provider_session"))
             for method, path in console_routes():
                 r = client.request(method, concrete(path), follow_redirects=False)
                 assert r.headers.get("X-Fleet-App") != "console", (host, method, path)
@@ -42,7 +42,7 @@ def test_no_console_route_answers_on_a_tenant_host(two_tenants):
 def test_no_tenant_route_answers_on_the_console_host(two_tenants):
     console_paths = {p for _, p in console_routes()}
     for client in (new_client(CONSOLE_HOST), provider_client()):
-        client.cookies.set("rdf_session", signed_in_at(two_tenants["a"]["admin"], HOST).cookies.get("rdf_session"))
+        client.cookies.set("__Host-rdf_session", signed_in_at(two_tenants["a"]["admin"], HOST).cookies.get("__Host-rdf_session"))
         for method, path in all_routes():
             r = client.request(method, concrete(path), follow_redirects=False)
             assert r.headers.get("X-Fleet-App") == "console", (method, path)

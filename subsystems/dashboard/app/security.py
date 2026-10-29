@@ -14,6 +14,12 @@ from app.tenancy import DEVICE_API_PATHS
 
 log = logging.getLogger("rdf.security")
 
+# Session cookies. The __Host- prefix makes browsers refuse any copy with a
+# Domain attribute, without Secure or with another Path, so a sibling
+# subdomain can't plant one ("cookie tossing").
+TENANT_COOKIE = "__Host-rdf_session"
+PROVIDER_COOKIE = "__Host-rdf_provider_session"
+
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 # Non-safe requests allowed without a same-origin signal, with the reason.
