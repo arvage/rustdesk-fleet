@@ -22,8 +22,10 @@ backup timer) and is idempotent. Full and manual steps:
 [`DEPLOYMENT.md`](DEPLOYMENT.md). Using the dashboard day to day:
 [`USER_GUIDE.md`](USER_GUIDE.md).
 
-Public product page, served by the dashboard at `/` to signed-out visitors:
-[`site/index.html`](site/index.html) — see [`site/README.md`](site/README.md).
+Public product page with pricing and self-service sign-up, served on the
+public host (`PUBLIC_SITE_HOST`, default `www.<PROVIDER_DOMAIN>`):
+[`subsystems/dashboard/app/templates/public/index.html`](subsystems/dashboard/app/templates/public/index.html)
+(`app/public_site.py`).
 
 PDF guides for your clients (installing the client, getting help during a
 session): [`client-docs/`](client-docs/README.md).
