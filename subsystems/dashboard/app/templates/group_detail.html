@@ -8,7 +8,7 @@
   {% set pw_style = "background:var(--info-bg);color:var(--link);border:1px solid var(--info-border)" %}
   {% if pw_copyable %}
   <button type="button" class="badge" style="{{ pw_style }};font-family:inherit;cursor:pointer"
-          data-pw="{{ unattended_password }}" onclick="copyText(this.dataset.pw, this)"
+          data-copy="{{ unattended_password }}"
           title="Copy the unattended password">
   {% else %}
   <span class="badge" style="{{ pw_style }}">
@@ -24,7 +24,7 @@
   {% endif %}
   <span class="text-muted text-sm">Created {{ group.created_at | localtime("%Y-%m-%d") }}</span>
   {% if 'manage_groups' in (current_user.permissions or []) %}
-  <button onclick="document.getElementById('edit-group-modal').style.display='flex'"
+  <button data-show="edit-group-modal"
           class="btn btn-ghost btn-sm">Edit</button>
   {% endif %}
 {% endblock %}
@@ -54,7 +54,7 @@
   {% if devices %}
   <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
     <div style="position:relative">
-      <button type="button" class="btn btn-ghost btn-sm" onclick="toggleColumnMenu(event)" title="Show/hide columns"
+      <button type="button" class="btn btn-ghost btn-sm" data-onclick="toggleColumnMenu" data-args='[{"$":"event"}]' title="Show/hide columns"
               style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
           <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>
@@ -67,7 +67,7 @@
         <div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;padding:4px 8px 6px">Show columns</div>
         <div id="column-options"></div>
         <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;text-align:right">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="resetColumns()">Reset</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-onclick="resetColumns">Reset</button>
         </div>
       </div>
     </div>
@@ -85,7 +85,7 @@
           <td style="white-space:nowrap">
             <code>{{ d.rustdesk_id | format_rid if d.rustdesk_id else '—' }}</code>
             {% if d.rustdesk_id %}
-            <button class="btn-copy" onclick="copyText('{{ d.rustdesk_id }}', this)" title="Copy ID">
+            <button class="btn-copy" data-copy="{{ d.rustdesk_id }}" title="Copy ID">
               <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
             {% endif %}
@@ -124,7 +124,7 @@
             <td class="text-sm">{% if d.client_version %}{{ d.client_version }}{% if d.client_outdated %} <span style="color:var(--warn-strong)" title="Older than your installers">⚠</span>{% endif %}{% else %}—{% endif %}</td>
             <td style="white-space:nowrap">
               {% if d.rustdesk_id %}
-              <button onclick="openDetailModal('{{ d.rustdesk_id }}')" class="btn btn-ghost btn-sm"
+              <button data-onclick="openDetailModal" data-args='[{{ d.rustdesk_id|tojson }}]' class="btn btn-ghost btn-sm"
                       title="View all details" aria-label="Details">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
                   <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
@@ -146,7 +146,7 @@
                 </svg>
               </a>
               {% if can_devices %}
-              <button onclick="openDeviceModal('{{ d.rustdesk_id }}', '{{ d.label | e }}', '{{ d.group_id or '' }}')"
+              <button data-onclick="openDeviceModal" data-args='[{{ d.rustdesk_id|tojson }},{{ (d.label or '')|tojson }},{{ (d.group_id or '')|string|tojson }}]'
                       class="btn btn-ghost btn-sm">Edit</button>
               {% endif %}
               {% endif %}
@@ -157,7 +157,10 @@
       </table>
     </div>
   </div>
-  <script>
+  <script nonce="{{ request.state.csp_nonce }}">
+function toggleLinkEmailExtra(value) { document.getElementById('link-email-extra').style.display = value ? 'block' : 'none'; }
+function disableEditPw(checked) { document.getElementById('edit-pw').disabled = checked; }
+
   // ── Column show/hide (per-browser, persisted) ──────────────────────────────
   // Columns are addressed by position (nth-child) so hiding survives the live
   // status refresh. The last column (actions) is fixed.
@@ -259,11 +262,11 @@
 
   <!-- Device detail (read-only) modal -->
   <div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px"
-       onclick="if(event.target===this)closeDetailModal()">
+       data-onclick-self="closeDetailModal">
     <div style="background:var(--surface);border-radius:14px;padding:28px 28px 22px;width:100%;max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,.22);max-height:90vh;overflow:auto">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
         <h2 style="font-size:16px;font-weight:700;margin:0">Device Details</h2>
-        <button onclick="closeDetailModal()"
+        <button data-onclick="closeDetailModal"
                 style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1;padding:0">✕</button>
       </div>
       <div style="margin-bottom:16px;padding:9px 12px;background:var(--surface-2);border:1px solid var(--border-lt);border-radius:8px">
@@ -287,11 +290,11 @@
   {% if can_devices %}
   <!-- Device edit modal (same form as the Devices page; returns here) -->
   <div id="device-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:16px"
-       onclick="if(event.target===this)closeDeviceModal()">
+       data-onclick-self="closeDeviceModal">
     <div style="background:var(--surface);border-radius:14px;padding:28px 28px 22px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.22)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
         <h2 style="font-size:16px;font-weight:700;margin:0">Edit Device</h2>
-        <button onclick="closeDeviceModal()"
+        <button data-onclick="closeDeviceModal"
                 style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1;padding:0">✕</button>
       </div>
       <div style="margin-bottom:18px;padding:9px 12px;background:var(--surface-2);border:1px solid var(--border-lt);border-radius:8px">
@@ -322,7 +325,7 @@
           </select>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <button type="button" onclick="confirmDelete()"
+          <button type="button" data-onclick="confirmDelete"
                   class="btn btn-ghost btn-sm" style="color:#EF4444;padding:7px 12px">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
                  style="width:13px;height:13px;display:inline;vertical-align:-2px;margin-right:3px">
@@ -334,7 +337,7 @@
             Delete
           </button>
           <div style="flex:1"></div>
-          <button type="button" onclick="closeDeviceModal()" class="btn btn-ghost">Cancel</button>
+          <button type="button" data-onclick="closeDeviceModal" class="btn btn-ghost">Cancel</button>
           <button type="submit" class="btn btn-primary">Save</button>
         </div>
       </form>
@@ -345,7 +348,7 @@
   </form>
   {% endif %}
 
-  <script>
+  <script nonce="{{ request.state.csp_nonce }}">
   (function () {
     const GROUP_NAME = {{ group.display_name | tojson }};
     const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -648,7 +651,7 @@
               {% endif %}
               {% if can_groups and signing_enabled and i.status in ('built','signed') %}
               <form method="post" action="/groups/{{ group.slug }}/installers/{{ i.id }}/sign" style="margin:0"
-                    onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Signing…'">
+                    data-busy="Signing…">
                 <button type="submit" class="btn btn-ghost btn-sm" title="{{ 'Re-sign this build' if i.status=='signed' else 'Sign this build with Azure Trusted Signing' }}">
                   {{ 'Re-sign' if i.status == 'signed' else 'Sign' }}
                 </button>
@@ -663,7 +666,7 @@
                 </button>
               </form>
               <form method="post" action="/groups/{{ group.slug }}/installers/{{ i.id }}/delete" style="margin:0"
-                    onsubmit="return confirm('Delete this installer build? The file will be removed from disk.')">
+                    data-confirm="Delete this installer build? The file will be removed from disk.">
                 <button type="submit" class="btn btn-ghost btn-sm" title="Delete this build"
                         style="color:#EF4444">
                   <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
@@ -700,7 +703,7 @@
       </div>
       {% endif %}
     </h2>
-    {% if can_groups %}<button onclick="document.getElementById('create-link-modal').style.display='flex'"
+    {% if can_groups %}<button data-show="create-link-modal"
             class="btn btn-primary btn-sm" {% if not shareable_platforms %}disabled title="Build an installer first"{% endif %}>
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
       New Link
@@ -720,7 +723,7 @@
             <td style="white-space:nowrap">
               {% if l.state == 'active' %}
               <code class="text-sm" title="{{ l.url }}">…/d/{{ l.token[:8] }}…</code>
-              <button class="btn-copy" onclick="copyText('{{ l.url }}', this)" title="Copy link">
+              <button class="btn-copy" data-copy="{{ l.url }}" title="Copy link">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 Copy
               </button>
@@ -747,12 +750,12 @@
             <td>
               {% if l.state == 'active' and can_groups %}
               <div style="display:flex;gap:4px;align-items:center">
-              <button type="button" class="btn btn-ghost btn-sm" onclick="openEmailLink({{ l.id }})">
+              <button type="button" class="btn btn-ghost btn-sm" data-onclick="openEmailLink" data-args='[{{ l.id|tojson }}]'>
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>
                 Email
               </button>
               <form method="post" action="/groups/{{ group.slug }}/links/{{ l.id }}/revoke" style="margin:0"
-                    onsubmit="return confirm('Revoke this link? Anyone who has it will no longer be able to download.')">
+                    data-confirm="Revoke this link? Anyone who has it will no longer be able to download.">
                 <button type="submit" class="btn btn-ghost btn-sm" style="color:#EF4444">Revoke</button>
               </form>
               </div>
@@ -784,7 +787,7 @@
   <div style="background:var(--surface);border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <h2 style="font-size:16px;font-weight:700">New Download Link</h2>
-      <button onclick="document.getElementById('create-link-modal').style.display='none'"
+      <button data-hide="create-link-modal"
               style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">✕</button>
     </div>
     <p class="text-muted text-sm" style="margin-bottom:16px">
@@ -827,7 +830,7 @@
       <div class="field" style="margin-bottom:14px;padding-top:14px;border-top:1px solid var(--border)">
         <label for="link-email">Email link to client</label>
         <input type="email" id="link-email" name="email_to" placeholder="client@example.com" style="width:100%"
-               oninput="document.getElementById('link-email-extra').style.display=this.value?'block':'none'">
+               data-oninput="toggleLinkEmailExtra" data-args='[{"$":"value"}]'>
         <span class="hint">Optional — leave blank to just copy the link yourself.</span>
       </div>
       <div id="link-email-extra" style="display:none">
@@ -842,7 +845,7 @@
       </div>
       <div style="margin-bottom:6px"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button type="button" onclick="document.getElementById('create-link-modal').style.display='none'" class="btn btn-ghost">Cancel</button>
+        <button type="button" data-hide="create-link-modal" class="btn btn-ghost">Cancel</button>
         <button type="submit" class="btn btn-primary">Create Link</button>
       </div>
     </form>
@@ -854,7 +857,7 @@
   <div style="background:var(--surface);border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <h2 style="font-size:16px;font-weight:700">Email Download Link</h2>
-      <button onclick="document.getElementById('email-link-modal').style.display='none'"
+      <button data-hide="email-link-modal"
               style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">✕</button>
     </div>
     <p class="text-muted text-sm" style="margin-bottom:16px">
@@ -875,13 +878,13 @@
         <textarea id="email-msg" name="message" rows="3" maxlength="1000" placeholder="Optional personal note" style="width:100%"></textarea>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button type="button" onclick="document.getElementById('email-link-modal').style.display='none'" class="btn btn-ghost">Cancel</button>
+        <button type="button" data-hide="email-link-modal" class="btn btn-ghost">Cancel</button>
         <button type="submit" class="btn btn-primary">Send Email</button>
       </div>
     </form>
   </div>
 </div>
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function openEmailLink(linkId) {
   const form = document.getElementById('email-link-form');
   form.action = '/groups/{{ group.slug }}/links/' + linkId + '/email';
@@ -903,7 +906,7 @@ document.querySelectorAll('#email-link-form, #create-link-modal form').forEach(f
   <div style="background:var(--surface);border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <h2 style="font-size:16px;font-weight:700">Edit Group</h2>
-      <button onclick="document.getElementById('edit-group-modal').style.display='none'"
+      <button data-hide="edit-group-modal"
               style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">✕</button>
     </div>
     <form method="post" action="/groups/{{ group.slug }}/edit" id="edit-group-form">
@@ -925,7 +928,7 @@ document.querySelectorAll('#email-link-form, #create-link-modal form').forEach(f
                  value="{{ unattended_password }}"
                  placeholder="Set a password…"
                  autocomplete="new-password" style="width:100%">
-          <button type="button" onclick="togglePw()" title="Show/hide"
+          <button type="button" data-onclick="togglePw" title="Show/hide"
                   style="background:none;border:1px solid var(--border-md);border-radius:var(--radius-sm);
                          padding:6px 8px;cursor:pointer;color:var(--text-3);flex-shrink:0">
             <svg id="eye-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
@@ -941,7 +944,7 @@ document.querySelectorAll('#email-link-form, #create-link-modal form').forEach(f
       {% if has_password %}
       <div style="margin-bottom:18px">
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text-2)">
-          <input type="checkbox" name="clear_password" value="1" onchange="document.getElementById('edit-pw').disabled=this.checked">
+          <input type="checkbox" name="clear_password" value="1" data-onchange="disableEditPw" data-args='[{"$":"checked"}]'>
           Remove password (disable unattended access)
         </label>
       </div>
@@ -957,15 +960,14 @@ document.querySelectorAll('#email-link-form, #create-link-modal form').forEach(f
         <button type="submit" form="delete-group-form" class="btn btn-ghost" style="color:#EF4444">Delete group</button>
         {% endif %}
         <div style="flex:1"></div>
-        <button type="button" onclick="document.getElementById('edit-group-modal').style.display='none'"
+        <button type="button" data-hide="edit-group-modal"
                 class="btn btn-ghost">Cancel</button>
         <button type="submit" class="btn btn-primary">Save changes</button>
       </div>
     </form>
     <form id="delete-group-form" method="post" action="/groups/{{ group.slug }}/delete" style="display:none"
-          data-msg="Delete the group {{ group.display_name }}?&#10;&#10;Its installers, download links and icon are deleted too. Clients already installed keep working."
-          onsubmit="return confirm(this.dataset.msg)"></form>
-<script>
+          data-confirm="Delete the group {{ group.display_name }}?&#10;&#10;Its installers, download links and icon are deleted too. Clients already installed keep working."></form>
+<script nonce="{{ request.state.csp_nonce }}">
 function togglePw() {
   const f = document.getElementById('edit-pw');
   f.type = f.type === 'password' ? 'text' : 'password';

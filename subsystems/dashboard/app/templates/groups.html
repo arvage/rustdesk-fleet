@@ -3,7 +3,7 @@
 {% block page_title %}Client Groups{% endblock %}
 {% block topbar_actions %}
   {% if 'manage_groups' in (current_user.permissions or []) %}
-  <button onclick="document.getElementById('create-modal').style.display='flex'" class="btn btn-primary btn-sm">
+  <button data-show="create-modal" class="btn btn-primary btn-sm">
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     New Group
   </button>
@@ -14,10 +14,10 @@
 {% if groups %}
 <div style="margin-bottom:14px;display:flex;align-items:center;gap:8px">
   <input id="group-filter" type="search" placeholder="Filter by name…"
-         oninput="filterGroups()"
+         data-oninput="filterGroups"
          class="filter-input" style="width:240px">
   <div style="position:relative">
-    <button type="button" class="btn btn-ghost btn-sm" onclick="toggleColumnMenu(event)" title="Show/hide columns"
+    <button type="button" class="btn btn-ghost btn-sm" data-onclick="toggleColumnMenu" data-args='[{"$":"event"}]' title="Show/hide columns"
             style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
         <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>
@@ -30,7 +30,7 @@
       <div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;padding:4px 8px 6px">Show columns</div>
       <div id="column-options"></div>
       <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;text-align:right">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="resetColumns()">Reset</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-onclick="resetColumns">Reset</button>
       </div>
     </div>
   </div>
@@ -42,19 +42,19 @@
     <table id="groups-table">
       <thead>
         <tr>
-          <th class="sortable" data-col="0" onclick="sortTable(0)">
+          <th class="sortable" data-col="0" data-onclick="sortTable" data-args='[0]'>
             Name <span class="sort-icon">↕</span>
           </th>
-          <th class="sortable" data-col="1" onclick="sortTable(1)">
+          <th class="sortable" data-col="1" data-onclick="sortTable" data-args='[1]'>
             Status <span class="sort-icon">↕</span>
           </th>
-          <th class="sortable" data-col="2" onclick="sortTable(2)">
+          <th class="sortable" data-col="2" data-onclick="sortTable" data-args='[2]'>
             Devices <span class="sort-icon">↕</span>
           </th>
-          <th class="sortable" data-col="3" onclick="sortTable(3)">
+          <th class="sortable" data-col="3" data-onclick="sortTable" data-args='[3]'>
             Online <span class="sort-icon">↕</span>
           </th>
-          <th class="sortable" data-col="4" onclick="sortTable(4)">
+          <th class="sortable" data-col="4" data-onclick="sortTable" data-args='[4]'>
             Created <span class="sort-icon">↕</span>
           </th>
           <th></th>
@@ -100,7 +100,7 @@
   <div style="background:var(--surface);border-radius:14px;padding:28px 28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.2);">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <h2 style="font-size:16px;font-weight:700">Create Client Group</h2>
-      <button onclick="document.getElementById('create-modal').style.display='none'"
+      <button data-hide="create-modal"
               style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">✕</button>
     </div>
     <form method="post" action="/groups">
@@ -121,7 +121,7 @@
                  pattern="[^&quot;'`$\\]*" title="Can't contain &quot; ' ` $ or \ — these break the installers"
                  placeholder="Optional — embedded in installer"
                  autocomplete="new-password" style="width:100%">
-          <button type="button" onclick="var f=document.getElementById('create-pw');f.type=f.type==='password'?'text':'password'"
+          <button type="button" data-onclick="toggleCreatePw"
                   title="Show/hide"
                   style="background:none;border:1px solid var(--border-md);border-radius:var(--radius-sm);
                          padding:6px 8px;cursor:pointer;color:var(--text-3);flex-shrink:0">
@@ -136,14 +136,19 @@
         <div class="hint" style="display:block;margin-top:6px;line-height:1.5">Tip: use 12+ characters mixing upper/lowercase, numbers and symbols (e.g. <code>Blue-Harbor-27!</code>). Avoid <code>"</code> <code>'</code> <code>`</code> <code>$</code> <code>\</code> — they break the installers. Anyone with the installer can read this password, so don't reuse one from another system.</div>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button type="button" onclick="document.getElementById('create-modal').style.display='none'" class="btn btn-ghost">Cancel</button>
+        <button type="button" data-hide="create-modal" class="btn btn-ghost">Cancel</button>
         <button type="submit" class="btn btn-primary">Create Group</button>
       </div>
     </form>
   </div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
+function toggleCreatePw() {
+  const f = document.getElementById('create-pw');
+  f.type = f.type === 'password' ? 'text' : 'password';
+}
+
 let sortCol = -1, sortAsc = true;
 
 // ── Column show/hide (per-browser, persisted) ────────────────────────────────
