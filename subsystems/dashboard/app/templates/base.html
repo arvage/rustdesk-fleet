@@ -4,10 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}RustDesk Fleet{% endblock %}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <script>
+  <script nonce="{{ request.state.csp_nonce }}">
   // Theme: 'light' | 'dark' | 'system' (follows the OS), saved per browser.
   // Runs before the page paints so dark mode doesn't flash white.
   (function () {
@@ -21,7 +19,8 @@
     window.rdfApplyTheme = apply;
   })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=7">
+  <link rel="stylesheet" href="/static/style.css?v=8">
+  <script src="/static/app.js?v=1" defer></script>
 </head>
 <body>
 <div class="shell">
@@ -132,12 +131,12 @@
     </div>
   </aside>
 
-  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
+  <div class="sidebar-backdrop" id="sidebar-backdrop" data-onclick="closeSidebar"></div>
 
   <!-- Main -->
   <div class="main">
     <header class="topbar">
-      <button class="sidebar-toggle" onclick="toggleSidebar()" aria-label="Open menu">
+      <button class="sidebar-toggle" data-onclick="toggleSidebar" aria-label="Open menu">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
       </button>
       <span class="topbar-title">{% block page_title %}{% endblock %}</span>
@@ -155,7 +154,7 @@
   </div>
 
 </div>
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 // Tell the dashboard who clicked Connect / Terminal, so the RustDesk session
 // that follows shows this dashboard user in the session logs.
 document.addEventListener('click', e => {
@@ -185,15 +184,6 @@ function closeSidebar() {
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('sidebar-backdrop').classList.remove('open');
 }
-function copyText(text, btn) {
-  navigator.clipboard.writeText(text).then(() => {
-    const prev = btn.innerHTML;
-    btn.innerHTML = 'Copied!';
-    btn.style.color = '#10B981';
-    setTimeout(() => { btn.innerHTML = prev; btn.style.color = ''; }, 1500);
-  });
-}
-
 // ── Generic column sorting ───────────────────────────────────────────────────
 // Any <table class="js-sort"> gets every column header clickable to sort, except
 // empty headers (e.g. action columns) or ones marked data-nosort. A cell's sort

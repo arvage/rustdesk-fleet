@@ -16,7 +16,7 @@
 {% endblock %}
 {% block script %}
 {% if user %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 document.getElementById('go').addEventListener('click', async () => {
   const box = document.getElementById('error-box');
   box.style.display = 'none';

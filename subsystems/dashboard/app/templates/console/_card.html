@@ -4,9 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Provider console — RustDesk Fleet{% endblock %}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-  <script>
+  <script nonce="{{ request.state.csp_nonce }}">
   // Theme: 'light' | 'dark' | 'system' (follows the OS), saved per browser.
   // Runs before the page paints so dark mode doesn't flash white.
   (function () {
@@ -20,7 +18,8 @@
     window.rdfApplyTheme = apply;
   })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=7">
+  <link rel="stylesheet" href="/static/style.css?v=8">
+  <script src="/static/app.js?v=1" defer></script>
 </head>
 <body>
 <div class="login-shell">
@@ -35,7 +34,7 @@
     {% block card %}{% endblock %}
   </div>
 </div>
-<script src="/static/passkey.js?v=1"></script>
+<script src="/static/passkey.js?v=1" nonce="{{ request.state.csp_nonce }}"></script>
 {% block script %}{% endblock %}
 </body>
 </html>

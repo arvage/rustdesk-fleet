@@ -1,6 +1,8 @@
 """Provider-wide settings from the environment (dashboard.env), and the names
 derived from them. Read on each call, so tests can change them.
 
+CSP_MODE             report-only (default) or enforce: whether the
+                     Content-Security-Policy is only reported or enforced.
 PROVIDER_DOMAIN      e.g. rds.example.com. Tenants live at <slug>.<domain>
                      (web) and <slug>.relay.<domain> (relay); the provider
                      console at admin.<domain>. Empty = no console and no new
@@ -30,6 +32,11 @@ SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 
 def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
+
+
+def csp_mode() -> str:
+    """'enforce' or 'report-only' (the default, and for anything else)."""
+    return "enforce" if _env("CSP_MODE").lower() == "enforce" else "report-only"
 
 
 def provider_domain() -> str:

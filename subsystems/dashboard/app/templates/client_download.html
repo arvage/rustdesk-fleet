@@ -6,8 +6,6 @@
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
   <title>Remote Support — Download</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
   <style>
@@ -35,6 +33,7 @@
     .guide .dl-icon { width: 16px; height: 16px; }
     .foot { font-size: 12px; color: var(--text-3); margin-top: 20px; margin-bottom: 0 !important; }
   </style>
+  <script src="/static/app.js?v=1" defer></script>
 </head>
 <body>
 <div class="login-shell">
@@ -120,7 +119,7 @@
 </div>
 
 {% if installers %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function () {
   const ua = navigator.userAgent || '';
   let os = /Windows/i.test(ua) ? 'windows'

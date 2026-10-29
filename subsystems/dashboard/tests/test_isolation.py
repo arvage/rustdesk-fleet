@@ -77,6 +77,7 @@ def _tenant_rows(tenant_id):
 
 
 def _norm(text: str, values) -> str:
+    text = re.sub(r'nonce="[^"]*"', 'nonce=""', text)    # a fresh CSP nonce per response
     for v in values:
         text = text.replace(str(v), "<ID>")
     return text

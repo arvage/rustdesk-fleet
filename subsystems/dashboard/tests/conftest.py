@@ -75,6 +75,8 @@ def fresh_state():
     import shutil
     shutil.rmtree(DATA_DIR / "tenants", ignore_errors=True)
     ratelimit.reset()
+    from app import security
+    security.reset_report_limits()
     tenancy.invalidate_cache()
     permissions.invalidate_cache()
     auth._setup_done.clear()

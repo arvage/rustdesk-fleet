@@ -6,7 +6,7 @@
     <button id="go" class="btn btn-primary" style="width:100%">Sign in with a passkey</button>
 {% endblock %}
 {% block script %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 document.getElementById('go').addEventListener('click', async () => {
   const box = document.getElementById('error-box');
   box.style.display = 'none';
