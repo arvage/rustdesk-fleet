@@ -68,6 +68,7 @@ admins; every action lands in the provider audit log.
 | `GET /tenants/new`, `POST /tenants` | Create a tenant (a job: slug check, tenant, relay, certificate + vhost, PDF guides, first-admin invite) |
 | `GET /tenants/{id}` | Relay ports and key, domains, admins and pending invites, usage (devices, technicians, session hours this and last month, daily history), plan, lifecycle |
 | `POST /tenants/{id}/plan` · `/activate` · `/extend-trial` · `/suspend` · `/reactivate` · `/cancel` · `/extend-grace` · `/purge`, `POST /tenants/{id}/invites/{invite}/resend` | Plan and lifecycle actions (cancel and purge need the slug typed; not for tenant #1) |
+| `POST /tenants/{id}/support/open` | Open the tenant's dashboard as provider support (needs an active grant and a reason) |
 | `GET /relays`, `POST /relays/{tenant}/start\|stop\|restart\|upgrade`, `POST /relays/upgrade-all` | Relay health, versions and operations (upgrade-all goes one relay at a time, stopping at the first failure) |
 | `GET /jobs`, `GET /jobs/{id}` (+ `.json`) | Background jobs and their live progress |
 | `GET /audit` | Provider audit log, filterable by event, tenant, admin, text |
@@ -117,6 +118,36 @@ provider console sends; `/setup` is 404 there. The setup page creates the first 
   tenant's id; `tests/test_sql_scoping.py` scans the source for SQL on a
   tenant-owned table without `tenant_id`.
 - **Backups** pass the gpg passphrase on stdin, never on the command line.
+- **Cross-origin requests** (`app/security.py`). Every tenant subdomain and
+  the console are the same *site* to a browser, so SameSite cookies don't
+  stop one from posting to another. `SecurityMiddleware` (outermost, so it
+  covers the console too) refuses any non-GET request unless
+  `Sec-Fetch-Site` is `same-origin` or, without it, `Origin` is
+  `https://<Host>`; neither header is refused too. Only the device API
+  paths and `/csp-report` are exempt (`ORIGIN_EXEMPT_PATHS`). Refusals are
+  a 403 and a warning in the log. GET routes never change state
+  (`tests/test_origin_checks.py` walks them all); the one exception is
+  `/support/enter`.
+- **Cookies** are `__Host-rdf_session` (tenant, `SameSite=Lax` because
+  download and invite links arrive from email) and
+  `__Host-rdf_provider_session` (console, `SameSite=Strict`): `Secure`,
+  `Path=/`, no `Domain`, so a sibling subdomain can't plant one.
+- **Headers** on every response but the device API's: HSTS (one year, no
+  `includeSubDomains`), `nosniff`, `Referrer-Policy: same-origin`,
+  `X-Frame-Options: DENY`, a Permissions-Policy (camera, microphone,
+  geolocation, payment and USB off; passkeys allowed) and
+  `Cross-Origin-Opener-Policy: same-origin`. A route's own value wins.
+- **Content-Security-Policy** on HTML: scripts only from this origin or
+  with the per-response nonce (`request.state.csp_nonce`), no plugins, no
+  `<base>`, forms only to this origin, no framing, `style-src
+  'unsafe-inline'` for now (templates use `style=` heavily: a later
+  cleanup). There are no inline event handlers: `static/app.js` wires
+  `data-onclick`, `data-confirm`, `data-copy` and friends (documented at
+  its top). `CSP_MODE` is `report-only` (default) or `enforce`; reports go
+  to `/csp-report` (logged, 8 KB cap, 30 a minute per IP). Inter is served
+  from `static/fonts`, not a CDN.
+- **Docker** is only reachable through `rdf-helper` (the dashboard user is
+  not in the `docker` group); see DEPLOYMENT.md.
 
 ### Output escaping
 
@@ -171,6 +202,41 @@ built in JavaScript put the RustDesk id into markup unescaped.
 Tests: `python3 -m pip install -r requirements-dev.txt`, then
 `python3 -m pytest subsystems/dashboard/tests` from the repo root.
 
+## Support access
+
+Provider support staff can open a tenant's dashboard only with the
+tenant's consent and only until the time the tenant chose (`app/support.py`,
+`routes/support.py`; tables `support_grants`, `support_tokens`,
+`support_sessions`).
+
+- **Granting** (Admin → Support access; the `manage_support_access`
+  capability, which only the built-in admin role has by default): for 4
+  hours to 12 months, or until a chosen time up to 12 months away, with an
+  optional note, and optionally letting support see unattended-access
+  passwords (off by default). One active grant; granting again changes it.
+  **Revoke** ends it and every support session at once. The tenant's admins
+  are emailed when access is granted, changed, revoked or runs out, and when
+  a support session starts.
+- **Opening** (console, tenant page): with a grant active, **Open
+  dashboard** asks for a reason and issues a single-use token (stored
+  hashed, valid 60 seconds, bound to the provider user, tenant and grant).
+  `GET /support/enter?token=…` on the tenant's domain spends it, starts a
+  support session in the tenant's cookie (no users row) and redirects to
+  `/`. The token is kept out of the uvicorn and nginx access logs.
+- **A support session** lasts until the grant ends or 4 hours
+  (`SUPPORT_SESSION_MAX_AGE`), whichever is first, and every request checks
+  the grant, the session, the cap and the provider user (enabled, same
+  session version). It can do what an admin can except manage users, roles
+  and invites, change support access, use its own account page or the
+  export page, and see or change unattended passwords unless the grant
+  allows it. A banner shows who is signed in and until when, with **End
+  session**. Audit entries and Connect clicks are attributed to
+  `support:<provider email>`; session start and end are in the tenant's
+  Logs and the provider audit log.
+- **Lifecycle:** suspending, cancelling or purging a tenant ends its
+  support sessions, and a closed tenant's grant can't be used; purging
+  removes the grants, tokens and sessions.
+
 ## Routes
 
 Staff pages (all require login):
@@ -193,6 +259,9 @@ Staff pages (all require login):
 | `GET /download/{filename}` | Staff installer download (path-traversal safe, DB-gated) |
 | `GET /users` + `POST /users/...` | User management: assign roles, group access, password reset, passkeys, MFA reminders (`manage_users`) |
 | `GET /admin` | Admin landing: tool cards + fleet stats (any admin-area capability) |
+| `GET /admin/support`, `POST /admin/support/grant` · `/revoke` | Support access: status, history, grant, change, revoke (`manage_support_access`) |
+| `GET /support/enter?token=…`, `POST /support/end` | Provider support's way in (single-use token from the console) and End session |
+| `POST /csp-report` | CSP violation reports from browsers: logged, size-capped, rate-limited |
 | `GET /admin/reports`, `GET /admin/reports/{key}`, `GET /admin/reports/{key}/{section}.csv` | Reports catalogue, one report (`?group=<slug>\|__none__&days=7\|30\|90\|180\|365`), and any of its tables as CSV (any admin-area capability) |
 | `GET /admin/emails`, `GET/POST /admin/emails/{key}`, `GET/POST /admin/emails/design`, `GET /admin/emails/logo.png` | Email templates: list, per-email editor (save / reset), shared design + logo upload (`manage_notifications`) |
 | `POST /admin/emails/preview`, `POST /admin/emails/{key}/test` | Render an unsaved draft with sample data (JSON → HTML); send the saved version to the signed-in user |

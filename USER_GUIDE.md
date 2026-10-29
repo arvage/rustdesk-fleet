@@ -480,6 +480,35 @@ in this browser, so set it once on each browser or device you use.
 
 ---
 
+## 14. Support access
+
+Your provider's support staff can sign in to your dashboard to help you, but
+only when you allow it and only for as long as you choose. Admins manage this
+under **Admin → Support access**.
+
+- **Grant access:** pick how long (4 hours, 1, 3, 7, 30 or 90 days, 6 or 12
+  months, or until a date and time up to 12 months away), add an optional
+  note such as "ticket 1234, VPN issue", and click **Grant access**. Your
+  admins get an email.
+- **Extend or shorten it:** change the period or note on the same page and
+  click **Save changes**. There is only ever one grant.
+- **Revoke it:** **Revoke now** ends access at once, including any support
+  session in progress.
+- **Passwords:** support never sees or changes your client groups'
+  unattended-access passwords unless you tick **Allow support to see
+  unattended-access passwords** on the grant.
+
+What support can do: anything an administrator can, for at most 4 hours per
+session and never past your grant: devices, client groups, installers,
+download links, reports, notifications and email templates. What support
+can't do: manage users or roles, change support access, use the data export
+page, or (without your say-so) see passwords. While they're signed in they
+see a banner, and you can see them on the Support access page.
+
+Everything support does is in **Logs**, marked `support:<their email>`, and
+your admins are emailed when a support session starts. The Support access
+page lists every grant and session.
+
 ## Quick task index
 
 | I want to… | Go to |

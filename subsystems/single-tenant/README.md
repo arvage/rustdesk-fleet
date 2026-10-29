@@ -88,8 +88,9 @@ HpZma9OkRoGQEdD4gXC8kXkgMJTdaf8ZVj5KzacLfFM=
 
 **Ownership**: `/opt/rustdesk-fleet` is ubuntu-owned (created before
 running the script to avoid root ownership from `sudo`). The `ubuntu` user
-is in the `docker` group; use `sg docker -c "python3 setup_server.py ..."`
-until the next login, then plain `python3 setup_server.py ...` works.
+is *not* in the `docker` group (phase 1c): `setup_server.py init` asks the
+root-owned `rdf-helper` to render tenant #1's compose file and run docker
+compose on it, so install.sh must have installed the helper first.
 
 **ufw**: inactive on this box — no OS firewall to configure. Only the
 Lightsail networking tab needs the ports opened (see Firewall section below).

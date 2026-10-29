@@ -79,6 +79,16 @@ Tenancy (phase 1a, built: see
 - **The current deployment is tenant #1**, with its relay, keys, devices,
   users and URLs exactly as they were.
 
+Support access (phase 1c, built: see
+[`subsystems/dashboard/README.md`](subsystems/dashboard/README.md), "Support access"):
+
+- **Consent-based and time-limited.** Provider staff can open a tenant's
+  dashboard only while that tenant has granted support access, for a period
+  the tenant chooses (up to 12 months), with a reason, for at most 4 hours
+  per session. The tenant can revoke at any time, is emailed about every
+  grant and session, and sees everything support does in its own audit log.
+  Unattended-access passwords stay hidden unless the grant includes them.
+
 Provider console (phase 1b, built: see [`DEPLOYMENT.md`](DEPLOYMENT.md) §11):
 
 - **A provider console** at `admin.<PROVIDER_DOMAIN>`, separate from every
@@ -95,7 +105,7 @@ Provider console (phase 1b, built: see [`DEPLOYMENT.md`](DEPLOYMENT.md) §11):
   for the tenant's admins, reactivation possible), then purged. Usage is
   recorded daily for billing later.
 - **Support access** to a tenant's dashboard needs the tenant's consent and
-  is time-limited: phase 1c.
+  is time-limited: built in phase 1c (above).
 - **Custom domains** (a tenant's CNAME, verification, per-domain
   certificates): phase 1d.
 

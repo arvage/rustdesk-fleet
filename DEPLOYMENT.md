@@ -50,7 +50,8 @@ this document explains what the script does, for manual or custom installs.
   sudo apt update && sudo apt install -y docker.io docker-compose-v2 \
       python3 python3-pip python3-pil nsis nginx certbot python3-certbot-nginx
   sudo systemctl enable --now docker
-  sudo usermod -aG docker $USER   # re-login (or `sg docker -c ...`) to take effect
+  # The dashboard user stays OUT of the docker group: install.sh installs
+  # rdf-helper (root) and the dashboard runs relays only through it.
   ```
 - Python packages (installed system-wide, not a venv — Debian/Ubuntu's
   PEP 668 guard means you'll likely need `--break-system-packages`):
@@ -911,10 +912,56 @@ previous commit, remove `/etc/nginx/conf.d/rdf-provider.conf` and
 
 ### Upgrading the live box to phase 1c
 
+What changes, and what to expect:
+
 - **Everyone is signed out once.** The session cookies are renamed to
   `__Host-rdf_session` and `__Host-rdf_provider_session` (host-only, so a
   sibling subdomain can't plant one), so existing sessions are dropped.
   Tenant users and provider admins sign in again; nothing else changes.
+- **The dashboard user leaves the `docker` group.** Every Docker operation
+  now goes through `rdf-helper`: `relay-write-compose ID VERSION`,
+  `relay-up`, `relay-start`, `relay-stop`, `relay-restart`, `relay-down`
+  (each takes a tenant id) and `relay-status`. The helper renders each
+  compose file itself from values it validates in the database, writes it
+  root-owned, checks it byte for byte before every command and gives docker
+  that checked text on stdin. Tenant #1's file renders exactly as it is
+  today and keeps its `rustdesk-fleet` project, so its containers are not
+  recreated. `install.sh` removes the user from the group (`gpasswd -d`)
+  and restarts the dashboard.
+- **Content-Security-Policy, report-only at first.** `CSP_MODE` in
+  `dashboard.env` is `report-only` (the default) or `enforce`. Browsers
+  report what the policy would block to `/csp-report`, which logs it:
+  `journalctl -u rustdesk-dashboard | grep 'CSP violation'`. After a few
+  days with no reports from real use, add `CSP_MODE=enforce` to
+  `/etc/rustdesk-fleet/dashboard.env` and `sudo systemctl restart
+  rustdesk-dashboard`. To go back, remove the line and restart.
+- **Cross-origin form posts are refused** (403, logged as `Refused
+  cross-origin`), and every response gets HSTS, nosniff, `X-Frame-Options:
+  DENY`, `Referrer-Policy: same-origin`, a Permissions-Policy and
+  `Cross-Origin-Opener-Policy`.
+- **nginx:** a `location = /support/enter` in every dashboard vhost logs
+  that path without its query (it carries a one-time sign-in token), with
+  the `rdf_noquery` format in `/etc/nginx/conf.d/rdf-log-format.conf`.
+  `install.sh --provider-only` adds it to existing vhosts.
+
+Steps:
+
+1. Back up: `sudo python3 ~/rustdesk-fleet/subsystems/single-tenant/backup.py run`,
+   and keep a plain copy of the database (the `sqlite3` online-backup
+   one-liner, to `~/fleet-pre-1c.sqlite3`).
+2. Note tenant #1's container start times:
+   `sudo docker inspect hbbs hbbr --format '{{.Name}} {{.State.StartedAt}}'`.
+3. Merge the branch in `~/rustdesk-fleet`, then
+   `./install.sh --provider-only --provider-domain rds.example.com`. It
+   installs the new helper, re-renders the relay compose files root-owned,
+   removes the docker group membership, adds the nginx location (`nginx -t`,
+   reload, no new `[emerg]`), and restarts the dashboard.
+4. Check: `id ubuntu` no longer lists `docker`; `ls -l
+   /opt/rustdesk-fleet/docker-compose.yml` is `root root`; the container
+   start times from step 2 are unchanged; `sudo nginx -t` passes; the
+   dashboard log has no tracebacks; devices still heartbeat; sign in with a
+   passkey on tenant #1 and on the console; the console's Relays and Host
+   health pages show both containers running.
 
 ### End-to-end checklist (after deploy)
 
