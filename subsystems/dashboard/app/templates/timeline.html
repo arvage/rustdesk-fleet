@@ -37,12 +37,12 @@ tr[data-sid] { cursor: pointer; }
     <a class="tl-chip {% if view == 'user' %}on{% endif %}" href="{{ link(v='user') }}">By user</a>
     <span style="width:8px"></span>
     <select class="tl-filter" aria-label="Client group"
-            onchange="location='{{ link(g='') }}'.replace('group=', 'group=' + encodeURIComponent(this.value))">
+            data-onchange="goWithFilter" data-args='[{{ link(g='')|tojson }},"group",{"$":"value"}]'>
       <option value="">All client groups</option>
       {% for g in groups %}<option value="{{ g.slug }}" {% if g.slug == group %}selected{% endif %}>{{ g.display_name }}</option>{% endfor %}
     </select>
     <select class="tl-filter" aria-label="User"
-            onchange="location='{{ link(u='') }}'.replace('user=', 'user=' + encodeURIComponent(this.value))">
+            data-onchange="goWithFilter" data-args='[{{ link(u='')|tojson }},"user",{"$":"value"}]'>
       <option value="">Everyone</option>
       {% for p in people %}<option value="{{ p }}" {% if p == user %}selected{% endif %}>{{ p }}</option>{% endfor %}
       {% if user and user not in people %}<option value="{{ user }}" selected>{{ user }}</option>{% endif %}
@@ -58,10 +58,10 @@ tr[data-sid] { cursor: pointer; }
       <input type="hidden" name="group" value="{{ group }}">
       <input type="hidden" name="user" value="{{ user }}">
       <input type="date" name="from" value="{{ d_from }}" max="{{ today }}" class="tl-filter {% if rng == 'custom' %}on{% endif %}" aria-label="From date" required
-             onchange="if (this.form.to.value < this.value) this.form.to.value = this.value">
+             data-onchange="keepToAfterFrom">
       <span class="text-muted text-sm">to</span>
       <input type="date" name="to" value="{{ d_to }}" max="{{ today }}" class="tl-filter {% if rng == 'custom' %}on{% endif %}" aria-label="To date" required
-             onchange="if (this.form.from.value > this.value) this.form.from.value = this.value">
+             data-onchange="keepFromBeforeTo">
       <button type="submit" class="btn btn-ghost btn-sm">Show</button>
     </form>
   </div>
@@ -171,7 +171,15 @@ tr[data-sid] { cursor: pointer; }
 
 <div id="tl-tip"></div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
+// The filter selects: the current link with this filter's value filled in.
+function goWithFilter(base, key, value) {
+  location = base.replace(key + '=', key + '=' + encodeURIComponent(value));
+}
+// Keep the custom date window the right way round.
+function keepToAfterFrom() { if (this.form.to.value < this.value) this.form.to.value = this.value; }
+function keepFromBeforeTo() { if (this.form.from.value > this.value) this.form.from.value = this.value; }
+
 (function () {
   const fmt = (t, withDate) => new Date(t * 1000).toLocaleString('sv-SE', { timeZone: 'America/Los_Angeles' })
     .slice(withDate ? 0 : 11, 16);

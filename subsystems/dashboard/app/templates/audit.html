@@ -65,7 +65,7 @@
     {% if active_count %}&nbsp;·&nbsp; <strong style="color:var(--success)">{{ active_count }} active now</strong>{% endif %}
   </span>
   <input id="log-filter" type="search" placeholder="Filter by device, group…"
-         oninput="filterLogRows()" class="filter-input" style="width:260px">
+         data-oninput="filterLogRows" class="filter-input" style="width:260px">
 </div>
 
 {% if sessions %}
@@ -120,7 +120,7 @@
     Alert emails sent by the server &nbsp;·&nbsp; showing up to 200 most recent
   </span>
   <input id="log-filter" type="search" placeholder="Filter by event, recipient, error…"
-         oninput="filterLogRows()" class="filter-input" style="width:260px">
+         data-oninput="filterLogRows" class="filter-input" style="width:260px">
 </div>
 
 {% if deliveries %}
@@ -166,14 +166,14 @@
            title="Devices coming online and going offline">
       <span class="log-toggle">
         <input type="checkbox" {% if hide_status %}checked{% endif %}
-               onchange="location.href='/audit?cat={{ cat }}' + (this.checked ? '' : '&onoff=1')">
+               data-onchange="toggleOnOff" data-args='[{{ cat|tojson }},{"$":"checked"}]'>
         <span></span>
       </span>
       Hide online/offline
     </label>
     {% endif %}
     <input id="log-filter" type="search" placeholder="Filter by user, event, detail…"
-           oninput="filterLogRows()" class="filter-input" style="width:260px">
+           data-oninput="filterLogRows" class="filter-input" style="width:260px">
   </div>
 </div>
 
@@ -206,7 +206,9 @@
 
 {% endif %}
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
+function toggleOnOff(cat, checked) { location.href = '/audit?cat=' + cat + (checked ? '' : '&onoff=1'); }
+
 function filterLogRows() {
   const q = (document.getElementById('log-filter')?.value || '').toLowerCase();
   const tbody = document.getElementById('log-tbody');

@@ -80,7 +80,7 @@
             <div class="kv-val text-muted" style="display:flex;align-items:center;gap:10px">
               <span>Added {{ p.created_at | localtime }}{% if p.last_used_at %}, last used {{ p.last_used_at | localtime }}{% endif %}</span>
               <form method="post" action="/account/passkeys/{{ p.id }}/delete"
-                    onsubmit="return confirm('Remove passkey \'{{ p.nickname or "Passkey" }}\'?')">
+                    data-confirm="Remove passkey '{{ p.nickname or "Passkey" }}'?">
                 <button type="submit" class="btn btn-ghost btn-sm">Remove</button>
               </form>
             </div>
@@ -122,7 +122,7 @@
           computer or think someone else has access to your account.
         </p>
         <form method="post" action="/account/sign-out-everywhere" style="margin:0"
-              onsubmit="return confirm('Sign out on every device, including this one?')">
+              data-confirm="Sign out on every device, including this one?">
           <button type="submit" class="btn btn-ghost btn-sm">Sign out everywhere</button>
         </form>
       </div>
@@ -131,7 +131,7 @@
 
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 function b64urlToBuf(s) {
   s = s.replace(/-/g, '+').replace(/_/g, '/');
   while (s.length % 4) s += '=';

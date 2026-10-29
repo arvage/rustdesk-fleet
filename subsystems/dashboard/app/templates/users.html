@@ -2,7 +2,7 @@
 {% block title %}Users — RustDesk Fleet{% endblock %}
 {% block page_title %}Users{% endblock %}
 {% block topbar_actions %}
-  <button onclick="openCreateModal()" class="btn btn-primary btn-sm">
+  <button data-onclick="openCreateModal" class="btn btn-primary btn-sm">
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     Add User
   </button>
@@ -88,9 +88,9 @@
 </style>
 
 {# Serialise all groups and access maps to JSON for JS — done in Python to avoid Jinja2 brace collision #}
-<script id="groups-json" type="application/json">{{ groups_json | safe }}</script>
-<script id="access-json" type="application/json">{{ access_json | safe }}</script>
-<script id="passkeys-json" type="application/json">{{ passkeys_json | safe }}</script>
+<script id="groups-json" type="application/json" nonce="{{ request.state.csp_nonce }}">{{ groups_json | safe }}</script>
+<script id="access-json" type="application/json" nonce="{{ request.state.csp_nonce }}">{{ access_json | safe }}</script>
+<script id="passkeys-json" type="application/json" nonce="{{ request.state.csp_nonce }}">{{ passkeys_json | safe }}</script>
 
 {# One-time new-user password reveal #}
 {% set new_pw = get_new_user_pw(request) %}
@@ -123,7 +123,7 @@
               <span class="badge badge-active">{{ u.role }}</span>
             {% else %}
             <form method="post" action="/users/{{ u.id }}/role" style="margin:0;display:inline">
-              <select name="role" onchange="this.form.submit()"
+              <select name="role" data-submit-on-change
                       style="padding:3px 8px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:12px;background:var(--surface);cursor:pointer">
                 {% for r in roles %}
                 <option value="{{ r.key }}" {% if u.role == r.key %}selected{% endif %}>{{ r.name }}</option>
@@ -142,7 +142,7 @@
                   {{ cnt }} group{{ 's' if cnt != 1 else '' }}
                 </span>
                 <button type="button" class="btn btn-ghost btn-sm"
-                        onclick="openGroupModal({{ u.id }}, '{{ u.display_name or u.email | e }}')">
+                        data-onclick="openGroupModal" data-args='[{{ u.id|tojson }},{{ (u.display_name or u.email)|tojson }}]'>
                   Edit
                 </button>
               </div>
@@ -152,12 +152,12 @@
             {% if u.passkeys %}
             <span class="badge {{ 'badge-active' if u.auth_method != 'password' else 'badge-pending' }}"
                   style="cursor:pointer" title="View passkey details"
-                  onclick="openPasskeysModal({{ u.id }}, '{{ u.display_name or u.email | e }}')">
+                  data-onclick="openPasskeysModal" data-args='[{{ u.id|tojson }},{{ (u.display_name or u.email)|tojson }}]'>
               {{ 'Active' if u.auth_method != 'password' else 'Enrolled' }}
             </span>
             {% else %}
             <form method="post" action="/users/{{ u.id }}/mfa-reminder" style="margin:0;display:inline"
-                  onsubmit="return confirm('Send an MFA/passkey setup reminder email to {{ u.email | e }}?')">
+                  data-confirm="Send an MFA/passkey setup reminder email to {{ u.email | e }}?">
               <button type="submit" class="badge badge-offline" style="cursor:pointer;border:none;font:inherit"
                       {% if not smtp_ready %}disabled title="SMTP not configured"{% else %}title="Send a setup reminder email"{% endif %}>
                 Not active
@@ -168,19 +168,19 @@
           <td class="text-muted text-sm">{{ u.created_at | localtime("%Y-%m-%d") }}</td>
           <td>
             <div style="display:flex;gap:6px">
-              <button onclick="document.getElementById('edit-{{ u.id }}').style.display='table-row'"
+              <button data-show="edit-{{ u.id }}" data-display="table-row"
                       class="btn btn-ghost btn-sm">Edit</button>
               <form method="post" action="/users/{{ u.id }}/reset-password" style="margin:0"
-                    onsubmit="return confirm('Reset password for {{ u.email | e }}?')">
+                    data-confirm="Reset password for {{ u.email | e }}?">
                 <button type="submit" class="btn btn-ghost btn-sm">Reset pw</button>
               </form>
               <form method="post" action="/users/{{ u.id }}/sign-out" style="margin:0"
-                    onsubmit="return confirm('Sign {{ u.email | e }} out on every device?')">
+                    data-confirm="Sign {{ u.email | e }} out on every device?">
                 <button type="submit" class="btn btn-ghost btn-sm">Sign out</button>
               </form>
               {% if u.id != current_user.id %}
               <form method="post" action="/users/{{ u.id }}/delete" style="margin:0"
-                    onsubmit="return confirm('Delete {{ u.email | e }}? This cannot be undone.')">
+                    data-confirm="Delete {{ u.email | e }}? This cannot be undone.">
                 <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Delete</button>
               </form>
               {% endif %}
@@ -202,7 +202,7 @@
               <div style="display:flex;gap:6px">
                 <button type="submit" class="btn btn-primary btn-sm">Save</button>
                 <button type="button"
-                        onclick="document.getElementById('edit-{{ u.id }}').style.display='none'"
+                        data-hide="edit-{{ u.id }}"
                         class="btn btn-ghost btn-sm">Cancel</button>
               </div>
             </form>
@@ -223,28 +223,28 @@
 {% endif %}
 
 <!-- ── Group Access Modal ──────────────────────────────────────────────────── -->
-<div id="group-modal" class="modal-backdrop" onclick="if(event.target===this)closeGroupModal()">
+<div id="group-modal" class="modal-backdrop" data-onclick-self="closeGroupModal">
   <div class="modal-box" style="max-width:460px">
     <div class="modal-header">
       <div>
         <h2 id="group-modal-title">Group Access</h2>
         <div id="group-modal-sub" style="font-size:12px;color:#64748B;margin-top:2px"></div>
       </div>
-      <button class="modal-close" onclick="closeGroupModal()">✕</button>
+      <button class="modal-close" data-onclick="closeGroupModal">✕</button>
     </div>
 
     <div class="group-search-wrap">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
       </svg>
-      <input type="text" id="group-search" placeholder="Search groups…" oninput="filterGroups(this.value)" autocomplete="off">
+      <input type="text" id="group-search" placeholder="Search groups…" data-oninput="filterGroups" data-args='[{"$":"value"}]' autocomplete="off">
     </div>
 
     <div style="padding:0 16px 8px;display:flex;align-items:center;justify-content:space-between">
       <span id="group-count-label" style="font-size:12px;color:#64748B"></span>
       <div style="display:flex;gap:12px">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="setAllGroups(true)">Select all</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="setAllGroups(false)">Clear all</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-onclick="setAllGroups" data-args='[true]'>Select all</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-onclick="setAllGroups" data-args='[false]'>Clear all</button>
       </div>
     </div>
 
@@ -253,7 +253,7 @@
     <form id="group-form" method="post" style="margin:0">
       <div id="group-form-inputs"></div>
       <div style="padding:14px 16px;border-top:1px solid #334155;display:flex;gap:8px;justify-content:flex-end">
-        <button type="button" class="btn btn-ghost" onclick="closeGroupModal()">Cancel</button>
+        <button type="button" class="btn btn-ghost" data-onclick="closeGroupModal">Cancel</button>
         <button type="submit" class="btn btn-primary">Save access</button>
       </div>
     </form>
@@ -261,22 +261,22 @@
 </div>
 
 <!-- ── Passkeys Modal ───────────────────────────────────────────────────────── -->
-<div id="passkeys-modal" class="modal-backdrop" onclick="if(event.target===this)closePasskeysModal()">
+<div id="passkeys-modal" class="modal-backdrop" data-onclick-self="closePasskeysModal">
   <div class="modal-box" style="max-width:460px">
     <div class="modal-header">
       <div>
         <h2 id="passkeys-modal-title">Passkeys</h2>
         <div id="passkeys-modal-sub" style="font-size:12px;color:#64748B;margin-top:2px"></div>
       </div>
-      <button class="modal-close" onclick="closePasskeysModal()">✕</button>
+      <button class="modal-close" data-onclick="closePasskeysModal">✕</button>
     </div>
 
     <div class="group-list" id="passkeys-list" style="max-height:280px"></div>
 
     <form id="passkeys-reset-form" method="post" style="margin:0"
-          onsubmit="return confirm('Reset all passkeys for this user? They will need to sign in with a password.')">
+          data-confirm="Reset all passkeys for this user? They will need to sign in with a password.">
       <div style="padding:14px 16px;border-top:1px solid #334155;display:flex;gap:8px;justify-content:flex-end">
-        <button type="button" class="btn btn-ghost" onclick="closePasskeysModal()">Close</button>
+        <button type="button" class="btn btn-ghost" data-onclick="closePasskeysModal">Close</button>
         <button type="submit" class="btn btn-ghost" style="color:var(--danger)">Reset all passkeys</button>
       </div>
     </form>
@@ -284,11 +284,11 @@
 </div>
 
 <!-- ── Create User Modal ──────────────────────────────────────────────────── -->
-<div id="create-modal" class="modal-backdrop" onclick="if(event.target===this)closeCreateModal()">
+<div id="create-modal" class="modal-backdrop" data-onclick-self="closeCreateModal">
   <div class="modal-box" style="max-width:460px">
     <div class="modal-header">
       <h2>Add User</h2>
-      <button class="modal-close" onclick="closeCreateModal()">✕</button>
+      <button class="modal-close" data-onclick="closeCreateModal">✕</button>
     </div>
 
     <form method="post" action="/users" id="create-form">
@@ -309,7 +309,7 @@
         <!-- Role -->
         <div class="modal-field">
           <label for="new-role">Role</label>
-          <select id="new-role" name="role" class="modal-select" onchange="onRoleChange(this.value)">
+          <select id="new-role" name="role" class="modal-select" data-onchange="onRoleChange" data-args='[{"$":"value"}]'>
             {% for r in roles %}
             <option value="{{ r.key }}">{{ r.name }}</option>
             {% endfor %}
@@ -331,12 +331,12 @@
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
             <input type="text" id="create-group-search" class="modal-input"
-                   placeholder="Search groups…" oninput="filterCreateGroups(this.value)"
+                   placeholder="Search groups…" data-oninput="filterCreateGroups" data-args='[{"$":"value"}]'
                    autocomplete="off" style="padding-left:30px">
           </div>
           <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:6px">
-            <button type="button" class="btn btn-ghost btn-sm" onclick="setAllCreateGroups(true)">Select all</button>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="setAllCreateGroups(false)">Clear</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-onclick="setAllCreateGroups" data-args='[true]'>Select all</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-onclick="setAllCreateGroups" data-args='[false]'>Clear</button>
           </div>
           <div id="create-group-list" class="group-list" style="max-height:180px;background:#0F172A;border-radius:8px;border:1px solid #334155"></div>
           <div id="create-group-hidden"></div>
@@ -348,8 +348,8 @@
             Password
           </div>
           <div style="display:flex;margin-bottom:12px">
-            <button type="button" id="seg-auto" class="seg-btn active" onclick="setPwMode('auto')">Auto-generate</button>
-            <button type="button" id="seg-manual" class="seg-btn" onclick="setPwMode('manual')">Set manually</button>
+            <button type="button" id="seg-auto" class="seg-btn active" data-onclick="setPwMode" data-args='["auto"]'>Auto-generate</button>
+            <button type="button" id="seg-manual" class="seg-btn" data-onclick="setPwMode" data-args='["manual"]'>Set manually</button>
           </div>
           <input type="hidden" name="password_mode" id="pw-mode-field" value="auto">
 
@@ -358,13 +358,13 @@
                    placeholder="Min. 10 characters" autocomplete="new-password"
                    style="padding-right:76px">
             <div style="position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;gap:4px">
-              <button type="button" class="pw-reveal-btn" onclick="togglePwVisibility()" title="Show/hide">
+              <button type="button" class="pw-reveal-btn" data-onclick="togglePwVisibility" title="Show/hide">
                 <svg id="pw-eye" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:15px;height:15px">
                   <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                   <circle cx="12" cy="12" r="3"/>
                 </svg>
               </button>
-              <button type="button" class="pw-reveal-btn" onclick="generateIntoField()" title="Generate">
+              <button type="button" class="pw-reveal-btn" data-onclick="generateIntoField" title="Generate">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:15px;height:15px">
                   <polyline points="23 4 23 10 17 10"/>
                   <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
@@ -400,14 +400,19 @@
       </div>
 
       <div style="padding:14px 24px;border-top:1px solid #334155;display:flex;gap:8px;justify-content:flex-end">
-        <button type="button" class="btn btn-ghost" onclick="closeCreateModal()">Cancel</button>
+        <button type="button" class="btn btn-ghost" data-onclick="closeCreateModal">Cancel</button>
         <button type="submit" class="btn btn-primary">Create user</button>
       </div>
     </form>
   </div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
+// The checkbox inside a group row: static/app.js handles only the innermost
+// data-onclick, so the row's own handler doesn't also run.
+function toggleGroupBox(id) { toggleGroup(id, this.closest('.group-item')); }
+function toggleCreateGroupBox(id) { toggleCreateGroup(id, this.closest('.group-item')); }
+
 // ── Data ─────────────────────────────────────────────────────────────────────
 const GROUPS = JSON.parse(document.getElementById('groups-json').textContent);
 const ACCESS = JSON.parse(document.getElementById('access-json').textContent);
@@ -452,7 +457,7 @@ function openPasskeysModal(userId, userName) {
           <div style="font-size:11px;color:#64748B">Added ${escHtml(c.created_at || '')}${c.last_used_at ? ', last used ' + escHtml(c.last_used_at) : ''}</div>
         </div>
         <form method="post" action="/users/${userId}/passkeys/${c.id}/revoke" style="margin:0"
-              onsubmit="return confirm('Revoke this passkey?')">
+              data-confirm="Revoke this passkey?">
           <button type="submit" class="btn btn-ghost btn-sm">Revoke</button>
         </form>
       </div>
@@ -477,8 +482,8 @@ function renderGroupList(query) {
   } else {
     list.innerHTML = filtered.map(g => {
       const chk = _selected.has(g.id) ? 'checked' : '';
-      return `<div class="group-item" onclick="toggleGroup(${g.id},this)">
-        <input type="checkbox" id="gc-${g.id}" ${chk} onclick="event.stopPropagation();toggleGroup(${g.id},this.closest('.group-item'))">
+      return `<div class="group-item" data-onclick="toggleGroup" data-args='[${g.id},{"$":"this"}]'>
+        <input type="checkbox" id="gc-${g.id}" ${chk} data-onclick="toggleGroupBox" data-args='[${g.id}]'>
         <label for="gc-${g.id}">${escHtml(g.name)}<span class="group-slug" style="margin-left:8px">${escHtml(g.slug)}</span></label>
       </div>`;
     }).join('');
@@ -560,9 +565,9 @@ function renderCreateGroupList(query) {
   } else {
     list.innerHTML = filtered.map(g => {
       const chk = _createSelected.has(g.id) ? 'checked' : '';
-      return `<div class="group-item" onclick="toggleCreateGroup(${g.id},this)">
+      return `<div class="group-item" data-onclick="toggleCreateGroup" data-args='[${g.id},{"$":"this"}]'>
         <input type="checkbox" id="cgc-${g.id}" ${chk}
-               onclick="event.stopPropagation();toggleCreateGroup(${g.id},this.closest('.group-item'))">
+               data-onclick="toggleCreateGroupBox" data-args='[${g.id}]'>
         <label for="cgc-${g.id}">${escHtml(g.name)}<span class="group-slug" style="margin-left:8px">${escHtml(g.slug)}</span></label>
       </div>`;
     }).join('');
