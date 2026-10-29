@@ -118,13 +118,15 @@
       const sw = h.swap || {};
       setText('h-swap-sub', sw.total_kb ? `swap ${sw.pct}% of ${fmtKB(sw.total_kb)}` : 'no swap configured');
 
+      // Tenant names and docker's status text: untrusted, escaped.
+      const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
       document.getElementById('h-relays').innerHTML = (h.relays || []).map(r => {
         const cells = ['hbbs', 'hbbr'].map(n => {
           const c = (r.containers || {})[n] || {};
           const colour = c.running ? '#10B981' : c.running === false ? '#EF4444' : '#94A3B8';
-          return `<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${colour}"></span> ${c.status || 'unknown'}</td>`;
+          return `<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${colour}"></span> ${esc(c.status || 'unknown')}</td>`;
         }).join('');
-        return `<tr><td><a href="/tenants/${r.tenant}">${r.name}</a></td><td>${r.status}</td>${cells}</tr>`;
+        return `<tr><td><a href="/tenants/${encodeURIComponent(r.tenant)}">${esc(r.name)}</a></td><td>${esc(r.status)}</td>${cells}</tr>`;
       }).join('') || '<tr><td colspan="4" class="text-muted">No relays.</td></tr>';
       setText('health-updated', 'updated ' + new Date().toLocaleTimeString('en-US',
         { hour: '2-digit', minute: '2-digit', second: '2-digit' }));

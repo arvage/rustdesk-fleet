@@ -59,13 +59,14 @@
       setText('h-devonline', `${dv.online ?? '—'}${dv.total != null ? ' / ' + dv.total : ''}`);
 
       const cont = h.containers || {};
+      const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
       document.getElementById('h-containers').innerHTML = ['hbbs', 'hbbr'].map(n => {
         const c = cont[n] || {};
         const colour = c.running ? '#10B981' : c.running === false ? '#EF4444' : '#94A3B8';
         return `<div style="display:flex;align-items:center;gap:7px;font-size:13px">
           <span style="width:8px;height:8px;border-radius:50%;background:${colour};flex-shrink:0"></span>
           <strong style="font-weight:600">${n}</strong>
-          <span class="text-muted" style="font-size:12px">${(c.status || 'unknown')}</span>
+          <span class="text-muted" style="font-size:12px">${esc(c.status || 'unknown')}</span>
         </div>`;
       }).join('');
 

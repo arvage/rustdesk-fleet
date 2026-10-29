@@ -887,7 +887,7 @@ function disableEditPw(checked) { document.getElementById('edit-pw').disabled = 
 <script nonce="{{ request.state.csp_nonce }}">
 function openEmailLink(linkId) {
   const form = document.getElementById('email-link-form');
-  form.action = '/groups/{{ group.slug }}/links/' + linkId + '/email';
+  form.action = {{ ('/groups/' ~ group.slug ~ '/links/')|tojson }} + linkId + '/email';
   form.reset();
   document.getElementById('email-link-modal').style.display = 'flex';
   document.getElementById('email-to').focus();

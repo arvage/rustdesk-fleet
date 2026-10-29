@@ -88,9 +88,9 @@
 </style>
 
 {# Serialise all groups and access maps to JSON for JS — done in Python to avoid Jinja2 brace collision #}
-<script id="groups-json" type="application/json" nonce="{{ request.state.csp_nonce }}">{{ groups_json | safe }}</script>
-<script id="access-json" type="application/json" nonce="{{ request.state.csp_nonce }}">{{ access_json | safe }}</script>
-<script id="passkeys-json" type="application/json" nonce="{{ request.state.csp_nonce }}">{{ passkeys_json | safe }}</script>
+<script id="groups-json" type="application/json" nonce="{{ request.state.csp_nonce }}">{{ groups_json | tojson }}</script>
+<script id="access-json" type="application/json" nonce="{{ request.state.csp_nonce }}">{{ access_json | tojson }}</script>
+<script id="passkeys-json" type="application/json" nonce="{{ request.state.csp_nonce }}">{{ passkeys_json | tojson }}</script>
 
 {# One-time new-user password reveal #}
 {% set new_pw = get_new_user_pw(request) %}

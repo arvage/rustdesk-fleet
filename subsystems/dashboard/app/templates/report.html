@@ -179,8 +179,10 @@ function printReport() { window.print(); }
 (function () {
   const tip = document.getElementById('rp-tip');
   const show = (el, x, y) => {
-    tip.innerHTML = `<i class="rp-sw" style="background:${el.dataset.color}"></i>`;
-    tip.appendChild(document.createTextNode(el.dataset.tip));
+    const sw = document.createElement('i');
+    sw.className = 'rp-sw';
+    sw.style.background = el.dataset.color;
+    tip.replaceChildren(sw, document.createTextNode(el.dataset.tip));
     tip.style.display = 'block';
     const w = tip.offsetWidth;
     tip.style.left = Math.min(x + 12, window.innerWidth - w - 8) + 'px';

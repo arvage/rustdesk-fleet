@@ -21,7 +21,7 @@ document.getElementById('go').addEventListener('click', async () => {
   const box = document.getElementById('error-box');
   box.style.display = 'none';
   try {
-    await rdfPasskeyCreate('/enroll/{{ token }}/begin', '/enroll/{{ token }}/complete',
+    await rdfPasskeyCreate({{ ('/enroll/' ~ token ~ '/begin')|tojson }}, {{ ('/enroll/' ~ token ~ '/complete')|tojson }},
                            document.getElementById('nickname').value);
     window.location.href = '/';
   } catch (e) { box.textContent = e.message || 'Could not create the passkey.'; box.style.display = 'block'; }

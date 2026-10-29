@@ -9,11 +9,12 @@
   {% if job.tenant_id %}<p style="margin-top:12px"><a href="/tenants/{{ job.tenant_id }}">Tenant details</a></p>{% endif %}
 </div></div></div>
 <script nonce="{{ request.state.csp_nonce }}">
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const ICON = { running: '⏳', done: '✓', failed: '✗' };
 function render(j) {
   document.getElementById('job-status').textContent = j.status;
   document.getElementById('job-steps').innerHTML = j.steps.map(s =>
-    `<li><span>${ICON[s.status] || '·'}</span> ${s.name}${s.detail ? ` <span class="text-muted">— ${s.detail.replace(/</g, '&lt;')}</span>` : ''}</li>`).join('');
+    `<li><span>${ICON[s.status] || '·'}</span> ${esc(s.name)}${s.detail ? ` <span class="text-muted">— ${esc(s.detail)}</span>` : ''}</li>`).join('');
   const e = document.getElementById('job-error');
   if (j.error) { e.textContent = j.error; e.style.display = 'block'; }
   return j.status === 'queued' || j.status === 'running';

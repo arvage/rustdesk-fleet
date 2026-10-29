@@ -117,7 +117,56 @@ provider console sends; `/setup` is 404 there. The setup page creates the first 
   tenant's id; `tests/test_sql_scoping.py` scans the source for SQL on a
   tenant-owned table without `tenant_id`.
 - **Backups** pass the gpg passphrase on stdin, never on the command line.
-- **Not yet:** CSRF tokens (`SameSite=Lax` is the current protection).
+
+### Output escaping
+
+Jinja autoescapes every template. These are the places that put markup
+into a page without it. Everything a tenant controls (group names, labels,
+notes, email wording, device-reported hostnames and usernames) is treated
+as untrusted, on the console most of all. `tests/test_output_escaping.py`
+fails when a file gains an `innerHTML`, `outerHTML`, `insertAdjacentHTML`,
+`|safe` or `Markup(` that isn't listed here (file, target, count).
+
+<!-- escaping-allowlist:start -->
+| File | Target | Count | Why it's safe |
+|---|---|---|---|
+| `static/app.js` | `btn.innerHTML` | 1 | copyText restores the button's own markup after "Copied!" |
+| `templates/reports.html` | `\| safe` | 1 | `icons[cat]`: SVG paths hard-coded in the template |
+| `templates/console/health.html` | `document.getElementById('h-relays').innerHTML` | 1 | tenant name, status and docker status through `esc()`; tenant id URL-encoded |
+| `templates/console/job.html` | `document.getElementById('job-steps').innerHTML` | 1 | step names and details through `esc()` |
+| `templates/home.html` | `document.getElementById('h-containers').innerHTML` | 1 | docker status through `esc()`; container names are constants |
+| `templates/devices.html` | `box.innerHTML` | 4 | column menu (labels are constants); sessions list: every value through `esc()`, ids URL-encoded |
+| `templates/devices.html` | `cells[1].innerHTML` | 1 | label through `esc()` |
+| `templates/devices.html` | `cells[2].innerHTML` | 2 | `computerCell()`: hostname, username and hardware through `esc()` |
+| `templates/devices.html` | `cells[3].innerHTML` | 2 | `osCell()`: OS, build and client version through `esc()` |
+| `templates/devices.html` | `cells[6].innerHTML` | 1 | group name and slug through `esc()` |
+| `templates/devices.html` | `cells[14].innerHTML` | 1 | client version through `esc()` |
+| `templates/devices.html` | `cl.innerHTML` | 1 | counts are numbers; the group filter through `esc()` |
+| `templates/devices.html` | `document.getElementById('detail-table').innerHTML` | 1 | every key and value through `esc()` |
+| `templates/devices.html` | `document.getElementById('modal-info-table').innerHTML` | 1 | keys are constants; values through `esc()` |
+| `templates/devices.html` | `tbody.insertAdjacentHTML(` | 1 | `buildRow()`: every value through `esc()`, ids escaped or URL-encoded |
+| `templates/dynamic_group_edit.html` | `div.innerHTML` | 1 | field list from the server's catalogue, through `escH()` |
+| `templates/dynamic_group_edit.html` | `opSel.innerHTML` | 1 | operator options through `escH()` |
+| `templates/dynamic_group_edit.html` | `wrap.innerHTML` | 4 | the rule's value and hints through `escH()`; one clears it |
+| `templates/dynamic_group_edit.html` | `document.getElementById('dg-rules').innerHTML` | 1 | clears the list |
+| `templates/group_detail.html` | `box.innerHTML` | 4 | column menu (constants); sessions list through `esc()` |
+| `templates/group_detail.html` | `document.getElementById('detail-table').innerHTML` | 1 | every key and value through `esc()` |
+| `templates/group_detail.html` | `document.getElementById('modal-info-table').innerHTML` | 1 | keys are constants; values through `esc()` |
+| `templates/groups.html` | `box.innerHTML` | 1 | column menu: labels are constants |
+| `templates/timeline.html` | `tip.innerHTML` | 1 | lane and tooltip text through `esc()` |
+| `templates/device_timeline.html` | `tip.innerHTML` | 1 | lane and tooltip text through `esc()` |
+| `templates/users.html` | `list.innerHTML` | 6 | group names, slugs, the filter text and passkey nicknames through `escHtml()`; ids are numbers |
+| `templates/users.html` | `container.innerHTML` | 2 | clears the list |
+<!-- escaping-allowlist:end -->
+
+Fixed in this review: the Users page put its groups, access and passkeys
+JSON in `<script>` elements with `|safe`, so a group name or passkey
+nickname containing `</script>` could end the element (now `|tojson`);
+the console's job page and host-health relay table showed step names,
+tenant names and docker status unescaped; the tenant home page showed
+docker status unescaped; the report tooltip built a `style` attribute
+from a `data-` value (now set through the DOM); and the device table
+built in JavaScript put the RustDesk id into markup unescaped.
 
 Tests: `python3 -m pip install -r requirements-dev.txt`, then
 `python3 -m pytest subsystems/dashboard/tests` from the repo root.

@@ -408,7 +408,6 @@ const CAN_EDIT = {{ 'true' if can_devices else 'false' }};
 function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function escAttr(s) { return esc(s).replace(/'/g,'&#39;'); }
 function toLA(utcStr) {
   if (!utcStr || utcStr === '—') return utcStr || '—';
   try {
@@ -465,9 +464,9 @@ function buildRow(d) {
     ? `<a href="/groups/${esc(d.group_slug)}" style="color:var(--accent);text-decoration:none;font-size:13px">${esc(d.group_name)}</a>`
     : `<span class="text-muted text-sm">—</span>`;
 
-  return `<tr data-rid="${rid}" data-search="${esc(searchText(d))}" data-info="${esc(JSON.stringify(d))}">
-    <td data-val="${rid}" style="white-space:nowrap">
-      <code>${formatRid(rid)}</code>
+  return `<tr data-rid="${esc(rid)}" data-search="${esc(searchText(d))}" data-info="${esc(JSON.stringify(d))}">
+    <td data-val="${esc(rid)}" style="white-space:nowrap">
+      <code>${esc(formatRid(rid))}</code>
       <button class="btn-copy" data-copy="${esc(rid)}" title="Copy ID">${SVG_COPY}</button>
     </td>
     <td data-val="${esc(label.toLowerCase())}">
@@ -477,7 +476,7 @@ function buildRow(d) {
     <td data-val="${esc((d.os_name || '').toLowerCase())}">${osCell(d)}</td>
     <td data-val="${esc(ip)}" class="text-muted text-sm mono">${esc(ip)}</td>
     <td data-val="${st}">
-      <span id="status-${rid}" class="badge badge-${stClass}">${st}</span>
+      <span id="status-${esc(rid)}" class="badge badge-${stClass}">${st}</span>
     </td>
     <td data-val="${d.group_name ? esc(d.group_name.toLowerCase()) : 'zzz'}">${groupCell}</td>
     <td data-val="${esc(d.registered_at)}" class="text-muted text-sm col-registered">${toLA(d.registered_at)}</td>
@@ -490,8 +489,8 @@ function buildRow(d) {
     <td data-val="${esc(d.client_version || '')}" class="text-sm">${d.client_version ? esc(d.client_version) + (d.client_outdated ? ' <span style="color:var(--warn-strong)" title="Older than your installers">⚠</span>' : '') : '—'}</td>
     <td style="white-space:nowrap">
       <button data-onclick="openDetailModal" data-args="${esc(JSON.stringify([rid]))}" class="btn btn-ghost btn-sm" title="View all details" aria-label="Details">${SVG_INFO}</button>
-      <a href="rustdesk://${rid}" class="btn btn-ghost btn-sm" title="Connect via RustDesk" aria-label="Connect" style="color:var(--link)">${SVG_VIDEO}</a>
-      <a href="rustdesk://terminal/${rid}" class="btn btn-ghost btn-sm" title="Open terminal (RustDesk)" aria-label="Terminal" style="color:var(--text-2)">${SVG_TERM}</a>
+      <a href="rustdesk://${encodeURIComponent(rid)}" class="btn btn-ghost btn-sm" title="Connect via RustDesk" aria-label="Connect" style="color:var(--link)">${SVG_VIDEO}</a>
+      <a href="rustdesk://terminal/${encodeURIComponent(rid)}" class="btn btn-ghost btn-sm" title="Open terminal (RustDesk)" aria-label="Terminal" style="color:var(--text-2)">${SVG_TERM}</a>
       ${CAN_EDIT ? `<button data-edit data-onclick="openDeviceModal" data-args="${esc(JSON.stringify([rid, label, String(d.group_id ?? '')]))}" class="btn btn-ghost btn-sm">Edit</button>` : ''}
     </td>
   </tr>`;
@@ -547,10 +546,9 @@ function patchRow(tr, d) {
     ? esc(d.client_version) + (d.client_outdated ? ' <span style="color:var(--warn-strong)" title="Older than your installers">⚠</span>' : '')
     : '—';
 
-  // Edit button onclick (label or group may have changed)
+  // Edit button arguments (label or group may have changed)
   const editBtn = tr.querySelector('button[data-edit]');
-  if (editBtn) editBtn.setAttribute('onclick',
-    `openDeviceModal('${d.rustdesk_id}','${escAttr(label)}','${d.group_id ?? ''}')`);
+  if (editBtn) editBtn.dataset.args = JSON.stringify([d.rustdesk_id, label, String(d.group_id ?? '')]);
 }
 
 // ── Main table refresh ───────────────────────────────────────────────────────

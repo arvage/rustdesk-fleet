@@ -1,4 +1,3 @@
-import json
 import secrets
 import string
 
@@ -113,15 +112,18 @@ async def users_list(request: Request, current_user: dict = Depends(require_auth
 
     smtp_ready = bool(smtp_row and smtp_row["enabled"] and smtp_row["smtp_host"])
 
-    groups_json = json.dumps([
+    # Passed as data and serialised with |tojson in the template, which
+    # escapes <, >, & and ' (json.dumps would let a group name or passkey
+    # nickname containing </script> end the script element).
+    groups_json = ([
         {"id": g["id"], "slug": g["slug"], "name": g["display_name"]}
         for g in groups
     ])
-    access_json = json.dumps({
+    access_json = ({
         str(u["id"]): sorted(u["group_ids"])
         for u in users_with_access
     })
-    passkeys_json = json.dumps({
+    passkeys_json = ({
         str(u["id"]): [
             {"id": p["id"], "nickname": p["nickname"], "created_at": p["created_at"], "last_used_at": p["last_used_at"]}
             for p in u["passkeys"]
