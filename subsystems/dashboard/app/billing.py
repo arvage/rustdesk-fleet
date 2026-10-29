@@ -580,3 +580,146 @@ def resubscribe_url(tenant_id: int, home_host: str) -> str:
                                     cancel_url=f"https://{home_host}/export")
     conn.close()
     return stripe_api.client().v1.checkout.sessions.create(params).url
+
+
+# ── The tenant's Billing page: portal, plan change, what it shows ───────────
+
+PORTAL_CONFIG_KEY = "stripe_portal_configuration"
+
+
+def portal_features(conn) -> dict:
+    """What the Customer Portal allows, from the console's plans: change the
+    card (never leave without one: Stripe won't remove the default card of a
+    customer with a subscription, and our sync re-checks), see invoices,
+    update billing details, cancel at period end. Switching plans in the
+    portal only works between single-price subscriptions, so it is turned on
+    only when every public plan is one licensed price; otherwise plans are
+    switched on our Billing page (change_plan)."""
+    from app import plans
+    public = plans.public_plans(conn)
+    single = public and all(len(p["prices"]) == 1 and p["prices"][0]["billing_scheme"] == "licensed" for p in public)
+    features = {
+        "customer_update": {"enabled": True, "allowed_updates": ["address", "email", "name", "tax_id"]},
+        "invoice_history": {"enabled": True},
+        "payment_method_update": {"enabled": True},
+        "subscription_cancel": {"enabled": True, "mode": "at_period_end",
+                                "cancellation_reason": {"enabled": True, "options": [
+                                    "too_expensive", "missing_features", "switched_service", "unused",
+                                    "customer_service", "too_complex", "low_quality", "other"]}},
+        "subscription_update": {"enabled": False},
+    }
+    if single:
+        by_product: dict[str, list[str]] = {}
+        for p in public:
+            pr = p["prices"][0]
+            by_product.setdefault(pr["stripe_product_id"], []).append(pr["stripe_price_id"])
+        features["subscription_update"] = {
+            "enabled": True, "default_allowed_updates": ["price"], "proration_behavior": settings.stripe_proration(),
+            "products": [{"product": k, "prices": v} for k, v in list(by_product.items())[:10]]}
+    return features
+
+
+def sync_portal_configuration() -> str:
+    """Create or update our portal configuration; returns its id."""
+    from app import provider_config
+    conn = get_db()
+    params = {"name": "RustDesk Fleet", "features": portal_features(conn),
+              "business_profile": {k: v for k, v in (("terms_of_service_url", settings.terms_url()),
+                                                     ("privacy_policy_url", settings.privacy_url())) if v}}
+    conn.close()
+    client = stripe_api.client()
+    current = provider_config.get(PORTAL_CONFIG_KEY)
+    if current:
+        try:
+            client.v1.billing_portal.configurations.update(current, params)
+            return current
+        except Exception as e:
+            log.warning("updating portal configuration %s: %s", current, e)
+    cfg = client.v1.billing_portal.configurations.create(params)
+    provider_config.set_many({PORTAL_CONFIG_KEY: cfg.id})
+    return cfg.id
+
+
+def portal_url(tenant_id: int, return_url: str) -> str:
+    from app import provider_config
+    conn = get_db()
+    cus = conn.execute("SELECT stripe_customer_id FROM billing_customers WHERE tenant_id = ?", (tenant_id,)).fetchone()
+    conn.close()
+    if cus is None or tenant_id == LEGACY_TENANT_ID:
+        raise ValueError("This account isn't billed through Stripe.")
+    config = provider_config.get(PORTAL_CONFIG_KEY) or sync_portal_configuration()
+    session = stripe_api.client().v1.billing_portal.sessions.create(
+        {"customer": cus[0], "return_url": return_url, "configuration": config})
+    return session.url
+
+
+def change_plan(tenant_id: int, plan_id: int, by: str) -> None:
+    """Switch a Stripe tenant to another public plan: replace the
+    subscription's items with the plan's prices (current quantities),
+    prorated per STRIPE_PRORATION, then sync."""
+    from app import billing_usage, plans
+    conn = get_db()
+    plan = plans.offered(conn, plan_id)
+    bs = conn.execute("SELECT * FROM billing_subscriptions WHERE tenant_id = ?", (tenant_id,)).fetchone()
+    if plan is None or bs is None or tenant_id == LEGACY_TENANT_ID:
+        conn.close()
+        raise ValueError("That plan isn't available.")
+    if bs["plan_id"] == plan["id"]:
+        conn.close()
+        return
+    n = billing_usage.counts(conn, tenant_id)
+    conn.close()
+    client = stripe_api.client()
+    sub = stripe_api.plain(client.v1.subscriptions.retrieve(bs["stripe_subscription_id"]))
+    items = [{"id": i["id"], "deleted": True} for i in sub["items"]["data"]]
+    for pr in plan["prices"]:
+        item = {"price": pr["stripe_price_id"]}
+        if pr["billing_scheme"] == "licensed":
+            item["quantity"] = 1 if pr["unit_type"] == "flat" else n[pr["unit_type"]]
+        items.append(item)
+    client.v1.subscriptions.update(bs["stripe_subscription_id"],
+                                   {"items": items, "proration_behavior": settings.stripe_proration(),
+                                    "metadata": {"plan_id": str(plan["id"])}})
+    conn = get_db()
+    conn.execute("UPDATE billing_subscriptions SET plan_id = ?, quantities = NULL WHERE tenant_id = ?",
+                 (plan["id"], tenant_id))
+    conn.commit()
+    from app.deps import log_event
+    log_event(conn, "plan_changed", f"{plan['name']}", by, tenant_id=tenant_id)
+    conn.commit()
+    conn.close()
+    sync_subscription(bs["stripe_subscription_id"])
+
+
+def overview(tenant_id: int) -> dict:
+    """What the Billing page shows, fetched from Stripe (short timeout).
+    'error' says if Stripe couldn't be reached; the rest still shows."""
+    from app import billing_usage, plans
+    conn = get_db()
+    bs = conn.execute("SELECT * FROM billing_subscriptions WHERE tenant_id = ?", (tenant_id,)).fetchone()
+    cus = conn.execute("SELECT stripe_customer_id FROM billing_customers WHERE tenant_id = ?", (tenant_id,)).fetchone()
+    out = {"sub": dict(bs) if bs else None, "counts": billing_usage.counts(conn, tenant_id),
+           "over": billing_usage.over_limits(conn, tenant_id), "plan": None, "prices": [],
+           "plans": plans.public_plans(conn), "invoices": [], "upcoming": None, "error": ""}
+    if bs and bs["plan_id"]:
+        p = plans.get(conn, bs["plan_id"])
+        out["plan"] = dict(p) if p else None
+        out["prices"] = [dict(r) for r in plans.prices_of(conn, bs["plan_id"])]
+    conn.close()
+    if not (bs and cus):
+        return out
+    try:
+        client = stripe_api.client()
+        if bs["status"] in ("trialing", "active", "past_due") and not bs["cancel_at_period_end"]:
+            prev = stripe_api.plain(client.v1.invoices.create_preview(
+                {"customer": cus[0], "subscription": bs["stripe_subscription_id"]}))
+            out["upcoming"] = {"amount": prev.get("amount_due"), "currency": prev.get("currency"),
+                               "date": _ts(prev.get("next_payment_attempt") or prev.get("period_end"))}
+        inv = stripe_api.plain(client.v1.invoices.list({"customer": cus[0], "limit": 12}))
+        out["invoices"] = [{"number": i.get("number") or i["id"], "created": _ts(i.get("created")),
+                            "amount": i.get("amount_paid") or i.get("amount_due"), "currency": i.get("currency"),
+                            "status": i.get("status"), "url": i.get("hosted_invoice_url")}
+                           for i in inv.get("data", [])]
+    except Exception as e:
+        out["error"] = f"Stripe couldn't be reached ({type(e).__name__}); try again shortly."
+    return out

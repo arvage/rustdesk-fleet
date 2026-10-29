@@ -14,6 +14,15 @@ def _flash(request: Request, kind: str, msg: str) -> None:
     request.session["flash"] = {"type": kind, "msg": msg}
 
 
+def _portal() -> None:
+    """The Customer Portal's plan switching follows the public plans."""
+    from app import billing
+    try:
+        billing.sync_portal_configuration()
+    except Exception:
+        pass
+
+
 def _page(request: Request, user: dict, plan=None, prices=None, form=None, error: str = "", status: int = 200):
     return templates.TemplateResponse(request, "console/plan_edit.html", {
         "current_user": user, "plan": plan, "prices": {p["unit_type"]: p for p in (prices or [])},
@@ -62,6 +71,7 @@ async def _save(request: Request, plan_id: int | None, user: dict):
         f"{p['unit_type']}={p['stripe_price_id']}" for p in plans.prices_of(conn, new_id)), user["email"])
     conn.commit()
     conn.close()
+    _portal()
     _flash(request, "success", "Plan saved. Prices checked with Stripe.")
     return RedirectResponse(f"/plans/{new_id}", status_code=303)
 
@@ -98,6 +108,7 @@ def _archive(request: Request, plan_id: int, archived: bool, user: dict):
         plans.set_archived(conn, plan_id, archived)
         provider_log(conn, "plan_archived" if archived else "plan_unarchived", plan["key"], user["email"])
         conn.commit()
+        _portal()
         _flash(request, "success", f"{plan['name']} {'archived: hidden from sign-up; subscribers stay on it' if archived else 'restored'}.")
     conn.close()
     return RedirectResponse("/plans", status_code=303)

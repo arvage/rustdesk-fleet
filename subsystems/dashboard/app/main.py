@@ -28,6 +28,7 @@ from app.routes.invites import router as invites_router
 from app.routes.export import router as export_router
 from app.routes.support import router as support_router
 from app.routes.domains import router as domains_router
+from app.routes.billing import router as billing_router
 from app.deps import run_migrations
 from app.security import TENANT_COOKIE
 from app.tenancy import TenantMiddleware, UnknownTenant
@@ -170,3 +171,4 @@ app.include_router(invites_router)
 app.include_router(export_router)
 app.include_router(support_router)
 app.include_router(domains_router)
+app.include_router(billing_router)

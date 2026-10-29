@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Billing — RustDesk Fleet{% endblock %}
+{% block page_title %}Billing{% endblock %}
+{% block content %}
+{% if mode != "stripe" %}
+<div class="section"><div class="card"><div class="card-body">
+  {% if mode == "internal" %}
+  <p style="margin:0">This account isn't billed.</p>
+  {% else %}
+  <p style="margin:0 0 6px">Your provider bills this account directly{% if t.plan %} (plan: {{ t.plan }}){% endif %}.</p>
+  {% if t.status == "trial" and t.trial_ends_at %}<p class="text-sm text-muted" style="margin:0">Trial ends {{ t.trial_ends_at | localtime("%Y-%m-%d") }}. Contact your provider to subscribe.</p>{% endif %}
+  {% endif %}
+</div></div></div>
+{% else %}
+{% if error %}<div class="flash warning">{{ error }}</div>{% endif %}
+<div class="stat-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:18px">
+  <div class="stat-card"><div class="stat-label">Plan</div><div class="stat-value" style="font-size:18px">{{ plan.name if plan else "—" }}</div>
+    {% for pr in prices %}<div class="stat-sub">{{ pr.summary }}</div>{% endfor %}</div>
+  <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value" style="font-size:18px">
+    {{ {"trialing": "Free trial", "active": "Active", "past_due": "Payment failed", "unpaid": "Unpaid", "canceled": "Cancelled", "incomplete": "Setting up", "paused": "Paused"}.get(sub.status, sub.status) if sub else "—" }}</div>
+    {% if sub and sub.status == "trialing" and sub.trial_end %}<div class="stat-sub">trial ends {{ sub.trial_end | localtime("%Y-%m-%d") }}</div>{% endif %}
+    {% if sub and sub.cancel_at_period_end %}<div class="stat-sub">ends {{ (sub.cancel_at or sub.current_period_end) | localtime("%Y-%m-%d") }}</div>{% endif %}</div>
+  <div class="stat-card"><div class="stat-label">Next invoice</div><div class="stat-value" style="font-size:18px">
+    {% if upcoming %}{{ upcoming.amount | money(upcoming.currency) }}{% else %}—{% endif %}</div>
+    {% if upcoming and upcoming.date %}<div class="stat-sub">on {{ upcoming.date | localtime("%Y-%m-%d") }}</div>{% endif %}</div>
+  <div class="stat-card"><div class="stat-label">Usage</div><div class="stat-value" style="font-size:18px">{{ counts.technician }} technicians · {{ counts.device }} devices</div>
+    {% if plan and (plan.max_technicians is not none or plan.max_devices is not none) %}<div class="stat-sub">plan fits {% if plan.max_technicians is not none %}{{ plan.max_technicians }} technicians{% endif %}{% if plan.max_technicians is not none and plan.max_devices is not none %} and {% endif %}{% if plan.max_devices is not none %}{{ plan.max_devices }} devices{% endif %}</div>{% endif %}</div>
+</div>
+
+<div class="section"><div class="card"><div class="card-body" style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+  <div style="flex:1 1 260px"><h2 style="font-size:14px;margin:0 0 4px">Card, invoices and cancelling</h2>
+    <p class="text-sm text-muted" style="margin:0">Opens Stripe's secure billing portal: change your card, download invoices, update billing details or cancel.</p></div>
+  <form method="post" action="/admin/billing/portal" data-busy="Opening…"><button class="btn btn-primary btn-sm">Manage billing</button></form>
+</div></div></div>
+
+{% if plans and sub and sub.status in ("trialing", "active", "past_due") %}
+<div class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 8px">Change plan</h2>
+  <form method="post" action="/admin/billing/plan" class="form-grid" data-confirm="Change your plan? Any difference is prorated on your next invoice.">
+    <select name="plan">{% for p in plans %}<option value="{{ p.id }}" {% if plan and p.id == plan.id %}selected{% endif %}>{{ p.name }}: {% for pr in p.prices %}{{ pr.summary }}{% if not loop.last %}; {% endif %}{% endfor %}</option>{% endfor %}</select>
+    <button class="btn btn-ghost btn-sm">Change plan</button>
+  </form>
+</div></div></div>
+{% endif %}
+
+<div class="section"><div class="card"><div class="card-header"><h2>Invoices</h2></div>
+  {% if invoices %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Invoice</th><th>Date</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+    <tbody>{% for i in invoices %}<tr><td>{{ i.number }}</td><td>{{ i.created | localtime("%Y-%m-%d") }}</td>
+      <td>{{ i.amount | money(i.currency) }}</td><td>{{ i.status }}</td>
+      <td>{% if i.url %}<a href="{{ i.url }}" target="_blank" rel="noopener">View</a>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="card-body text-muted text-sm">No invoices yet.</div>{% endif %}
+</div></div>
+{% endif %}
+{% endblock %}
