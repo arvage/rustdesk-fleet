@@ -1,0 +1,67 @@
+{% extends "public/base.html" %}
+{% block title %}Start your free trial — RustDesk Fleet{% endblock %}
+{% block body %}
+<h2>Start your {{ trial_days }}-day free trial</h2>
+<p>Your own relay and dashboard, hosted by us. A card is required; nothing is charged until the trial ends.</p>
+{% if error %}<div class="flash error" style="margin-bottom:16px">{{ error }}</div>{% endif %}
+<form method="post" action="/signup" id="signup-form" data-busy="Sending…">
+  <div class="login-field">
+    <label for="company">Company name</label>
+    <input type="text" id="company" name="company" value="{{ form.company or '' }}" required maxlength="200" autocomplete="organization">
+  </div>
+  <div class="login-field">
+    <label for="slug">Your address</label>
+    <div style="display:flex;align-items:center;gap:6px">
+      <input type="text" id="slug" name="slug" value="{{ form.slug or '' }}" required maxlength="32" autocapitalize="none" spellcheck="false" style="flex:1 1 auto;min-width:0">
+      <span class="text-muted text-sm" style="white-space:nowrap">{{ suffix }}</span>
+    </div>
+    <span class="hint" id="slug-hint">Lowercase letters, digits and hyphens.</span>
+  </div>
+  <div class="login-field">
+    <label for="admin_name">Your name</label>
+    <input type="text" id="admin_name" name="admin_name" value="{{ form.admin_name or '' }}" required maxlength="200" autocomplete="name">
+  </div>
+  <div class="login-field">
+    <label for="email">Work email</label>
+    <input type="email" id="email" name="email" value="{{ form.email or '' }}" required maxlength="200" autocomplete="email">
+  </div>
+  <div class="login-field">
+    <label for="password">Password (at least 10 characters)</label>
+    <input type="password" id="password" name="password" required minlength="10" autocomplete="new-password">
+  </div>
+  <div class="login-field">
+    <label for="plan">Plan</label>
+    <select id="plan" name="plan" required>
+      {% for p in plans %}<option value="{{ p.id }}" {% if form.plan|string == p.id|string %}selected{% endif %}>{{ p.name }}: {% for pr in p.prices %}{{ pr.summary }}{% if not loop.last %}; {% endif %}{% endfor %}</option>{% endfor %}
+    </select>
+  </div>
+  <label class="text-sm" style="display:flex;gap:8px;align-items:flex-start;margin:6px 0 16px">
+    <input type="checkbox" name="accept" value="1" required {% if form.accept %}checked{% endif %} style="margin-top:3px">
+    <span>I accept the {% if terms_url %}<a href="{{ terms_url }}" target="_blank" rel="noopener">Terms of Service</a>{% else %}Terms of Service{% endif %}
+      and the {% if privacy_url %}<a href="{{ privacy_url }}" target="_blank" rel="noopener">Privacy Policy</a>{% else %}Privacy Policy{% endif %}.</span>
+  </label>
+  <button type="submit" class="btn btn-primary">Continue</button>
+</form>
+<p class="text-sm text-muted" style="margin-top:14px">Already have an account? <a href="/signin">Sign in</a></p>
+{% endblock %}
+{% block scripts %}
+<script nonce="{{ request.state.csp_nonce }}">
+// Suggest an address from the company name, and check it as it's typed.
+(function () {
+  const company = document.getElementById('company'), slug = document.getElementById('slug');
+  const hint = document.getElementById('slug-hint');
+  let edited = slug.value !== '', timer = null;
+  async function check(params) {
+    const r = await fetch('/signup/slug-check?' + new URLSearchParams(params));
+    const d = await r.json();
+    if (!edited && d.slug) slug.value = d.slug;
+    hint.textContent = d.ok ? 'Your dashboard will be at https://' + d.host : d.problem;
+    hint.style.color = d.ok ? '' : 'var(--danger)';
+  }
+  function later(params) { clearTimeout(timer); timer = setTimeout(() => check(params).catch(() => {}), 300); }
+  company.addEventListener('input', () => { if (!edited) later({ name: company.value }); });
+  slug.addEventListener('input', () => { edited = true; later({ slug: slug.value }); });
+  if (slug.value) later({ slug: slug.value });
+})();
+</script>
+{% endblock %}

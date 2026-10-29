@@ -321,8 +321,7 @@ def after_sign_in(request: Request) -> str:
 @router.post("/logout")
 async def logout(request: Request):
     request.session.clear()
-    # Signed out, "/" is the public landing page (falls back to /login if
-    # site/index.html is missing).
+    # Signed out, "/" sends the visitor to /login.
     return RedirectResponse("/", status_code=303)
 
 

@@ -1,0 +1,45 @@
+{% extends "public/base.html" %}
+{% block title %}Setting up your account — RustDesk Fleet{% endblock %}
+{% block body %}
+{% if cancelled and state.status == 'checkout' %}
+<h2>Payment details not entered</h2>
+<p>Your trial starts once a card is on file. Nothing has been charged.</p>
+<form method="post" action="/signup/{{ ref }}/checkout" data-busy="Opening the payment page…">
+  <button type="submit" class="btn btn-primary">Enter payment details</button>
+</form>
+{% else %}
+<h2 id="title">{% if state.status == 'created' %}Your account is ready{% elif state.status == 'failed' %}We're on it{% else %}Setting up your account…{% endif %}</h2>
+<p id="text">
+  {% if state.status == 'created' %}Sign in at <a href="{{ state.login }}">{{ state.host }}</a> with the email and password you chose.
+  {% elif state.status == 'failed' %}Something went wrong while we set up your account. Our team has been told and will finish it; we'll email you. You won't be charged twice.
+  {% else %}We're creating your relay, dashboard and web address. This takes a minute or two; this page updates by itself.{% endif %}
+</p>
+<p id="trial" class="flash warning" {% if not state.trial_denied %}style="display:none"{% endif %}>
+  This card has already been used for a free trial, so your subscription starts now, without a trial.</p>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if not cancelled and state.status not in ('created', 'failed') %}
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+  async function poll() {
+    try {
+      const d = await (await fetch('/signup/{{ ref }}/status')).json();
+      if (d.trial_denied) document.getElementById('trial').style.display = '';
+      if (d.status === 'created') {
+        document.getElementById('title').textContent = 'Your account is ready';
+        const t = document.getElementById('text');
+        t.textContent = 'Sign in at ';
+        const a = document.createElement('a'); a.href = d.login; a.textContent = d.host; t.appendChild(a);
+        t.appendChild(document.createTextNode(' with the email and password you chose.'));
+        return;
+      }
+      if (d.status === 'failed') { window.location.reload(); return; }
+    } catch (e) {}
+    setTimeout(poll, 3000);
+  }
+  setTimeout(poll, 2000);
+})();
+</script>
+{% endif %}
+{% endblock %}

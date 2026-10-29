@@ -91,7 +91,8 @@ def run_once() -> None:
                  lambda: record_usage(today),
                  refresh_cert_expiry,
                  _lifecycle,
-                 _support_expiry):
+                 _support_expiry,
+                 _signups):
         try:
             step()
         except Exception:
@@ -108,6 +109,14 @@ def _missing(day: date) -> bool:
 def _support_expiry() -> None:
     from app import support
     support.sweep()
+
+
+def _signups() -> None:
+    """Sign-ups never verified are deleted after 48 hours."""
+    from app import signup
+    conn = get_db()
+    signup.purge_unverified(conn)
+    conn.close()
 
 
 def _lifecycle() -> None:

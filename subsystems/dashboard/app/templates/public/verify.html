@@ -1,0 +1,11 @@
+{% extends "public/base.html" %}
+{% block title %}Confirm your email — RustDesk Fleet{% endblock %}
+{% block body %}
+<h2>Confirm your email</h2>
+<p>Thanks for confirming. Next, enter a card on our payment provider's secure page (Stripe) to start your free trial.
+  Nothing is charged until the trial ends, and you can cancel before then.</p>
+<form method="post" action="/signup/verify" data-busy="Opening the payment page…">
+  <input type="hidden" name="token" value="{{ token }}">
+  <button type="submit" class="btn btn-primary">Continue to payment details</button>
+</form>
+{% endblock %}

@@ -96,6 +96,14 @@ def allocate_block(conn, tenant_id: int, slug: str) -> Block:
     return Block(nxt)
 
 
+def free_blocks(conn) -> int:
+    """How many more relay port blocks allocate_block() can hand out."""
+    base, top = settings.relay_port_base(), settings.relay_port_max()
+    row = conn.execute("SELECT MAX(base_port) FROM relay_port_blocks WHERE base_port >= ?", (base,)).fetchone()
+    nxt = base if row[0] is None else row[0] + STRIDE
+    return 0 if nxt + 4 > top else (top - 4 - nxt) // STRIDE + 1
+
+
 def block_of(relay) -> Block:
     return Block(relay.hbbs_port - 1)
 

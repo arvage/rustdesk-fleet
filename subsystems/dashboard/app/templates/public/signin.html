@@ -1,0 +1,14 @@
+{% extends "public/base.html" %}
+{% block title %}Sign in — RustDesk Fleet{% endblock %}
+{% block body %}
+<h2>Sign in</h2>
+<p>Each account has its own address, like <code>{{ example }}</code>. Enter your account name to go there.</p>
+{% if error %}<div class="flash error" style="margin-bottom:16px">{{ error }}</div>{% endif %}
+<form method="get" action="/signin">
+  <div class="login-field">
+    <label for="account">Account name</label>
+    <input type="text" id="account" name="account" value="{{ account }}" required autocapitalize="none" spellcheck="false" placeholder="yourcompany">
+  </div>
+  <button type="submit" class="btn btn-primary">Continue</button>
+</form>
+{% endblock %}

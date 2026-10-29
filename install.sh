@@ -398,6 +398,19 @@ EOF
   else
     warn "Couldn't set up https://$console/ yet (DNS for *.$PROVIDER_DOMAIN must point here, port 80 open). Re-run with --provider-only."
   fi
+  # The public site (product page, pricing, sign-up, Stripe webhook): a
+  # provider host like the console.
+  local public
+  public="$(sudo sed -n 's/^PUBLIC_SITE_HOST=//p' "$ETC_DIR/dashboard.env" | head -n1)"
+  public="${public:-www.$PROVIDER_DOMAIN}"
+  if sudo test -f "$TENANT_VHOST_DIR/$public.conf"; then
+    info "The public site vhost for $public already exists."
+  elif sudo "$HELPER" issue-cert "$public" ${LE_EMAIL:+"$LE_EMAIL"} && sudo "$HELPER" write-vhost "$public" \
+       && sudo "$HELPER" reload-nginx; then
+    info "Public site: https://$public/"
+  else
+    warn "Couldn't set up https://$public/ yet (DNS for $public must point here, port 80 open). Re-run with --provider-only."
+  fi
   info "Create the first provider admin:  python3 $DASH_DIR/scripts/provider_admin.py --domain $PROVIDER_DOMAIN add you@example.com 'Your Name'"
 }
 

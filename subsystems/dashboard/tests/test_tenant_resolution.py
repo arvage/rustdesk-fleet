@@ -26,9 +26,10 @@ def test_tenant_one_is_the_existing_host():
     assert t.relay.ports == {21115, 21116, 21117, 21118, 21119}
 
 
-def test_known_host_serves_the_landing_page_and_login(admin):
+def test_known_host_sends_signed_out_visitors_to_login(admin):
+    # The product page lives on the public host (phase 2).
     c = new_client()
-    assert c.get("/").status_code == 200
+    assert c.get("/", follow_redirects=False).headers["location"] == "/login"
     assert c.get("/login").status_code == 200
 
 

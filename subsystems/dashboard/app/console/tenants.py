@@ -122,22 +122,26 @@ def _rebuild_tenants(conn, cols: list[str]) -> None:
 
 # ── Validation ───────────────────────────────────────────────────────────────
 
-def slug_error(conn, slug: str) -> str | None:
+def slug_error(conn, slug: str, ignore_signup: int | None = None) -> str | None:
     problem = settings.slug_problem(slug)
     if problem:
         return problem
     if conn.execute("SELECT 1 FROM tenants WHERE slug = ?", (slug,)).fetchone():
         return f"“{slug}” is taken (slugs of removed tenants stay reserved)."
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'signups'").fetchone() and conn.execute(
+            "SELECT 1 FROM signups WHERE slug = ? AND id IS NOT ?"
+            " AND status IN ('pending_verification', 'checkout', 'creating', 'failed')", (slug, ignore_signup)).fetchone():
+        return f"“{slug}” is held by a sign-up in progress."
     return None
 
 
-def validate(conn, name: str, slug: str, email: str) -> list[str]:
+def validate(conn, name: str, slug: str, email: str, signup_id: int | None = None) -> list[str]:
     errors = []
     if not settings.provider_domain():
         errors.append("PROVIDER_DOMAIN isn't set, so tenants have nowhere to live.")
     if not name.strip():
         errors.append("Give the tenant a name.")
-    err = slug_error(conn, slug)
+    err = slug_error(conn, slug, signup_id)
     if err:
         errors.append(err)
     if "@" not in email or len(email) > 200:

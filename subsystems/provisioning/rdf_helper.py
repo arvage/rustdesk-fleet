@@ -30,7 +30,8 @@ is refused and can't be raced in. The image is always
 rustdesk/rustdesk-server:<VERSION> with VERSION like 1.1.16.
 
 HOST must be <slug>.<PROVIDER_DOMAIN> for a valid, non-reserved slug, the
-console host admin.<PROVIDER_DOMAIN>, or a tenant's custom domain. A custom
+console host admin.<PROVIDER_DOMAIN>, the public site (PUBLIC_SITE_HOST,
+default www.<PROVIDER_DOMAIN>), or a tenant's custom domain. A custom
 domain is accepted only when the control database (read-only) has it as kind
 'custom' for a trial or active tenant, and for issue-cert and write-vhost
 only when the helper's own DNS check passes (the rules below): the dashboard's
@@ -141,8 +142,11 @@ class Config:
     def __init__(self, provider_domain: str, data_dir: Path, vhost_dir: Path = VHOST_DIR,
                  webroot: Path = ACME_WEBROOT, le_live: Path = LE_LIVE, error_log: Path = NGINX_ERROR_LOG,
                  run=None, sleep=time.sleep, port_base: int = 21200, port_max: int = 21999,
-                 public_ipv4: str = "", public_ipv6: str = "", resolvers: tuple = (), dns=None):
+                 public_ipv4: str = "", public_ipv6: str = "", resolvers: tuple = (), dns=None,
+                 public_site_host: str = ""):
         self.provider_domain = provider_domain
+        # The public site (phase 2): www.<PROVIDER_DOMAIN> unless PUBLIC_SITE_HOST says otherwise.
+        self.public_site_host = public_site_host or (f"www.{provider_domain}" if provider_domain else "")
         self.public_ipv4, self.public_ipv6 = public_ipv4, public_ipv6
         self.resolvers = tuple(resolvers) or DEFAULT_RESOLVERS
         self.dns = dns          # query(resolver, name, type); None = dig through run
@@ -188,7 +192,11 @@ class Config:
                     raise HelperError(f"{key} is not an IPv{version} address in dashboard.env")
                 raw = str(addr)
             ips[key] = raw
+        public = values.get("PUBLIC_SITE_HOST", "").lower().strip().rstrip(".")
+        if public and not DOMAIN_RE.match(public):
+            raise HelperError("PUBLIC_SITE_HOST is invalid in dashboard.env")
         return cls(domain, Path(values.get("FLEET_DATA_DIR") or "/opt/rustdesk-fleet"), port_base=base, port_max=top,
+                   public_site_host=public,
                    public_ipv4=ips["PUBLIC_IPV4"], public_ipv6=ips["PUBLIC_IPV6"],
                    resolvers=parse_resolvers(values.get("DNS_CHECK_RESOLVERS", "")))
 
@@ -218,7 +226,7 @@ def check_host(cfg: Config, host: str) -> str:
     if not host.endswith(suffix):
         raise HelperError(f"{host!r} is not under {domain}")
     label = host[: -len(suffix)]
-    if label == "admin":
+    if label == "admin" or host == cfg.public_site_host:
         return host
     if not SLUG_RE.match(label) or label in RESERVED_SLUGS:
         raise HelperError(f"{host!r} is not a tenant domain")
@@ -264,6 +272,8 @@ def check_web_host(cfg: Config, host: str, dns: bool = False, any_status: bool =
     domain = cfg.need_domain()
     if host == domain or host.endswith("." + domain):
         return check_host(cfg, host)
+    if host == cfg.public_site_host:
+        return host
     problem = custom_domain_problem(host, domain)
     if problem:
         raise HelperError(f"{host!r}: {problem}")
@@ -280,7 +290,7 @@ def check_web_host(cfg: Config, host: str, dns: bool = False, any_status: bool =
 
 def is_custom(cfg: Config, host: str) -> bool:
     domain = cfg.need_domain()
-    return not (host == domain or host.endswith("." + domain))
+    return not (host == domain or host.endswith("." + domain) or host == cfg.public_site_host)
 
 
 def vhost_text(cfg: Config, host: str) -> str:

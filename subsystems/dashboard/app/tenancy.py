@@ -228,6 +228,18 @@ class _Console:
 CONSOLE = _Console()
 
 
+class _Public:
+    """tenant_for_request()'s answer for PUBLIC_SITE_HOST: the product page,
+    pricing, sign-up and the Stripe webhook (app/public_site.py), never a
+    tenant route."""
+
+    def __repr__(self) -> str:
+        return "PUBLIC"
+
+
+PUBLIC = _Public()
+
+
 def tenant_for_request(host: str, path: str, listener: str) -> "Tenant | _Console | None":
     """Host -> tenant, or CONSOLE for admin.<PROVIDER_DOMAIN>. Device API
     requests may also match a relay host, and on the legacy port-21114
@@ -237,6 +249,9 @@ def tenant_for_request(host: str, path: str, listener: str) -> "Tenant | _Consol
     console = settings.console_host()
     if console and normalize_host(host) == console:
         return CONSOLE
+    public = settings.public_site_host()
+    if public and normalize_host(host) == public:
+        return PUBLIC
     tenant = resolve_host(host)
     if tenant is None and path in DEVICE_API_PATHS:
         tenant = resolve_relay_host(host)
@@ -315,6 +330,9 @@ class TenantMiddleware:
                 return await _plain(send, 403, _FORBIDDEN_HTML)
             from app.console.main import console_app
             return await console_app(scope, receive, send)
+        if tenant is PUBLIC:
+            from app.public_site import public_app
+            return await public_app(scope, receive, send)
         is_device_api = path in DEVICE_API_PATHS
         if tenant is None and not is_device_api:
             return await _plain(send, 404, _NOT_FOUND_HTML)

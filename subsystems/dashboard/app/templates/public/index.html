@@ -5,9 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="RustDesk Fleet: a self-hosted RustDesk relay and management dashboard for MSPs and IT teams. One install script.">
 <title>RustDesk Fleet</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..900&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/static/site-fonts.css?v=1">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <style>
 /* Layout: operator's console. Wide expanded headline left, a live-looking device panel right;
    below, a relay diagram and plain-spoken spec sheet. One bold move: the expanded display type. */
@@ -276,6 +275,12 @@ footer .wrap {
   padding-block: 28px; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--line);
 }
 footer .mono { font-family: var(--mono); font-size: 0.8rem; }
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; margin-top: 28px; }
+.plan { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 10px; }
+.plan h3 { font-size: 1.3rem; font-stretch: 115%; }
+.plan ul { margin: 0; padding-left: 18px; }
+.plan-desc, .plan-limits { margin: 0; color: var(--muted); }
+.plan .btn { margin-top: auto; align-self: flex-start; }
 </style>
 </head>
 <body>
@@ -295,9 +300,11 @@ footer .mono { font-family: var(--mono); font-size: 0.8rem; }
       <a href="#features">Features</a>
       <a href="#how">How it works</a>
       <a href="#architecture">Architecture</a>
+      {% if plans %}<a href="#pricing">Pricing</a>{% endif %}
       <a href="https://github.com/arvage/rustdesk-fleet">GitHub</a>
-      <a class="btn btn-ghost" href="/login">Sign in</a>
-      <a class="btn btn-primary" href="#install">Install</a>
+      <a class="btn btn-ghost" href="/signin">Sign in</a>
+      {% if signup_open %}<a class="btn btn-primary" href="/signup">Start free trial</a>
+      {% else %}<a class="btn btn-primary" href="#install">Install</a>{% endif %}
     </nav>
   </div>
 </header>
@@ -517,6 +524,31 @@ footer .mono { font-family: var(--mono); font-size: 0.8rem; }
     </div>
   </section>
 
+  {% if plans %}
+  <section class="block" id="pricing" style="background: var(--surface); border-block: 1px solid var(--line);">
+    <div class="wrap">
+      <span class="eyebrow">Hosted plans</span>
+      <h2>Or let us run it for you</h2>
+      <p class="lede">Your own relay, dashboard and web address on our servers. {{ trial_days }}-day free trial with a card on file;
+        cancel any time before it ends and you pay nothing.</p>
+      <div class="plans">
+        {% for plan in plans %}
+        <div class="plan">
+          <h3>{{ plan.name }}</h3>
+          {% if plan.description %}<p class="plan-desc">{{ plan.description }}</p>{% endif %}
+          <ul>{% for pr in plan.prices %}<li>{{ pr.summary }}</li>{% endfor %}</ul>
+          {% if plan.max_technicians is not none or plan.max_devices is not none %}
+          <p class="plan-limits">Fits up to {% if plan.max_technicians is not none %}{{ plan.max_technicians }} technicians{% endif %}{% if plan.max_technicians is not none and plan.max_devices is not none %} and {% endif %}{% if plan.max_devices is not none %}{{ plan.max_devices }} devices{% endif %}</p>
+          {% endif %}
+          {% if signup_open %}<a class="btn btn-primary" href="/signup?plan={{ plan.id }}">Start free trial</a>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% if not signup_open %}<p class="hero-note">Sign-up is closed right now. Please check back soon.</p>{% endif %}
+    </div>
+  </section>
+  {% endif %}
+
   <section class="install" id="install">
     <div class="wrap">
       <span class="eyebrow">Install</span>
@@ -551,7 +583,7 @@ footer .mono { font-family: var(--mono); font-size: 0.8rem; }
   </div>
 </footer>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
   (function () {
     var btn = document.getElementById('copy-cmd');
     var text = [

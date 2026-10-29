@@ -618,5 +618,7 @@ def run_migrations(db_path=None) -> None:
     _webauthn.ensure_rp_column(conn)
     from app import billing_schema as _billing
     _billing.ensure_tables(conn)
+    from app import signup as _signup
+    _signup.ensure_tables(conn)
 
     conn.close()

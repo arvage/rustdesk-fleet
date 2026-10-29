@@ -37,7 +37,7 @@ def test_allowed_hosts(tmp_path, host):
 
 @pytest.mark.parametrize("host", [
     "rds.example.com", "evil.com", "acme.rds.example.com.evil.com", "x.acme.rds.example.com",
-    "acme.relay.rds.example.com", "relay.rds.example.com", "www.rds.example.com", "ACME.rds.example.com",
+    "acme.relay.rds.example.com", "relay.rds.example.com", "ACME.rds.example.com",
     "ac.rds.example.com", "1acme.rds.example.com", "acme-.rds.example.com", "a/b.rds.example.com",
     "acme.rds.example.com;reboot", " acme.rds.example.com", "../etc.rds.example.com", "",
 ])

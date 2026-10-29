@@ -1,6 +1,6 @@
 # Landing page
 
-`index.html` is the public product page for RustDesk Fleet. It is a single
+
 static file with no build step: inline CSS and JS, fonts from Google Fonts.
 
 The dashboard serves it at `/` to visitors who aren't signed in

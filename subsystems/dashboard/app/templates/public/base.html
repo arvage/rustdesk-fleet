@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}RustDesk Fleet{% endblock %}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css?v=9">
+  <script src="/static/app.js?v=2" defer></script>
+</head>
+<body>
+<div class="login-shell">
+  <div class="login-card" style="max-width:520px">
+    <div class="login-logo">
+      <div class="brand-icon">R</div>
+      <div>
+        <a href="/" class="brand-name" style="color:inherit;text-decoration:none">RustDesk Fleet</a>
+        <span class="brand-sub">Hosted remote support</span>
+      </div>
+    </div>
+    {% block body %}{% endblock %}
+  </div>
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

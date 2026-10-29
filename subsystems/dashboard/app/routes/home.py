@@ -4,10 +4,10 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app import paths
-from app.auth import _users_exist, require_auth
+from app.auth import require_auth
 from app.deps import get_db, log_event
 from app.notifications import fire_notification
 from app.tenancy import Tenant, get_tenant
@@ -137,19 +137,13 @@ def _set_flash(request: Request, type_: str, msg: str) -> None:
     request.session["flash"] = {"type": type_, "msg": msg}
 
 
-# Public product page shown at "/" to visitors who aren't signed in
-# (repo-root site/index.html, a static file with no server-side data).
-LANDING_PAGE = Path(__file__).resolve().parents[4] / "site" / "index.html"
-
-
 # Plain `def` (not async): reading the compose file and version pin is
 # blocking, so let FastAPI run this in its threadpool.
 @router.get("/", response_class=HTMLResponse)
 def home(request: Request, tenant: Tenant = Depends(get_tenant)):
-    # Unknown hosts never get here (TenantMiddleware answers 404).
-    signed_in = request.session.get("user_id") or request.session.get("support_session_id")
-    if _users_exist(tenant) and not signed_in and LANDING_PAGE.is_file():
-        return FileResponse(LANDING_PAGE, media_type="text/html")
+    # Unknown hosts never get here (TenantMiddleware answers 404). Signed
+    # out, require_auth sends the visitor to /login; the product page lives
+    # on the public host (app/public_site.py).
     current_user = require_auth(request)
     from setup_server import get_server_version
     from generate_installer import get_pinned_version
