@@ -258,6 +258,11 @@ def creation_finished(signup_id: int, tenant_id: int) -> None:
     except Exception as e:
         log.warning("tagging %s: %s", row["stripe_subscription_id"], e)
     sync_subscription(row["stripe_subscription_id"])
+    try:
+        from app import billing_usage
+        billing_usage.push_quantities(tenant_id, force=True)      # the real counts from day one
+    except Exception as e:
+        log.warning("quantities for tenant %s: %s", tenant_id, e)
 
 
 def creation_failed(signup_id: int, error: str) -> None:
@@ -505,6 +510,11 @@ def reconcile(at: datetime | None = None) -> list[str]:
         except Exception as e:
             changes.append(f"{r['slug']}: sync failed ({e})")
             continue
+        try:
+            from app import billing_usage
+            billing_usage.push_quantities(r["tenant_id"], force=True, at=at)
+        except Exception as e:
+            log.warning("quantities for %s: %s", r["slug"], e)
         conn = get_db()
         after = conn.execute("SELECT s.status, t.status FROM billing_subscriptions s JOIN tenants t ON t.id = s.tenant_id"
                              " WHERE s.tenant_id = ?", (r["tenant_id"],)).fetchone()

@@ -620,5 +620,7 @@ def run_migrations(db_path=None) -> None:
     _billing.ensure_tables(conn)
     from app import signup as _signup
     _signup.ensure_tables(conn)
+    from app import billing_usage as _usage
+    _usage.ensure_table(conn)
 
     conn.close()

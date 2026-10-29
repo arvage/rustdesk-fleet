@@ -93,6 +93,7 @@ def run_once() -> None:
                  _lifecycle,
                  _support_expiry,
                  _signups,
+                 _billing_usage,
                  _billing):
         try:
             step()
@@ -110,6 +111,11 @@ def _missing(day: date) -> bool:
 def _support_expiry() -> None:
     from app import support
     support.sweep()
+
+
+def _billing_usage() -> None:
+    from app import billing_usage
+    billing_usage.hourly()
 
 
 def _billing() -> None:

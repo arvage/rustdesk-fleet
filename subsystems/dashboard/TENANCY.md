@@ -29,6 +29,9 @@ There are no exceptions: child tables such as `webauthn_credentials` and
 | `billing_customers` | provider | direct `tenant_id` (the tenant's Stripe customer; kept after purge, like usage) | `tenant_id`; `stripe_customer_id` |
 | `billing_subscriptions` | provider | direct `tenant_id` (the tenant's subscription as last synced from Stripe; kept after purge) | `tenant_id`; `stripe_subscription_id` |
 | `stripe_events` | provider | — (webhook events received, for idempotency and errors) | `event_id` |
+| `signups` | provider | `tenant_id` once created (self-service sign-ups before and after they become tenants; password stored hashed) | `ref` |
+| `trial_cards` | provider | — (card fingerprints that have had a trial; never deleted, so a purge doesn't forget them) | `fingerprint` |
+| `billing_device_peaks` | provider | `tenant_id` (each day's peak device count, for metered plans) | `(tenant_id, day)` |
 | `signing_config` | provider | — (singleton) | `id = 1` |
 | `sqlite_sequence` | SQLite internal | — | — |
 | `client_groups` | tenant | direct | `(tenant_id, slug)`; `(tenant_id, id)` for composite foreign keys |
