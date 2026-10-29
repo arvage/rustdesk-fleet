@@ -40,6 +40,7 @@
         <div class="nav-label">Provider</div>
         {{ item('/', 'Tenants', request.url.path == '/' or request.url.path.startswith('/tenants')) }}
         {{ item('/relays', 'Relays', request.url.path.startswith('/relays')) }}
+        {{ item('/domains', 'Custom domains', request.url.path.startswith('/domains')) }}
         {{ item('/jobs', 'Jobs', request.url.path.startswith('/jobs')) }}
         {{ item('/audit', 'Audit log', request.url.path == '/audit') }}
       </div>

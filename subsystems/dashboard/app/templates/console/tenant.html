@@ -34,10 +34,26 @@
 <div class="section"><div class="card"><div class="card-body">
   <h2 style="font-size:14px;margin:0 0 10px">Domains</h2>
   <div class="table-wrap"><table>
-    <thead><tr><th>Hostname</th><th>Kind</th><th>Primary</th><th>TLS</th><th>Certificate expires</th></tr></thead>
-    <tbody>{% for d in domains %}<tr><td><a href="https://{{ d.hostname }}/" target="_blank" rel="noopener">{{ d.hostname }}</a></td><td>{{ d.kind }}</td>
-      <td>{{ "yes" if d.is_primary else "" }}</td><td>{{ d.tls_status or "" }}</td><td>{{ d.cert_expires_at | localtime if d.cert_expires_at else "—" }}</td></tr>{% endfor %}</tbody>
+    <thead><tr><th>Hostname</th><th>Kind</th><th>Status</th><th>Check</th><th>Last DNS check</th><th>Certificate expires</th><th></th></tr></thead>
+    <tbody>{% for d in domains %}<tr>
+      <td>{% if d.kind != 'custom' or d.status in ('active', 'dns_broken') %}<a href="https://{{ d.hostname }}/" target="_blank" rel="noopener">{{ d.hostname }}</a>{% else %}{{ d.hostname }}{% endif %}
+        {% if d.is_primary %}<span class="badge badge-built">primary</span>{% endif %}</td>
+      <td>{{ d.kind }}</td>
+      <td>{% if d.remove_reason %}removing{% else %}{{ d.status or "active" }}{% endif %}</td>
+      <td>{% if d.kind == 'custom' %}{{ {"cname": "CNAME", "txt": "A + TXT"}.get(d.check_method, "—") }}{% endif %}</td>
+      <td>{% if d.kind == 'custom' and d.last_checked_at %}{{ d.last_checked_at | localtime }}:
+        {% if d.last_check_ok %}points here{% else %}<span class="text-sm">{{ d.last_check_message }}</span>{% endif %}{% elif d.kind == 'custom' %}not yet{% endif %}</td>
+      <td>{% if d.cert_expires_at %}{{ d.cert_expires_at | localtime("%Y-%m-%d") }}{% if d.cert_expires_at <= expiring_before %}
+        <span class="badge badge-failed">soon</span>{% endif %}{% else %}—{% endif %}</td>
+      <td>{% if d.kind == 'custom' and not d.remove_reason %}
+        <form method="post" action="/tenants/{{ t.id }}/domains/{{ d.id }}/remove" style="display:flex;gap:6px;flex-wrap:wrap;margin:0"
+              data-confirm="Remove {{ d.hostname }} from {{ t.display_name }}? Its certificate is revoked and links on it stop working. The tenant's admins are emailed the reason.">
+          <input name="reason" placeholder="Reason (sent to the tenant)" required maxlength="300" style="min-width:0;flex:1 1 160px">
+          <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Remove</button>
+        </form>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
   </table></div>
+  <p class="text-sm text-muted" style="margin:8px 0 0">Tenants add custom domains themselves (Admin → Domains); the console can only remove one.</p>
 </div></div></div>
 
 <div class="section"><div class="card"><div class="card-body">

@@ -1,0 +1,29 @@
+{% extends "console/base.html" %}
+{% block title %}Custom domains — Provider console{% endblock %}
+{% block page_title %}Custom domains{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+{% block content %}
+<p class="text-muted text-sm" style="margin:0 0 16px">Tenants' custom domains that need attention: DNS no longer
+  pointing here (still served for 7 days), set-ups that failed, and certificates expiring within {{ warn_days }} days
+  (certbot renews them automatically; one that keeps getting closer means renewal is failing).
+  {{ total }} custom domain{{ "s" if total != 1 }} in all.</p>
+<div class="section"><div class="card"><div class="card-body" style="padding:0">
+  {% if rows %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Domain</th><th>Tenant</th><th>Problem</th><th>Since / last check</th><th>Certificate expires</th></tr></thead>
+    <tbody>{% for d in rows %}<tr>
+      <td>{{ d.hostname }}</td>
+      <td><a href="/tenants/{{ d.tenant_id }}">{{ d.display_name }}</a> <span class="text-muted text-sm">{{ d.slug }}</span></td>
+      <td>{% if d.status == 'dns_broken' %}<span class="badge badge-failed">DNS broken</span>
+          {% elif d.status == 'failed' %}<span class="badge badge-offline">failed</span>
+          {% else %}<span class="badge badge-pending">certificate expiring</span>{% endif %}
+          {% if d.last_check_message %}<div class="text-sm text-muted">{{ d.last_check_message }}</div>{% endif %}</td>
+      <td>{% if d.broken_since %}broken since {{ d.broken_since | localtime }}{% elif d.last_checked_at %}{{ d.last_checked_at | localtime }}{% else %}—{% endif %}</td>
+      <td>{{ d.cert_expires_at | localtime("%Y-%m-%d") if d.cert_expires_at else "—" }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}
+  <p class="text-muted" style="padding:16px;margin:0">No custom domain needs attention.</p>
+  {% endif %}
+</div></div></div>
+{% endblock %}

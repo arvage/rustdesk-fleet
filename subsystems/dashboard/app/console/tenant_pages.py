@@ -144,7 +144,7 @@ def usage(conn, tenant_id: int) -> dict:
 
 @router.get("/tenants/{tenant_id}", response_class=HTMLResponse)
 def tenant_detail(request: Request, tenant_id: int, user: dict = Depends(require_provider)):
-    from app.console import relays
+    from app.console import domain_pages, relays
     from app.tenancy import load_tenant
     conn = get_db()
     rows = tenant_summaries(conn, tenant_id)
@@ -177,6 +177,7 @@ def tenant_detail(request: Request, tenant_id: int, user: dict = Depends(require
         "invites": invites, "usage": use, "jobs": job_rows, "now": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         "new_invite": request.session.pop("new_invite_link", None),
         "grant": grant, "support_sessions": support_sessions,
+        "expiring_before": domain_pages.expiring_before(),
     })
 
 
