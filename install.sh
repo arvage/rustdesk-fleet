@@ -167,6 +167,73 @@ PY
   done <<< "$rows"
 }
 
+# Dashboard locations, shared by both vhosts. The sign-in endpoints get a
+# per-IP limit on POSTs (zone and map defined at the top of the vhost file);
+# GETs, the device API and everything else are not limited. The app applies
+# its own per-email and per-IP lockouts on top of this. Every location drops
+# a client-sent X-Fleet-Listener (an empty value isn't passed upstream): only
+# the port-21114 block may set it.
+dash_locations() {
+  cat <<'NGX'
+    # Support sign-in links carry a one-time token in the query: log the path
+    # only (log_format rdf_noquery, conf.d/rdf-log-format.conf).
+    location = /support/enter {
+        access_log /var/log/nginx/access.log rdf_noquery;
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  "";
+        proxy_read_timeout 60s;
+    }
+    location = /login {
+        limit_req        zone=rdf_signin burst=20 nodelay;
+        limit_req_status 429;
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  "";
+        proxy_read_timeout 60s;
+    }
+    # No trailing slash: a proxied prefix ending in / makes nginx 301
+    # /login/webauthn -> /login/webauthn/, and the app redirects back (loop).
+    location ^~ /login/webauthn {
+        limit_req        zone=rdf_signin burst=20 nodelay;
+        limit_req_status 429;
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  "";
+        proxy_read_timeout 60s;
+    }
+    location = /setup {
+        limit_req        zone=rdf_signin burst=20 nodelay;
+        limit_req_status 429;
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  "";
+        proxy_read_timeout 60s;
+    }
+    location / {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Fleet-Listener  "";
+        proxy_read_timeout 60s;
+    }
+NGX
+}
+
 # http-level log format for /support/enter (dash_locations): the request
 # line without its query string, which holds a one-time sign-in token.
 write_log_format() {
@@ -567,73 +634,6 @@ server {
     }
     location / { return 404; }
 }
-NGX
-}
-
-# Dashboard locations, shared by both vhosts. The sign-in endpoints get a
-# per-IP limit on POSTs (zone and map defined at the top of the vhost file);
-# GETs, the device API and everything else are not limited. The app applies
-# its own per-email and per-IP lockouts on top of this. Every location drops
-# a client-sent X-Fleet-Listener (an empty value isn't passed upstream): only
-# the port-21114 block may set it.
-dash_locations() {
-  cat <<'NGX'
-    # Support sign-in links carry a one-time token in the query: log the path
-    # only (log_format rdf_noquery, conf.d/rdf-log-format.conf).
-    location = /support/enter {
-        access_log /var/log/nginx/access.log rdf_noquery;
-        proxy_pass         http://127.0.0.1:8000;
-        proxy_set_header   Host              $host;
-        proxy_set_header   X-Real-IP         $remote_addr;
-        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_set_header   X-Fleet-Listener  "";
-        proxy_read_timeout 60s;
-    }
-    location = /login {
-        limit_req        zone=rdf_signin burst=20 nodelay;
-        limit_req_status 429;
-        proxy_pass         http://127.0.0.1:8000;
-        proxy_set_header   Host              $host;
-        proxy_set_header   X-Real-IP         $remote_addr;
-        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_set_header   X-Fleet-Listener  "";
-        proxy_read_timeout 60s;
-    }
-    # No trailing slash: a proxied prefix ending in / makes nginx 301
-    # /login/webauthn -> /login/webauthn/, and the app redirects back (loop).
-    location ^~ /login/webauthn {
-        limit_req        zone=rdf_signin burst=20 nodelay;
-        limit_req_status 429;
-        proxy_pass         http://127.0.0.1:8000;
-        proxy_set_header   Host              $host;
-        proxy_set_header   X-Real-IP         $remote_addr;
-        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_set_header   X-Fleet-Listener  "";
-        proxy_read_timeout 60s;
-    }
-    location = /setup {
-        limit_req        zone=rdf_signin burst=20 nodelay;
-        limit_req_status 429;
-        proxy_pass         http://127.0.0.1:8000;
-        proxy_set_header   Host              $host;
-        proxy_set_header   X-Real-IP         $remote_addr;
-        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_set_header   X-Fleet-Listener  "";
-        proxy_read_timeout 60s;
-    }
-    location / {
-        proxy_pass         http://127.0.0.1:8000;
-        proxy_set_header   Host              $host;
-        proxy_set_header   X-Real-IP         $remote_addr;
-        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_set_header   X-Fleet-Listener  "";
-        proxy_read_timeout 60s;
-    }
 NGX
 }
 
