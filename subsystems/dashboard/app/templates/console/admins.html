@@ -6,7 +6,7 @@
 <div class="flash success" style="word-break:break-all">
   One-time passkey enrollment link for {{ new_link.email }} (valid for 1 hour{% if new_link.emailed %}, also emailed{% endif %}):<br>
   <code>{{ new_link.link }}</code>
-  <button class="btn-copy" onclick="copyText('{{ new_link.link }}', this)">Copy</button>
+  <button class="btn-copy" data-copy="{{ new_link.link }}">Copy</button>
 </div>
 {% endif %}
 <div class="section">
@@ -22,7 +22,7 @@
           {% if not a.disabled_at %}
           <form method="post" action="/admins/{{ a.id }}/enroll-link" style="display:inline"><button class="btn btn-ghost btn-sm">New enrollment link</button></form>
           {% if a.id != current_user.id %}
-          <form method="post" action="/admins/{{ a.id }}/disable" style="display:inline" onsubmit="return confirm('Disable {{ a.email }}?')"><button class="btn btn-ghost btn-sm" style="color:var(--danger)">Disable</button></form>
+          <form method="post" action="/admins/{{ a.id }}/disable" style="display:inline" data-confirm="Disable {{ a.email }}?"><button class="btn btn-ghost btn-sm" style="color:var(--danger)">Disable</button></form>
           {% endif %}
           {% else %}
           <form method="post" action="/admins/{{ a.id }}/enable" style="display:inline"><button class="btn btn-ghost btn-sm">Enable</button></form>

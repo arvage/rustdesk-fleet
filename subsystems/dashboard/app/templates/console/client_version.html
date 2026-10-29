@@ -9,7 +9,7 @@
   <div class="flash success" style="margin:0">Rebuilding installers in the background…</div>
   {% elif update_available %}
   <form method="post" action="/client-version/update" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"
-        onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Downloading…'">
+        data-busy="Downloading…">
     <button class="btn btn-primary">Update installers to {{ latest }}</button>
     <label class="text-sm text-muted"><input type="checkbox" name="rebuild" value="1" checked> Also rebuild every tenant's outdated installers</label>
   </form>

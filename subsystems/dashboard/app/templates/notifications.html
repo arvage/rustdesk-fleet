@@ -81,7 +81,7 @@
           <label class="toggle" style="margin:0">
             <input type="checkbox" name="enabled" value="1"
                    {% if settings.enabled %}checked{% endif %}
-                   onchange="this.form.submit()">
+                   data-submit-on-change>
             <span class="toggle-slider"></span>
           </label>
           <div>
@@ -204,7 +204,7 @@
 
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function () {
   const status = document.getElementById('trigger-status');
   let hideTimer;

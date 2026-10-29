@@ -9,7 +9,7 @@
     <p class="text-sm text-muted" style="margin:4px 0 0">Relay ports {{ port_range[0] }}–{{ port_range[1] }} (TCP and UDP) must be open in the cloud firewall. Tenant #1 uses the default 21115–21119.</p>
   </div>
   <form method="post" action="/relays/upgrade-all" style="display:flex;gap:8px;align-items:center"
-        onsubmit="return confirm('Upgrade every relay, one at a time? Each restart drops that tenant\'s active sessions briefly.')">
+        data-confirm="Upgrade every relay, one at a time? Each restart drops that tenant's active sessions briefly.">
     <input name="version" placeholder="{{ latest or 'version' }}" style="width:110px">
     <button class="btn btn-primary btn-sm">Upgrade all relays</button>
   </form>
@@ -30,10 +30,10 @@
       <td style="white-space:nowrap">
         {% for a in ["restart", "stop", "start"] %}
         <form method="post" action="/relays/{{ r.tenant_id }}/{{ a }}" style="display:inline"
-              onsubmit="return confirm('{{ a|capitalize }} {{ r.slug }}\'s relay?')"><button class="btn btn-ghost btn-sm">{{ a|capitalize }}</button></form>
+              data-confirm="{{ a|capitalize }} {{ r.slug }}'s relay?"><button class="btn btn-ghost btn-sm">{{ a|capitalize }}</button></form>
         {% endfor %}
         <form method="post" action="/relays/{{ r.tenant_id }}/upgrade" style="display:inline"
-              onsubmit="return confirm('Upgrade {{ r.slug }}\'s relay to {{ latest }}?')"><button class="btn btn-ghost btn-sm">Upgrade</button></form>
+              data-confirm="Upgrade {{ r.slug }}'s relay to {{ latest }}?"><button class="btn btn-ghost btn-sm">Upgrade</button></form>
       </td>
     </tr>
   {% endfor %}

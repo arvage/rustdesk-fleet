@@ -7,7 +7,7 @@ from app.deps import get_db
 def _values(html: str) -> list[str]:
     import re
     sec = html[html.index('id="app"'):html.index('id="s2"')]
-    return re.findall(r'data-v="([^"]*)"', sec)
+    return re.findall(r'data-copy="([^"]*)"', sec)
 
 
 def test_each_tenant_sees_its_own_server_settings(two_tenants):

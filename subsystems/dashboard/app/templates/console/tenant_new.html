@@ -12,7 +12,7 @@
   <p class="text-sm text-muted" style="margin:0">Creating takes a minute: a relay with its own keypair and port block, a certificate and vhost for the web domain, the client PDF guides, and an invitation (valid 72 hours) for the first admin.</p>
   <div><button class="btn btn-primary">Create tenant</button></div>
 </div></div></form>
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 const nameEl = document.getElementById('name'), slugEl = document.getElementById('slug');
 let touched = slugEl.value !== '';
 function suggest(n) { return n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+/, '').slice(0, 32).replace(/-+$/, ''); }

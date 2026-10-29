@@ -40,7 +40,7 @@
     </div>
     {% if not r.is_system %}
     <form method="post" action="/admin/roles/{{ r.key }}/delete" style="margin:0"
-          onsubmit="return confirm('Delete the role {{ r.name }}?')">
+          data-confirm="Delete the role {{ r.name }}?">
       <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)"
               {% if r.users %}disabled title="Reassign its {{ r.users }} user(s) first"{% endif %}>Delete</button>
     </form>

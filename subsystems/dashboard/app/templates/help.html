@@ -48,7 +48,7 @@
                             ("API server", app_settings.api_server), ("Key", app_settings.key)) %}
     <tr><td>{{ label }}</td>
         <td><code style="word-break:break-all">{{ value }}</code>
-            <button type="button" class="btn-copy" style="margin-left:6px" data-v="{{ value }}" onclick="copyText(this.dataset.v, this)" title="Copy {{ label }}">Copy</button></td></tr>
+            <button type="button" class="btn-copy" style="margin-left:6px" data-copy="{{ value }}" title="Copy {{ label }}">Copy</button></td></tr>
     {% endfor %}
   </table>
   {% else %}

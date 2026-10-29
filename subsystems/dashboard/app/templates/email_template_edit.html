@@ -62,12 +62,12 @@
 
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button type="submit" class="btn btn-primary">Save</button>
-      <button type="button" class="btn btn-ghost" onclick="sendTest()" id="test-btn">Send test to me</button>
+      <button type="button" class="btn btn-ghost" data-onclick="sendTest" id="test-btn">Send test to me</button>
       <span id="test-result" class="text-sm"></span>
       <div style="flex:1"></div>
       {% if t.customized %}
       <button type="submit" name="action" value="reset" class="btn btn-ghost btn-sm" style="color:var(--danger)"
-              onclick="return confirm('Reset this email to the default wording?')">Reset to default</button>
+              data-confirm="Reset this email to the default wording?">Reset to default</button>
       {% endif %}
     </div>
     <p class="text-muted" style="font-size:12px;margin:10px 0 0">The test sends the <strong>saved</strong> version, with sample data, to {{ current_user.email }}.</p>
@@ -82,7 +82,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 const KEY = {{ key | tojson }};
 const form = document.getElementById('et-form');
 let lastField = document.getElementById('f-intro');

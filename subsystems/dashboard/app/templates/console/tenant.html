@@ -5,7 +5,7 @@
 {% block content %}
 {% if new_invite %}
 <div class="flash success" style="word-break:break-all">Invitation link for {{ new_invite.email }} (valid 72 hours{% if new_invite.emailed %}, also emailed{% endif %}):<br>
-  <code>{{ new_invite.link }}</code> <button class="btn-copy" onclick="copyText('{{ new_invite.link }}', this)">Copy</button></div>
+  <code>{{ new_invite.link }}</code> <button class="btn-copy" data-copy="{{ new_invite.link }}">Copy</button></div>
 {% endif %}
 <div class="stats">
   <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value" style="font-size:18px">{{ t.status }}</div>
@@ -70,11 +70,11 @@
     <input name="days" value="14" size="4"> days <button class="btn btn-ghost btn-sm">Extend trial</button></form><br>
   {% endif %}
   {% if t.status == "trial" %}
-  <form method="post" action="/tenants/{{ t.id }}/activate" style="display:inline" onsubmit="return confirm('Activate {{ t.slug }}? It leaves its trial, and its users stop seeing the trial notice.')">
+  <form method="post" action="/tenants/{{ t.id }}/activate" style="display:inline" data-confirm="Activate {{ t.slug }}? It leaves its trial, and its users stop seeing the trial notice.">
     <button class="btn btn-primary btn-sm">Activate</button></form>
   {% endif %}
   {% if t.status in ("trial", "active") %}
-  <form method="post" action="/tenants/{{ t.id }}/suspend" style="display:inline" onsubmit="return confirm('Suspend {{ t.slug }}? Its dashboard and download links stop working; its relay keeps running.')">
+  <form method="post" action="/tenants/{{ t.id }}/suspend" style="display:inline" data-confirm="Suspend {{ t.slug }}? Its dashboard and download links stop working; its relay keeps running.">
     <button class="btn btn-ghost btn-sm" style="color:var(--warning)">Suspend</button></form>
   {% endif %}
   {% if t.status == "suspended" or (t.status == "cancelled" and t.purge_after and t.purge_after > now) %}
@@ -93,7 +93,7 @@
   <form method="post" action="/tenants/{{ t.id }}/extend-grace" style="display:inline-flex;gap:8px;align-items:center">
     <input name="days" value="30" size="4"> days <button class="btn btn-ghost btn-sm">Extend grace period</button></form>
   <form method="post" action="/tenants/{{ t.id }}/purge" style="display:flex;gap:8px;align-items:center;margin-top:10px"
-        onsubmit="return confirm('Purge {{ t.slug }} now? This deletes its relay, keys, files and data for good.')">
+        data-confirm="Purge {{ t.slug }} now? This deletes its relay, keys, files and data for good.">
     <input name="confirm" placeholder="type {{ t.slug }} to purge" required>
     <button class="btn btn-ghost btn-sm" style="color:var(--danger)">Purge now</button></form>
   {% endif %}

@@ -30,7 +30,7 @@
       <thead><tr><th>Email</th><th>Subject</th><th>Status</th><th></th></tr></thead>
       <tbody>
       {% for t in items %}
-        <tr style="cursor:pointer" onclick="location.href='/admin/emails/{{ t.key }}'">
+        <tr style="cursor:pointer" data-href="/admin/emails/{{ t.key }}">
           <td style="font-weight:600;white-space:nowrap"><a href="/admin/emails/{{ t.key }}" style="color:var(--text-1);text-decoration:none">{{ t.name }}</a></td>
           <td class="text-sm text-muted">{{ t.subject }}</td>
           <td>{% if t.customized %}<span class="badge badge-signed">customized</span>{% else %}<span class="badge badge-unknown">default</span>{% endif %}</td>

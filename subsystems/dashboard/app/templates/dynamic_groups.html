@@ -26,7 +26,7 @@
       </thead>
       <tbody>
       {% for g in items %}
-        <tr style="cursor:pointer" onclick="location.href='/dynamic-groups/{{ g.id }}'">
+        <tr style="cursor:pointer" data-href="/dynamic-groups/{{ g.id }}">
           <td>
             <a href="/dynamic-groups/{{ g.id }}" style="font-weight:600;color:var(--accent);text-decoration:none">{{ g.name }}</a>
             {% if g.description %}<div class="text-muted" style="font-size:12px;margin-top:2px">{{ g.description }}</div>{% endif %}

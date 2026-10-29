@@ -40,7 +40,7 @@
   </table></div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function () {
   const POLL_MS = 15000;
   // With a configured threshold: red at/above it, amber within 10 points below,

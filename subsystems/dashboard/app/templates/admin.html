@@ -62,7 +62,7 @@
     <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Prune logs</h2>
     <p class="text-muted text-sm" style="margin:0 0 14px">Delete audit events older than the chosen age. Currently {{ log_count }} entries.</p>
     <form method="post" action="/admin/logs/prune" style="display:flex;gap:8px;align-items:center;margin:0"
-          onsubmit="return confirm('Permanently delete audit log entries older than the selected age?')">
+          data-confirm="Permanently delete audit log entries older than the selected age?">
       <select name="days" style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--radius-sm);font-size:13px;background:var(--surface);color:var(--text-1)">
         <option value="30">older than 30 days</option>
         <option value="90" selected>older than 90 days</option>

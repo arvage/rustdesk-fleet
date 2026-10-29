@@ -40,7 +40,7 @@
         <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#0F172A;border-radius:8px">
           <label style="position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;margin:0">
             <input type="checkbox" name="enabled" value="1" id="offsite-toggle" {% if cfg.enabled %}checked{% endif %}
-                   style="opacity:0;width:0;height:0" onchange="toggleOffsite(this)">
+                   style="opacity:0;width:0;height:0" data-onchange="toggleOffsite" data-args='[{"$":"this"}]'>
             <span style="position:absolute;inset:0;cursor:pointer;background:{{ '#3B82F6' if cfg.enabled else '#334155' }};border-radius:20px;transition:background .15s"></span>
             <span style="position:absolute;top:2px;left:{{ '18px' if cfg.enabled else '2px' }};width:16px;height:16px;background:#fff;border-radius:50%;pointer-events:none;transition:left .15s"></span>
           </label>
@@ -58,7 +58,7 @@
           <div class="bk-grid">
             <div class="field">
               <label>S3 provider</label>
-              <select name="s3_provider" id="s3_provider" onchange="syncS3Preset()">
+              <select name="s3_provider" id="s3_provider" data-onchange="syncS3Preset">
                 <option value="aws" {% if cfg.s3_provider=='aws' %}selected{% endif %}>Amazon S3</option>
                 <option value="wasabi" {% if cfg.s3_provider=='wasabi' %}selected{% endif %}>Wasabi</option>
                 <option value="b2" {% if cfg.s3_provider=='b2' %}selected{% endif %}>Backblaze B2 (S3)</option>
@@ -124,7 +124,7 @@
         </div>
       </div>
       <form method="post" action="/backup/run" style="margin:0;flex-shrink:0"
-            onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Backing up…'">
+            data-busy="Backing up…">
         <button type="submit" class="btn btn-primary btn-sm">Back up now</button>
       </form>
     </div>
@@ -157,13 +157,13 @@
             <td style="white-space:nowrap;text-align:right">
               <a href="/backup/download?archive={{ a.file }}" class="btn btn-ghost btn-sm">Download</a>
               <form method="post" action="/backup/restore" style="display:inline;margin:0"
-                    onsubmit="return confirm('Restore from {{ a.file }}?\n\nThis overwrites the server keypair and databases with this archive and restarts the relay. A safety snapshot of the current state is taken first. You may be logged out.\n\nProceed?')">
+                    data-confirm="Restore from {{ a.file }}?&#10;&#10;This overwrites the server keypair and databases with this archive and restarts the relay. A safety snapshot of the current state is taken first. You may be logged out.&#10;&#10;Proceed?">
                 <input type="hidden" name="archive" value="{{ a.file }}">
                 <input type="hidden" name="confirm" value="yes">
                 <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--warning)">Restore</button>
               </form>
               <form method="post" action="/backup/delete" style="display:inline;margin:0"
-                    onsubmit="return confirm('Delete {{ a.file }} from this server?{% if archives|length == 1 %}\n\nThis is the ONLY local archive — you will have no local backup until the next one runs.{% endif %}\n\nOff-site copies are not affected. This cannot be undone.')">
+                    data-confirm="Delete {{ a.file }} from this server?{% if archives|length == 1 %}&#10;&#10;This is the ONLY local archive — you will have no local backup until the next one runs.{% endif %}&#10;&#10;Off-site copies are not affected. This cannot be undone.">
                 <input type="hidden" name="archive" value="{{ a.file }}">
                 <input type="hidden" name="confirm" value="yes">
                 <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Delete</button>
@@ -236,7 +236,7 @@
 
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 // data-confirm forms: ask first, then show a busy label while the request runs.
 document.querySelectorAll('form[data-confirm]').forEach(f => f.addEventListener('submit', e => {
   if (!confirm(f.dataset.confirm.replace(/\\n/g, '\n'))) { e.preventDefault(); return; }

@@ -28,7 +28,7 @@
 {% if devices %}
 <div style="margin-bottom:12px">
   <input id="dg-filter" type="search" placeholder="Filter these devices…" class="filter-input" style="width:260px"
-         oninput="const q=this.value.toLowerCase();document.querySelectorAll('#dg-table tbody tr').forEach(r=>r.style.display=r.textContent.toLowerCase().includes(q)?'':'none')">
+         data-oninput="filterDgRows" data-args='[{"$":"value"}]'>
 </div>
 <div class="card">
   <div class="table-wrap">
@@ -80,8 +80,16 @@
 
 {% if 'manage_devices' in (current_user.permissions or []) %}
 <form method="post" action="/dynamic-groups/{{ group.id }}/delete" style="margin-top:22px"
-      onsubmit='return confirm({{ ("Delete the dynamic group “" ~ group.name ~ "”? Devices are not affected.") | tojson }})'>
+      data-confirm="Delete the dynamic group “{{ group.name }}”? Devices are not affected.">
   <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Delete this dynamic group</button>
 </form>
 {% endif %}
+<script nonce="{{ request.state.csp_nonce }}">
+function filterDgRows(value) {
+  const q = value.toLowerCase();
+  document.querySelectorAll('#dg-table tbody tr').forEach(r => {
+    r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+</script>
 {% endblock %}

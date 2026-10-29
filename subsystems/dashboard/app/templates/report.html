@@ -3,7 +3,7 @@
 {% block page_title %}{{ title }}{% endblock %}
 {% block content_class %}content-wide{% endblock %}
 {% block topbar_actions %}
-  <button type="button" class="btn btn-ghost btn-sm" onclick="window.print()">Print</button>
+  <button type="button" class="btn btn-ghost btn-sm" data-onclick="printReport">Print</button>
 {% endblock %}
 
 {% block content %}
@@ -66,14 +66,14 @@
 {% if uses_group or uses_period %}
 <form method="get" class="report-filters" style="display:flex;gap:8px;align-items:center;margin-bottom:18px;flex-wrap:wrap">
   {% if uses_group %}
-  <select name="group" onchange="this.form.submit()" class="filter-input" style="width:auto">
+  <select name="group" data-submit-on-change class="filter-input" style="width:auto">
     <option value="">All client groups</option>
     {% for g in groups %}<option value="{{ g.slug }}" {% if ctx.group == g.slug %}selected{% endif %}>{{ g.display_name }}</option>{% endfor %}
     <option value="__none__" {% if ctx.group == '__none__' %}selected{% endif %}>No client group</option>
   </select>
   {% endif %}
   {% if uses_period %}
-  <select name="days" onchange="this.form.submit()" class="filter-input" style="width:auto">
+  <select name="days" data-submit-on-change class="filter-input" style="width:auto">
     {% for d, label in periods %}<option value="{{ d }}" {% if ctx.days == d %}selected{% endif %}>{{ label }}</option>{% endfor %}
   </select>
   {% endif %}
@@ -172,7 +172,9 @@
 {% endfor %}
 
 <div id="rp-tip" role="tooltip"></div>
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
+function printReport() { window.print(); }
+
 // One shared tooltip for every chart mark (data-tip); hit area = the whole mark/column slot.
 (function () {
   const tip = document.getElementById('rp-tip');

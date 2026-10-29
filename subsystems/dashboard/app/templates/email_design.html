@@ -90,7 +90,7 @@
       <button type="submit" class="btn btn-primary">Save design</button>
       <div style="flex:1"></div>
       <button type="submit" name="action" value="reset" class="btn btn-ghost btn-sm" style="color:var(--danger)"
-              onclick="return confirm('Reset colors, brand names, font and footers to the defaults? The logo is kept.')">Reset to defaults</button>
+              data-confirm="Reset colors, brand names, font and footers to the defaults? The logo is kept.">Reset to defaults</button>
     </div>
   </div></form>
 
@@ -107,7 +107,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 const form = document.getElementById('d-form');
 // Keep each color picker and its hex box in sync.
 form.querySelectorAll('input[type=color]').forEach(picker => {

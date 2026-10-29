@@ -8,7 +8,7 @@
   <div id="job-error" class="flash error" style="margin-top:12px;display:none;white-space:pre-wrap"></div>
   {% if job.tenant_id %}<p style="margin-top:12px"><a href="/tenants/{{ job.tenant_id }}">Tenant details</a></p>{% endif %}
 </div></div></div>
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 const ICON = { running: '⏳', done: '✓', failed: '✗' };
 function render(j) {
   document.getElementById('job-status').textContent = j.status;

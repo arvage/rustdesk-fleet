@@ -178,7 +178,7 @@
 
 <div id="tl-tip"></div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 (function () {
   const fmt = (t, withDate) => new Date(t * 1000).toLocaleString('sv-SE', { timeZone: 'America/Los_Angeles' })
     .slice(withDate ? 0 : 11, 16);
