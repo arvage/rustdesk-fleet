@@ -54,7 +54,7 @@
 
 <div class="section"><div class="card"><div class="card-body">
   <h2 style="font-size:14px;margin:0 0 10px">Plan</h2>
-  <form method="post" action="/tenants/{{ t.id }}/plan" style="display:flex;gap:8px">
+  <form method="post" action="/tenants/{{ t.id }}/plan" style="display:flex;flex-wrap:wrap;gap:8px">
     <input name="plan" value="{{ t.plan or '' }}" placeholder="e.g. Pilot, 25 devices" style="min-width:280px">
     <button class="btn btn-ghost btn-sm">Save</button>
   </form>
@@ -68,7 +68,7 @@
     Unattended passwords: {{ "included" if grant.include_passwords else "not included" }}.</p>
   {% if grant.note %}<p class="text-sm text-muted" style="margin:0 0 8px">Note: {{ grant.note }}</p>{% endif %}
   {% if t.status in ("trial", "active") %}
-  <form method="post" action="/tenants/{{ t.id }}/support/open" style="display:flex;gap:8px;align-items:center;margin-top:10px">
+  <form method="post" action="/tenants/{{ t.id }}/support/open" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px">
     <input name="reason" required maxlength="300" placeholder="Reason (shown to the tenant)" style="min-width:320px">
     <button class="btn btn-primary btn-sm">Open dashboard</button>
   </form>
@@ -109,7 +109,7 @@
   <form method="post" action="/tenants/{{ t.id }}/reactivate" style="display:inline"><button class="btn btn-primary btn-sm">Reactivate</button></form>
   {% endif %}
   {% if t.id != 1 and t.status in ("trial", "active", "suspended") %}
-  <form method="post" action="/tenants/{{ t.id }}/cancel" style="display:flex;gap:8px;align-items:center;margin-top:10px">
+  <form method="post" action="/tenants/{{ t.id }}/cancel" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px">
     <input name="confirm" placeholder="type {{ t.slug }} to cancel" required>
     <button class="btn btn-ghost btn-sm" style="color:var(--danger)">Cancel tenant</button>
     <span class="text-sm text-muted">Stops the relay now; data is kept for 30 days for export or reactivation, then purged.</span>
@@ -120,7 +120,7 @@
     {% if t.purge_warning_sent_at %}(warning emailed {{ t.purge_warning_sent_at | localtime }}){% endif %}.</p>
   <form method="post" action="/tenants/{{ t.id }}/extend-grace" style="display:inline-flex;gap:8px;align-items:center">
     <input name="days" value="30" size="4"> days <button class="btn btn-ghost btn-sm">Extend grace period</button></form>
-  <form method="post" action="/tenants/{{ t.id }}/purge" style="display:flex;gap:8px;align-items:center;margin-top:10px"
+  <form method="post" action="/tenants/{{ t.id }}/purge" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px"
         data-confirm="Purge {{ t.slug }} now? This deletes its relay, keys, files and data for good.">
     <input name="confirm" placeholder="type {{ t.slug }} to purge" required>
     <button class="btn btn-ghost btn-sm" style="color:var(--danger)">Purge now</button></form>

@@ -434,6 +434,20 @@ Heartbeat/sysinfo requests are excluded from the uvicorn access log
 | `app/routes/*.py` | One module per area. `api.py` also hosts the background watchers |
 | `app/templates/*.html`, `app/static/style.css` | Jinja templates (all extend `base.html` except login/setup/public pages) and the stylesheet |
 
+### Phones
+
+Every page works at phone width (390px), checked by
+`tests/test_mobile_layout.py` (Playwright, dev-only like the CSP browser
+test). Below 860px the sidebar becomes a slide-in menu. Below 640px, any
+table with four or more columns shows one card per row: `static/app.js`
+gives such tables class `stack` and labels each cell with its column
+header (also for rows added later by script), and `style.css` lays them
+out. Mark a table `data-nostack` to keep it as a table. Inputs are 16px on
+phones so iOS doesn't zoom in on focus, and dialogs scroll inside the
+screen. In templates, let flex rows of buttons or form fields wrap
+(`flex-wrap:wrap`) and give side-by-side form grids class `grid-2col` so
+they become one column on phones.
+
 ## Background jobs
 
 Daemon threads started at import (one uvicorn worker, so each runs once).

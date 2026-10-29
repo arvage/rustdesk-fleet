@@ -122,3 +122,81 @@
     });
   };
 })();
+
+// Phone layout for wide tables: every table with four or more columns gets
+// class "stack", and each body cell a data-label naming its column, so
+// style.css can show one card per row below 640px. Header text comes from
+// the thead, or from a body row made only of <th> cells (tables built in
+// JS). Opt a table out with data-nostack. Rows added later (filters,
+// fetches) are labelled as they arrive.
+(function () {
+  'use strict';
+
+  function headerRow(table) {
+    if (table.tHead && table.tHead.rows.length) return table.tHead.rows[table.tHead.rows.length - 1];
+    for (const body of table.tBodies) {
+      for (const row of body.rows) {
+        if (row.cells.length > 1 && Array.from(row.cells).every(c => c.tagName === 'TH')) return row;
+      }
+    }
+    return null;
+  }
+
+  function label(table) {
+    if (table.hasAttribute('data-nostack')) return;
+    const head = headerRow(table);
+    if (!head) return;
+    const labels = [];
+    for (const th of head.cells) {
+      const text = th.textContent.replace(/[↕↑↓]/g, '').trim();
+      for (let i = 0; i < th.colSpan; i++) labels.push(text);
+    }
+    if (labels.length < 4) return;
+    table.classList.add('stack');
+    head.classList.add('stack-head');
+    for (const body of table.tBodies) {
+      for (const row of body.rows) {
+        if (row === head) continue;
+        let i = 0;
+        for (const cell of row.cells) {
+          if (cell.colSpan > 1) cell.classList.add('stack-span');
+          else if (labels[i]) cell.dataset.label = labels[i];
+          i += cell.colSpan;
+        }
+      }
+    }
+  }
+
+  let queued = false;
+  function labelAll() {
+    queued = false;
+    document.querySelectorAll('table').forEach(label);
+  }
+  function queue() {
+    if (!queued) { queued = true; requestAnimationFrame(labelAll); }
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    labelAll();
+    new MutationObserver(queue).observe(document.body, { childList: true, subtree: true });
+  });
+})();
+
+// Timeline axes: hide any tick label that would overlap the one before it
+// (phones show fewer dates instead of a smear). Re-checked on resize.
+(function () {
+  'use strict';
+  function thin() {
+    document.querySelectorAll('.tl-axis').forEach(axis => {
+      const box = axis.getBoundingClientRect();
+      let lastRight = -Infinity;
+      axis.querySelectorAll('.tl-tick').forEach(tick => {
+        tick.style.visibility = '';
+        const r = tick.getBoundingClientRect();
+        if (r.left < Math.max(lastRight + 6, box.left) || r.right > box.right) tick.style.visibility = 'hidden';
+        else lastRight = r.right;
+      });
+    });
+  }
+  document.addEventListener('DOMContentLoaded', thin);
+  window.addEventListener('resize', thin);
+})();

@@ -56,7 +56,7 @@
   {% else %}
   <form method="post" action="/admin/roles/{{ r.key }}/update">
     <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
-      <div style="display:grid;grid-template-columns:1fr 2fr;gap:14px">
+      <div class="grid-2col" style="display:grid;grid-template-columns:1fr 2fr;gap:14px">
         <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:5px">Name</label>
           <input type="text" name="name" value="{{ r.name }}"></div>
         <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:5px">Description</label>
@@ -86,7 +86,7 @@
     <div style="font-size:12px;color:var(--text-3);margin-top:2px">A new permission level you can assign to users.</div></div></div>
   <form method="post" action="/admin/roles">
     <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
-      <div style="display:grid;grid-template-columns:1fr 2fr;gap:14px">
+      <div class="grid-2col" style="display:grid;grid-template-columns:1fr 2fr;gap:14px">
         <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:5px">Name</label>
           <input type="text" name="name" placeholder="e.g. Senior technician" required></div>
         <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:5px">Description</label>
