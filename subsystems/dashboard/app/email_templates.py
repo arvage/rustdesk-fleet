@@ -294,6 +294,7 @@ def _db() -> sqlite3.Connection:
 
 
 def ensure_tables(conn: sqlite3.Connection) -> None:
+    conn.executescript(PROVIDER_SQL)      # provider-level emails (phase 2)
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS email_templates (
             key          TEXT PRIMARY KEY,
@@ -418,7 +419,6 @@ def get_provider_template(key: str) -> dict:
     t["show_details"], t["customized"] = True, False
     try:
         conn = _db()
-        conn.executescript(PROVIDER_SQL)
         row = conn.execute("SELECT * FROM provider_email_templates WHERE key = ?", (key,)).fetchone()
         conn.close()
     except sqlite3.Error:
@@ -434,7 +434,6 @@ def get_provider_template(key: str) -> dict:
 def save_provider_template(key: str, values: dict, user_email: str) -> None:
     clean = {f: (values.get(f) or "").strip()[:5000] for f in TEXT_FIELDS}
     conn = _db()
-    conn.executescript(PROVIDER_SQL)
     conn.execute("INSERT OR REPLACE INTO provider_email_templates (key, subject, heading, intro, outro, button_text,"
                  " updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)",
                  (key, *[clean[f] for f in TEXT_FIELDS], user_email))
@@ -444,7 +443,6 @@ def save_provider_template(key: str, values: dict, user_email: str) -> None:
 
 def reset_provider_template(key: str) -> None:
     conn = _db()
-    conn.executescript(PROVIDER_SQL)
     conn.execute("DELETE FROM provider_email_templates WHERE key = ?", (key,))
     conn.commit()
     conn.close()
