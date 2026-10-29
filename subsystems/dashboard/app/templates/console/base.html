@@ -44,7 +44,9 @@
       </div>
       <div class="nav-section">
         <div class="nav-label">Billing</div>
+        {{ item('/billing', 'Overview', request.url.path == '/billing') }}
         {{ item('/plans', 'Plans', request.url.path.startswith('/plans')) }}
+        {{ item('/signups', 'Sign-ups', request.url.path.startswith('/signups')) }}
         {{ item('/jobs', 'Jobs', request.url.path.startswith('/jobs')) }}
         {{ item('/audit', 'Audit log', request.url.path == '/audit') }}
       </div>

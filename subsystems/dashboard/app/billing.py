@@ -308,6 +308,44 @@ def resubscribed(tenant_id: int, session: dict) -> None:
 
 # ── Syncing from Stripe ──────────────────────────────────────────────────────
 
+_MONTHS = {"day": 12 / 365, "week": 12 / 52, "month": 1, "year": 12}
+
+
+def _item_amount(price: dict, qty: int) -> int:
+    """One period's amount for a licensed item (graduated or volume tiers too)."""
+    if price.get("billing_scheme") != "tiered":
+        return int(price.get("unit_amount") or 0) * qty
+    tiers = price.get("tiers") or []
+    if price.get("tiers_mode") == "volume":
+        tier = next((t for t in tiers if t.get("up_to") is None or qty <= int(t["up_to"])), tiers[-1] if tiers else {})
+        return int(tier.get("unit_amount") or 0) * qty + int(tier.get("flat_amount") or 0)
+    total, below = 0, 0
+    for t in tiers:
+        top = qty if t.get("up_to") is None else min(qty, int(t["up_to"]))
+        n = max(0, top - below)
+        if n:
+            total += int(t.get("unit_amount") or 0) * n + int(t.get("flat_amount") or 0)
+        below = top if t.get("up_to") is not None else qty
+        if below >= qty:
+            break
+    return total
+
+
+def mrr(sub: dict) -> tuple[int, str]:
+    """Monthly recurring amount from the subscription's licensed items
+    (metered usage and discounts excluded), and its currency."""
+    total, currency = 0.0, ""
+    for item in (sub.get("items") or {}).get("data", []):
+        price = item.get("price") or {}
+        rec = price.get("recurring") or {}
+        if not isinstance(price, dict) or rec.get("usage_type") == "metered":
+            continue
+        currency = price.get("currency") or currency
+        months = _MONTHS.get(rec.get("interval"), 1) * int(rec.get("interval_count") or 1)
+        total += _item_amount(price, int(item.get("quantity") or 0)) / months
+    return int(round(total)), currency
+
+
 def _period_end(sub: dict) -> str | None:
     """Since API 2025-03-31 the billing period lives on the items."""
     ends = [i.get("current_period_end") for i in (sub.get("items") or {}).get("data", []) if i.get("current_period_end")]
@@ -330,11 +368,13 @@ def sync_subscription(sub_id: str, at: datetime | None = None, quiet: bool = Fal
     sub = stripe_api.plain(client.v1.subscriptions.retrieve(sub_id, {"expand": ["default_payment_method"]}))
     has_card = default_card(client, sub) is not None
     conn = get_db()
+    amount, currency = mrr(sub)
+    discount = ", ".join(str((d.get("coupon") if isinstance(d, dict) else d) or "") for d in (sub.get("discounts") or []))
     conn.execute("""UPDATE billing_subscriptions SET status = ?, current_period_end = ?, cancel_at_period_end = ?,
-                        cancel_at = ?, trial_end = ?, has_card = ?, last_synced_at = datetime('now'),
-                        updated_at = datetime('now') WHERE tenant_id = ?""",
+                        cancel_at = ?, trial_end = ?, has_card = ?, mrr = ?, currency = ?, discount = ?,
+                        last_synced_at = datetime('now'), updated_at = datetime('now') WHERE tenant_id = ?""",
                  (sub["status"], _period_end(sub), 1 if sub.get("cancel_at_period_end") else 0, _ts(sub.get("cancel_at")),
-                  _ts(sub.get("trial_end")), 1 if has_card else 0, row["tenant_id"]))
+                  _ts(sub.get("trial_end")), 1 if has_card else 0, amount, currency, discount or None, row["tenant_id"]))
     conn.commit()
     conn.close()
     out = _Synced(sub)
@@ -723,3 +763,59 @@ def overview(tenant_id: int) -> dict:
     except Exception as e:
         out["error"] = f"Stripe couldn't be reached ({type(e).__name__}); try again shortly."
     return out
+
+
+# ── Console actions ──────────────────────────────────────────────────────────
+
+def set_billing_mode(tenant_id: int, mode: str, by: str) -> None:
+    from app.billing_schema import BILLING_MODES
+    if tenant_id == LEGACY_TENANT_ID:
+        raise ValueError("Tenant #1 is always internal: never billed.")
+    if mode not in BILLING_MODES:
+        raise ValueError("Unknown billing mode.")
+    conn = get_db()
+    try:
+        if mode == "stripe" and not conn.execute("SELECT 1 FROM billing_subscriptions WHERE tenant_id = ?",
+                                                 (tenant_id,)).fetchone():
+            raise ValueError("This tenant has no Stripe subscription; it can't be put on Stripe billing here.")
+        conn.execute("UPDATE tenants SET billing_mode = ?, updated_at = datetime('now') WHERE id = ?", (mode, tenant_id))
+        conn.commit()
+        provider_log(conn, "billing_mode_changed", mode, by, tenant_id)
+    finally:
+        conn.close()
+    from app.tenancy import invalidate_cache
+    invalidate_cache()
+
+
+def extend_trial(tenant_id: int, days: int, by: str) -> str:
+    """A Stripe tenant's trial lives in Stripe: move its trial_end."""
+    row = subscription_of(tenant_id)
+    if row is None or tenant_id == LEGACY_TENANT_ID:
+        raise ValueError("No Stripe subscription.")
+    if row["status"] != "trialing" or not row["trial_end"]:
+        raise ValueError("Only a subscription still on trial has a trial to extend.")
+    days = max(1, min(90, int(days)))
+    base = max(_now(), datetime.strptime(row["trial_end"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc))
+    new = base + timedelta(days=days)
+    stripe_api.client().v1.subscriptions.update(row["stripe_subscription_id"],
+                                                {"trial_end": int(new.timestamp()), "proration_behavior": "none"})
+    conn = get_db()
+    provider_log(conn, "tenant_trial_extended", f"+{days}d → {_fmt(new)} (Stripe)", by, tenant_id)
+    conn.close()
+    sync_subscription(row["stripe_subscription_id"])
+    return _fmt(new)
+
+
+def apply_coupon(tenant_id: int, coupon: str, by: str) -> None:
+    import re
+    coupon = coupon.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", coupon):
+        raise ValueError("Enter a Stripe coupon id.")
+    row = subscription_of(tenant_id)
+    if row is None or tenant_id == LEGACY_TENANT_ID:
+        raise ValueError("No Stripe subscription.")
+    stripe_api.client().v1.subscriptions.update(row["stripe_subscription_id"], {"discounts": [{"coupon": coupon}]})
+    conn = get_db()
+    provider_log(conn, "coupon_applied", coupon, by, tenant_id)
+    conn.close()
+    sync_subscription(row["stripe_subscription_id"])

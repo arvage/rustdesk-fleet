@@ -1,0 +1,23 @@
+{% extends "console/base.html" %}
+{% block title %}Sign-ups — Provider console{% endblock %}
+{% block page_title %}Sign-ups{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+{% block content %}
+<p class="text-muted text-sm" style="margin:0 0 16px">Self-service sign-ups on the public site: waiting for email
+  verification, in Stripe Checkout, being created, failed, and those created in the last 30 days. Unverified ones are
+  deleted after 48 hours. A failed creation after payment can be retried with the same slug and subscription.</p>
+<div class="section"><div class="card"><div class="card-body" style="padding:0">
+  {% if rows %}<div class="table-wrap"><table>
+    <thead><tr><th>Company</th><th>Address</th><th>Email</th><th>Plan</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+    <tbody>{% for s in rows %}<tr>
+      <td>{{ s.company }}</td><td>{{ s.slug }}</td><td>{{ s.email }}</td><td>{{ s.plan_name or "—" }}</td>
+      <td>{{ {"pending_verification": "waiting for email", "checkout": "in checkout", "creating": "creating", "created": "created", "failed": "failed", "cancelled": "cancelled"}.get(s.status, s.status) }}
+        {% if s.trial_denied %}<span class="badge badge-pending">no trial (card used before)</span>{% endif %}
+        {% if s.failure_reason %}<div class="text-sm text-muted">{{ s.failure_reason }}</div>{% endif %}</td>
+      <td>{{ s.updated_at | localtime }}</td>
+      <td>{% if s.tenant_id %}<a href="/tenants/{{ s.tenant_id }}">tenant</a>{% elif s.status == "failed" and s.stripe_subscription_id and s.failure_reason != "no payment method" %}
+        <form method="post" action="/signups/{{ s.id }}/retry" style="margin:0" data-confirm="Create the tenant again for {{ s.slug }}?"><button class="btn btn-primary btn-sm">Retry</button></form>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>{% else %}<p class="text-muted" style="padding:16px;margin:0">No sign-ups yet.</p>{% endif %}
+</div></div></div>
+{% endblock %}

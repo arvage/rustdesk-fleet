@@ -144,7 +144,7 @@ def usage(conn, tenant_id: int) -> dict:
 
 @router.get("/tenants/{tenant_id}", response_class=HTMLResponse)
 def tenant_detail(request: Request, tenant_id: int, user: dict = Depends(require_provider)):
-    from app.console import domain_pages, relays
+    from app.console import billing_pages, domain_pages, relays
     from app.tenancy import load_tenant
     conn = get_db()
     rows = tenant_summaries(conn, tenant_id)
@@ -178,6 +178,7 @@ def tenant_detail(request: Request, tenant_id: int, user: dict = Depends(require
         "new_invite": request.session.pop("new_invite_link", None),
         "grant": grant, "support_sessions": support_sessions,
         "expiring_before": domain_pages.expiring_before(),
+        "billing": billing_pages.tenant_billing(tenant_id, t["billing_mode"]),
     })
 
 
@@ -339,6 +340,14 @@ async def tenant_extend_trial(request: Request, tenant_id: int, days: str = Form
     row = _lifecycle_target(request, tenant_id)
     if row is None:
         return RedirectResponse("/", status_code=303)
+    if row["billing_mode"] == "stripe":
+        from app import billing
+        try:
+            new = billing.extend_trial(tenant_id, int(days) if days.strip().isdigit() else 14, user["email"])
+            _flash(request, "success", f"Trial extended in Stripe: it ends {new} UTC.")
+        except Exception as e:
+            _flash(request, "error", str(e))
+        return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
     try:
         new = lifecycle.extend_trial(tenant_id, int(days) if days.strip().isdigit() else 14, user["email"])
         msg = f"Trial extended: it ends {new} UTC."

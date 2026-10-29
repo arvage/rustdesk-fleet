@@ -89,6 +89,10 @@ def ensure_tables(conn) -> None:
                      " CHECK (billing_mode IN ('stripe', 'manual', 'internal'))")
         # Existing tenants were made by hand: manual. Tenant #1 is ours.
         conn.execute("UPDATE tenants SET billing_mode = 'internal' WHERE id = ?", (LEGACY_TENANT_ID,))
+    scols = {r[1] for r in conn.execute("PRAGMA table_info(billing_subscriptions)")}
+    for col, ddl in (("mrr", "INTEGER"), ("currency", "TEXT"), ("discount", "TEXT")):
+        if col not in scols:   # monthly recurring amount (smallest unit), from the items at the last sync
+            conn.execute(f"ALTER TABLE billing_subscriptions ADD COLUMN {col} {ddl}")
     if "billing_suspended" not in cols:
         # 1 = suspended because of billing: paying lifts it. A provider's
         # suspension (0) is never lifted by a payment.

@@ -1,0 +1,46 @@
+{% extends "console/base.html" %}
+{% block title %}Billing — Provider console{% endblock %}
+{% block page_title %}Billing{% endblock %}
+{% block content_class %}content-wide{% endblock %}
+{% block content %}
+{% if billing_missing %}<div class="flash error">Billing is off: set {{ billing_missing | join(", ") }} in dashboard.env. Sign-up is closed until then.</div>
+{% elif stripe_mode == "test" %}<div class="flash warning">Stripe is in test mode: nobody is charged.</div>{% endif %}
+
+<div class="section"><div class="card"><div class="card-header"><h2>Monthly recurring revenue</h2></div><div class="card-body">
+  {% if mrr %}<table><thead><tr><th>Plan</th><th>Currency</th><th>MRR</th></tr></thead><tbody>
+  {% for plan, cur, amount in mrr %}<tr><td>{{ plan }}</td><td>{{ cur }}</td><td>{{ amount | money(cur | lower) }}</td></tr>{% endfor %}</tbody></table>
+  <p class="text-sm text-muted" style="margin:8px 0 0">Active and past-due subscriptions, from their items at the last sync; trials, metered usage and coupons aren't included.</p>
+  {% else %}<p class="text-muted text-sm" style="margin:0">No paying subscriptions yet.</p>{% endif %}
+</div></div></div>
+
+{% macro tenants(title, rows, empty, extra) %}
+<div class="section"><div class="card"><div class="card-header"><h2>{{ title }}</h2></div>
+  {% if rows %}<div class="table-wrap"><table><tbody>
+  {% for r in rows %}<tr><td><a href="/tenants/{{ r.tenant_id }}">{{ r.display_name }}</a> <span class="text-muted text-sm">{{ r.slug }}</span></td>
+    <td>{{ r.plan_name or "—" }}</td><td>{{ r.status }}</td><td class="text-sm">{{ extra(r) }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="card-body text-muted text-sm">{{ empty }}</div>{% endif %}
+</div></div>
+{% endmacro %}
+{% macro trial_end(r) %}trial ends {{ r.trial_end | localtime }}{% endmacro %}
+{% macro due(r) %}{% if r.past_due_since %}past due since {{ r.past_due_since | localtime }}{% endif %}{% endmacro %}
+{% macro nothing(r) %}{% endmacro %}
+{{ tenants("Trials ending this week", trials, "None.", trial_end) }}
+{{ tenants("Past due and unpaid", unpaid, "None.", due) }}
+{{ tenants("No card on file", no_card, "None.", nothing) }}
+
+<div class="section"><div class="card"><div class="card-header"><h2>Over their plan's soft limits</h2></div>
+  {% if over %}<div class="card-body"><ul style="margin:0">{% for r, o in over %}<li><a href="/tenants/{{ r.tenant_id }}">{{ r.display_name }}</a>: {{ o | join("; ") }}</li>{% endfor %}</ul></div>
+  {% else %}<div class="card-body text-muted text-sm">None.</div>{% endif %}
+</div></div>
+
+<div class="section"><div class="card"><div class="card-header"><h2>Failed sign-ups</h2></div>
+  {% if failed %}<div class="card-body"><ul style="margin:0">{% for s in failed %}<li>{{ s.company }} ({{ s.slug }}, {{ s.email }}): {{ s.failure_reason }} · <a href="/signups">Sign-ups</a></li>{% endfor %}</ul></div>
+  {% else %}<div class="card-body text-muted text-sm">None.</div>{% endif %}
+</div></div>
+
+<div class="section"><div class="card"><div class="card-header"><h2>Webhook errors</h2></div>
+  {% if errors %}<div class="table-wrap"><table><thead><tr><th>Received</th><th>Event</th><th>Type</th><th>Error</th></tr></thead><tbody>
+  {% for e in errors %}<tr><td>{{ e.received_at | localtime }}</td><td><code>{{ e.event_id }}</code></td><td>{{ e.type }}</td><td class="text-sm">{{ e.error }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="card-body text-muted text-sm">None.</div>{% endif %}
+</div></div>
+{% endblock %}

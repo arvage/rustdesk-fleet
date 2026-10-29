@@ -68,14 +68,7 @@
   </table></div>
 </div></div></div>
 
-<div class="section"><div class="card"><div class="card-body">
-  <h2 style="font-size:14px;margin:0 0 10px">Plan</h2>
-  <form method="post" action="/tenants/{{ t.id }}/plan" style="display:flex;flex-wrap:wrap;gap:8px">
-    <input name="plan" value="{{ t.plan or '' }}" placeholder="e.g. Pilot, 25 devices" style="min-width:280px">
-    <button class="btn btn-ghost btn-sm">Save</button>
-  </form>
-  <p class="text-sm text-muted" style="margin:6px 0 0">Free text for now; billing will read it later.</p>
-</div></div></div>
+{% include "console/_tenant_billing.html" %}
 
 <div class="section"><div class="card"><div class="card-body">
   <h2 style="font-size:14px;margin:0 0 10px">Support access</h2>

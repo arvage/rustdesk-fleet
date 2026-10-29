@@ -1,0 +1,35 @@
+{% set bl = billing %}
+<div class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 10px">Billing</h2>
+  <form method="post" action="/tenants/{{ t.id }}/billing-mode" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px">
+    <span class="text-sm">Mode</span>
+    <select name="mode" {% if t.id == 1 %}disabled{% endif %}>{% for m in ("stripe", "manual", "internal") %}<option {% if bl.mode == m %}selected{% endif %}>{{ m }}</option>{% endfor %}</select>
+    {% if t.id != 1 %}<button class="btn btn-ghost btn-sm" data-confirm="Change how this tenant is billed?">Change</button>{% endif %}
+    <span class="text-sm text-muted">{{ {"stripe": "Stripe drives the lifecycle", "manual": "billed outside Stripe; the local trial timer applies", "internal": "never billed"}[bl.mode] }}</span>
+  </form>
+  {% if bl.mode == "manual" or (bl.mode != "stripe" and t.plan) %}
+  <form method="post" action="/tenants/{{ t.id }}/plan" style="display:flex;flex-wrap:wrap;gap:8px">
+    <input name="plan" value="{{ t.plan or '' }}" placeholder="e.g. Pilot, 25 devices" style="min-width:280px">
+    <button class="btn btn-ghost btn-sm">Save plan note</button>
+  </form>
+  {% endif %}
+  {% if bl.sub %}
+  <div class="kv-grid" style="margin-top:6px">
+    <div class="kv-row"><div class="kv-key">Customer</div><div class="kv-val">{% if bl.customer %}<a href="{{ bl.customer_url }}" target="_blank" rel="noopener">{{ bl.customer }}</a>{% else %}—{% endif %}</div></div>
+    <div class="kv-row"><div class="kv-key">Subscription</div><div class="kv-val"><a href="{{ bl.sub_url }}" target="_blank" rel="noopener">{{ bl.sub.stripe_subscription_id }}</a> · {{ bl.sub.status }}{% if bl.sub.cancel_at_period_end %} · cancels {{ (bl.sub.cancel_at or bl.sub.current_period_end) | localtime("%Y-%m-%d") }}{% endif %}{% if bl.sub.has_card == 0 %} · <strong style="color:var(--danger)">no card</strong>{% endif %}</div></div>
+    <div class="kv-row"><div class="kv-key">Plan</div><div class="kv-val">{{ bl.plan.name if bl.plan else "—" }}{% if bl.sub.discount %} · coupon {{ bl.sub.discount }}{% endif %}{% if bl.sub.mrr %} · {{ bl.sub.mrr | money(bl.sub.currency) }}/month{% endif %}</div></div>
+    <div class="kv-row"><div class="kv-key">Dates</div><div class="kv-val">{% if bl.sub.trial_end %}trial ends {{ bl.sub.trial_end | localtime }}{% endif %}{% if bl.sub.current_period_end %} · period ends {{ bl.sub.current_period_end | localtime }}{% endif %}{% if bl.sub.past_due_since %} · past due since {{ bl.sub.past_due_since | localtime }}{% endif %}</div></div>
+    <div class="kv-row"><div class="kv-key">Quantities</div><div class="kv-val">{{ bl.counts.technician }} technicians · {{ bl.counts.device }} devices{% if bl.sub.quantities %} (pushed {{ bl.sub.quantities }} at {{ bl.sub.quantities_pushed_at | localtime }}){% endif %}
+      {% for o in bl.over %}<span class="badge badge-failed">over: {{ o }}</span>{% endfor %}</div></div>
+    <div class="kv-row"><div class="kv-key">Last sync</div><div class="kv-val">{{ bl.sub.last_synced_at | localtime if bl.sub.last_synced_at else "never" }}</div></div>
+  </div>
+  {% if bl.error %}<p class="text-sm" style="color:var(--danger)">{{ bl.error }}</p>{% endif %}
+  {% if bl.invoices %}<p class="text-sm" style="margin:10px 0 4px">Invoices:</p>
+  <ul class="text-sm" style="margin:0">{% for i in bl.invoices %}<li>{{ i.created | localtime("%Y-%m-%d") }} · {{ i.number }} · {{ i.amount | money(i.currency) }} · {{ i.status }}{% if i.url %} · <a href="{{ i.url }}" target="_blank" rel="noopener">view</a>{% endif %}</li>{% endfor %}</ul>{% endif %}
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+    <form method="post" action="/tenants/{{ t.id }}/billing-sync" style="margin:0"><button class="btn btn-ghost btn-sm">Resync now</button></form>
+    <form method="post" action="/tenants/{{ t.id }}/coupon" style="display:flex;gap:6px;margin:0">
+      <input name="coupon" placeholder="Stripe coupon id" required style="min-width:0;width:160px"><button class="btn btn-ghost btn-sm">Apply coupon</button></form>
+  </div>
+  {% elif bl.mode == "stripe" %}<p class="text-sm text-muted">No subscription recorded.</p>{% endif %}
+</div></div></div>
