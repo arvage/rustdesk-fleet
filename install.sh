@@ -244,6 +244,47 @@ log_format rdf_noquery '$remote_addr - $remote_user [$time_local] "$request_meth
 NGX
 }
 
+# Default servers: a request for a hostname nginx has no server block for
+# gets nothing. Port 80 answers only ACME challenges (so a certificate can be
+# issued for a custom domain before its vhost exists) and closes everything
+# else (444); port 443 refuses the TLS handshake, so an unknown name never
+# sees another site's certificate. Debian's stock "default" site claims
+# default_server on port 80, so it goes; any other default_server is left
+# alone and reported.
+write_default_servers() {
+  if [[ -L /etc/nginx/sites-enabled/default \
+        && "$(readlink -f /etc/nginx/sites-enabled/default)" == /etc/nginx/sites-available/default ]]; then
+    sudo rm -f /etc/nginx/sites-enabled/default
+    info "Disabled nginx's stock default site (replaced by /etc/nginx/conf.d/rdf-default.conf)."
+  fi
+  if sudo grep -lE 'listen[^;]*default_server' /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*.conf 2>/dev/null \
+       | grep -vx /etc/nginx/conf.d/rdf-default.conf | grep -q .; then
+    warn "Another nginx server claims default_server; not writing /etc/nginx/conf.d/rdf-default.conf. Remove that default_server and re-run."
+    return 0
+  fi
+  sudo mkdir -p /var/www/certbot
+  default_servers | sudo tee /etc/nginx/conf.d/rdf-default.conf >/dev/null
+}
+
+default_servers() {
+  cat <<'NGX'
+# RustDesk Fleet (install.sh): hostnames with no server block of their own.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location / { return 444; }
+}
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+NGX
+}
+
 # Vhosts written before phase 1c lack the /support/enter location: add it to
 # the dashboard's own vhost and re-render the helper's (tenants, console).
 refresh_vhosts() {
@@ -274,6 +315,7 @@ provider_setup() {
   log "Setting up the provider console pieces"
   install_helper
   write_log_format
+  write_default_servers
   drop_docker_group
   secure_relay_compose
   [[ $DOCKER_GROUP_DROPPED -eq 1 ]] && sudo systemctl restart rustdesk-dashboard.service
@@ -604,6 +646,7 @@ sudo systemctl enable --now rustdesk-backup.timer
 
 # ── 9. nginx + TLS ───────────────────────────────────────────────────────────
 write_log_format   # dash_locations logs /support/enter with it
+write_default_servers
 log "Configuring nginx"
 VHOST="/etc/nginx/sites-available/rustdesk-fleet"
 

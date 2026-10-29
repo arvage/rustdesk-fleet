@@ -270,6 +270,36 @@ sudo ln -s /etc/nginx/sites-available/rds.example.com /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+Then give hostnames that have no server block of their own nothing at all
+(`install.sh` writes this as `/etc/nginx/conf.d/rdf-default.conf`). Without
+it, an unknown name pointed at the box gets whichever server block nginx
+loads first, with that block's certificate. Port 80 still answers ACME
+challenges, so a certificate can be issued for a tenant's custom domain
+before its vhost exists. Disable Debian's stock site first: it also claims
+`default_server` on port 80, and nginx refuses two.
+
+```nginx
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location / { return 444; }
+}
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+```
+
+```bash
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo mkdir -p /var/www/certbot
+sudo nginx -t && sudo systemctl reload nginx
+```
+
 ### Updating the dashboard
 
 The service runs straight from the repo checkout, so an update is a pull and
