@@ -181,12 +181,9 @@ def _cancel(job) -> None:
         _set(conn, t.id, status="cancelled", cancelled_at=_fmt(now), purge_after=_fmt(purge_after),
              purge_warning_sent_at=None)
         provider_log(conn, "tenant_cancelled", f"{t.slug}; purge after {_fmt(purge_after)}", job.created_by, t.id)
-        _notify_admins(conn, t.id, f"Your {t.display_name} RustDesk Fleet account was cancelled", [
-            "Remote support for this account has stopped.",
-            f"You can still sign in to download your data (devices, groups, users, session history) until "
-            f"{purge_after.strftime('%Y-%m-%d')}. After that, everything is deleted for good.",
-        ])
         conn.close()
+        from app import billing_emails
+        billing_emails.cancelled(t.id, purge_after.strftime("%b %d, %Y"), t.billing_mode == "stripe")
 
 
 @jobs.handler("reactivate_tenant")

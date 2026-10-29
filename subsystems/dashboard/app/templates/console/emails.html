@@ -1,0 +1,12 @@
+{% extends "console/base.html" %}
+{% block title %}Emails — Provider console{% endblock %}
+{% block page_title %}Emails{% endblock %}
+{% block content %}
+<p class="text-muted text-sm" style="margin:0 0 16px">What we send tenants about sign-up and billing, in the same
+  template format tenants use for their own emails. Stripe still sends its receipts and invoices.</p>
+<div class="section"><div class="card"><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+  <thead><tr><th>Email</th><th>Subject</th><th></th></tr></thead>
+  <tbody>{% for r in rows %}<tr><td><a href="/emails/{{ r.key }}">{{ r.name }}</a></td><td class="text-sm">{{ r.subject }}</td>
+    <td>{% if r.customized %}<span class="badge badge-built">edited</span>{% endif %}</td></tr>{% endfor %}</tbody>
+</table></div></div></div></div>
+{% endblock %}

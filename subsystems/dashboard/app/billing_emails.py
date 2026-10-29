@@ -1,54 +1,67 @@
-"""Emails for sign-up and billing (phase 2), sent with the provider's mail
-settings (console → Settings)."""
+"""Emails for sign-up and billing (phase 2): the provider-level templates in
+email_templates.PROVIDER_TEMPLATES (editable in the console's Emails page),
+sent with the provider's mail settings. Stripe's own emails that would
+duplicate these are turned off in the Stripe dashboard (DEPLOYMENT.md);
+Stripe still sends receipts and invoices."""
 from __future__ import annotations
 
+from app import email_templates
 from app.console import mail
+from app.deps import get_db
+
+
+def send(key: str, to: list[str], ctx: dict) -> tuple[bool, str]:
+    if not to:
+        return False, "no recipients"
+    subject, html, _ = email_templates.render(0, key, ctx)
+    return mail.send(to, subject, html, event=f"{key}_email")
+
+
+def _tenant(tenant_id: int) -> tuple[list[str], dict]:
+    """The tenant's admins and the context every billing email uses."""
+    from app import domains
+    from app.templates_config import _localtime
+    conn = get_db()
+    to = [r[0] for r in conn.execute("SELECT email FROM users WHERE tenant_id = ? AND role = 'admin'", (tenant_id,))]
+    t = conn.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+    bs = conn.execute("SELECT * FROM billing_subscriptions WHERE tenant_id = ?", (tenant_id,)).fetchone()
+    home = domains.home_host(conn, tenant_id)
+    conn.close()
+    ctx = {"company": t["display_name"] if t else "", "home": home,
+           "trial_end": _localtime(bs["trial_end"], "%b %d, %Y") if bs and bs["trial_end"] else ""}
+    return to, ctx
 
 
 def verify_email(signup_row, link: str) -> tuple[bool, str]:
-    return mail.send([signup_row["email"]], "Confirm your email to start your RustDesk Fleet trial", mail.simple_html(
-        "Confirm your email",
-        [f"Hi {signup_row['admin_name']}, thanks for signing up {signup_row['company']}.",
-         "Open the link below within 24 hours to confirm this address and enter payment details for your trial. "
-         "If you didn't sign up, ignore this email."],
-        link, "Confirm my email"), event="signup_verify_email")
+    from app import signup
+    return send("signup_verify", [signup_row["email"]], {"name": signup_row["admin_name"], "company": signup_row["company"],
+                                                        "url": link, "trial_days": str(signup.TRIAL_DAYS)})
 
 
 def welcome(tenant_id: int, email: str, name: str, login_url: str) -> tuple[bool, str]:
-    return mail.send([email], "Your RustDesk Fleet account is ready", mail.simple_html(
-        "Your account is ready",
-        [f"Hi {name}, your RustDesk Fleet dashboard is ready. Sign in with the email and password you chose.",
-         "Your free trial has started; you can see its end date and manage billing under Admin → Billing."],
-        login_url, "Sign in"), event="signup_welcome_email")
+    _, ctx = _tenant(tenant_id)
+    return send("signup_welcome", [email], {**ctx, "name": name, "url": login_url})
 
 
-LIFECYCLE = {
-    "payment_failed": ("Payment failed for your RustDesk Fleet subscription",
-                       ["We couldn't take the latest payment for your subscription. Stripe will retry it.",
-                        "Please update your card under Admin → Billing → Manage billing so your account isn't suspended."]),
-    "suspended": ("Your RustDesk Fleet account is suspended for non-payment",
-                  ["Remote support and installer downloads are off because the subscription hasn't been paid.",
-                   "Sign in and open Admin → Billing to pay; the account reopens as soon as the payment goes through. "
-                   "Your devices, groups and settings are kept."]),
-    "reactivated": ("Your RustDesk Fleet account is active again",
-                    ["Thanks: the payment went through and your account is open again, with the same relay, keys and "
-                     "devices."]),
-    "card_missing": ("No card on file for your RustDesk Fleet subscription",
-                     ["Your subscription has no card on file. Add one under Admin → Billing → Manage billing.",
-                      "Without one, the subscription ends when the trial does (or at the next renewal)."]),
-    "trial_ending": ("Your RustDesk Fleet trial ends in 3 days",
-                     ["Your free trial ends in 3 days, and your card will be charged for the first period then.",
-                      "You can change your plan or cancel under Admin → Billing before it ends."]),
-}
+KINDS = {"payment_failed": ("payment_failed", "/admin/billing"), "suspended": ("suspended_nonpayment", "/admin/billing"),
+         "reactivated": ("reactivated", "/"), "card_missing": ("card_missing", "/admin/billing"),
+         "trial_ending": ("trial_ending", "/admin/billing")}
 
 
 def lifecycle(tenant_id: int, kind: str) -> tuple[bool, str]:
     """Email the tenant's admins about a billing event."""
-    from app.deps import get_db
-    subject, lines = LIFECYCLE[kind]
-    conn = get_db()
-    to = [r[0] for r in conn.execute("SELECT email FROM users WHERE tenant_id = ? AND role = 'admin'", (tenant_id,))]
-    conn.close()
-    if not to:
-        return False, "no admins"
-    return mail.send(to, subject, mail.simple_html(subject, lines), event=f"billing_{kind}_email")
+    from app import settings
+    key, path = KINDS[kind]
+    to, ctx = _tenant(tenant_id)
+    return send(key, to, {**ctx, "url": f"https://{ctx['home']}{path}", "days": str(settings.past_due_suspend_days())})
+
+
+def cancelled(tenant_id: int, purge_date: str, stripe: bool) -> tuple[bool, str]:
+    to, ctx = _tenant(tenant_id)
+    resub = PROVIDER_RESUBSCRIBE if stripe else ""
+    return send("subscription_cancelled", to, {**ctx, "url": f"https://{ctx['home']}/export", "purge_date": purge_date,
+                                               "resubscribe": resub})
+
+
+PROVIDER_RESUBSCRIBE = ("Changed your mind? Resubscribe from the same page before then and everything comes back as "
+                        "it was.")

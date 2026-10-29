@@ -186,6 +186,87 @@ FONTS = {
     "trebuchet": ("Trebuchet", "'Trebuchet MS',Helvetica,sans-serif"),
 }
 
+# Provider-level emails (phase 2): from us to tenants' admins about sign-up
+# and billing. Edited in the provider console (Emails), stored in
+# provider_email_templates, rendered with the default design; tenants'
+# Email templates pages don't list them.
+_P = {"category": "Provider: sign-up and billing", "audience": "provider", "details": []}
+PROVIDER_TEMPLATES: dict[str, dict] = {
+    "signup_verify": {**_P, "name": "Sign-up: confirm your email",
+        "subject": "Confirm your email to start your RustDesk Fleet trial",
+        "heading": "Confirm your email",
+        "intro": "Hi {name}, thanks for signing up {company} for RustDesk Fleet.",
+        "button_text": "Confirm my email", "button_url": "url",
+        "outro": "Open the link within 24 hours to confirm this address and enter payment details for your "
+                 "{trial_days}-day free trial. If you didn't sign up, ignore this email.",
+        "sample": {"name": "Ada", "company": "ABC IT", "url": "https://www.rds.example.com/signup/verify?token=x",
+                   "trial_days": "14"}},
+    "signup_welcome": {**_P, "name": "Sign-up: welcome",
+        "subject": "Your RustDesk Fleet account is ready",
+        "heading": "Welcome to RustDesk Fleet",
+        "intro": "Hi {name}, your dashboard for {company} is ready. Sign in with the email and password you chose.",
+        "button_text": "Sign in", "button_url": "url",
+        "outro": "Your free trial ends on {trial_end}. You can see your plan, invoices and card under "
+                 "**Admin → Billing**.",
+        "sample": {"name": "Ada", "company": "ABC IT", "url": "https://abc.rds.example.com/login",
+                   "trial_end": "Nov 12, 2026"}},
+    "trial_ending": {**_P, "name": "Billing: trial ends in 3 days",
+        "subject": "Your RustDesk Fleet trial ends in 3 days",
+        "heading": "Your trial ends soon",
+        "intro": "The free trial for {company} ends on {trial_end}. Your card is charged for the first period then.",
+        "button_text": "Billing", "button_url": "url",
+        "outro": "To change your plan or cancel before then, open **Admin → Billing**.",
+        "sample": {"company": "ABC IT", "trial_end": "Nov 12, 2026", "url": "https://abc.rds.example.com/admin/billing"}},
+    "payment_failed": {**_P, "name": "Billing: payment failed",
+        "subject": "Payment failed for your RustDesk Fleet subscription",
+        "heading": "Your payment didn't go through",
+        "intro": "We couldn't take the latest payment for {company}. Stripe will try again.",
+        "button_text": "Update card", "button_url": "url",
+        "outro": "Please update your card so the account isn't suspended: it is suspended {days} days after "
+                 "a failed payment.",
+        "sample": {"company": "ABC IT", "url": "https://abc.rds.example.com/admin/billing", "days": "7"}},
+    "suspended_nonpayment": {**_P, "name": "Billing: suspended for non-payment",
+        "subject": "Your RustDesk Fleet account is suspended for non-payment",
+        "heading": "Your account is suspended",
+        "intro": "Remote support and installer downloads for {company} are off because the subscription hasn't "
+                 "been paid.",
+        "button_text": "Pay now", "button_url": "url",
+        "outro": "Sign in and pay under **Admin → Billing**; the account reopens as soon as the payment goes "
+                 "through. Your devices, groups and settings are kept.",
+        "sample": {"company": "ABC IT", "url": "https://abc.rds.example.com/admin/billing"}},
+    "subscription_cancelled": {**_P, "name": "Account cancelled",
+        "subject": "Your {company} RustDesk Fleet account was cancelled",
+        "heading": "Your account was cancelled",
+        "intro": "Remote support for {company} has stopped.",
+        "button_text": "Export your data", "button_url": "url",
+        "outro": "You can still sign in to download your data (devices, groups, users, session history) until "
+                 "{purge_date}. After that, everything is deleted for good.\n\n{resubscribe}",
+        "sample": {"company": "ABC IT", "url": "https://abc.rds.example.com/export", "purge_date": "Dec 12, 2026",
+                   "resubscribe": "Changed your mind? Resubscribe from the same page before then and everything "
+                                  "comes back as it was."}},
+    "reactivated": {**_P, "name": "Billing: account active again",
+        "subject": "Your RustDesk Fleet account is active again",
+        "heading": "You're back",
+        "intro": "Thanks: {company} is open again, with the same relay, keys and devices.",
+        "button_text": "Open the dashboard", "button_url": "url",
+        "outro": "",
+        "sample": {"company": "ABC IT", "url": "https://abc.rds.example.com/"}},
+    "card_missing": {**_P, "name": "Billing: no card on file",
+        "subject": "No card on file for your RustDesk Fleet subscription",
+        "heading": "Add a card to keep your account",
+        "intro": "The subscription for {company} has no card on file.",
+        "button_text": "Add a card", "button_url": "url",
+        "outro": "Without one, the subscription ends when the trial does (or at the next renewal).",
+        "sample": {"company": "ABC IT", "url": "https://abc.rds.example.com/admin/billing"}},
+}
+TEMPLATES.update(PROVIDER_TEMPLATES)
+
+
+def tenant_keys() -> list[str]:
+    """The emails a tenant edits (Admin → Email templates)."""
+    return [k for k, v in TEMPLATES.items() if v["audience"] != "provider"]
+
+
 DESIGN_DEFAULTS = {
     "brand_name": "RustDesk Fleet",        # header title on team emails
     "client_brand_name": "",               # header title on client emails ("" = no header)
@@ -319,6 +400,54 @@ def get_template(tenant_id: int, key: str) -> dict:
     if spec.get("details_required"):
         t["show_details"] = True
     return t
+
+
+PROVIDER_SQL = """
+    CREATE TABLE IF NOT EXISTS provider_email_templates (
+        key           TEXT PRIMARY KEY,
+        subject       TEXT, heading TEXT, intro TEXT, outro TEXT, button_text TEXT,
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_by    TEXT
+    );
+"""
+
+
+def get_provider_template(key: str) -> dict:
+    spec = PROVIDER_TEMPLATES[key]
+    t = {f: spec.get(f, "") for f in TEXT_FIELDS}
+    t["show_details"], t["customized"] = True, False
+    try:
+        conn = _db()
+        conn.executescript(PROVIDER_SQL)
+        row = conn.execute("SELECT * FROM provider_email_templates WHERE key = ?", (key,)).fetchone()
+        conn.close()
+    except sqlite3.Error:
+        row = None
+    if row:
+        for f in TEXT_FIELDS:
+            if row[f] is not None:
+                t[f] = row[f]
+        t["customized"], t["updated_at"], t["updated_by"] = True, row["updated_at"], row["updated_by"]
+    return t
+
+
+def save_provider_template(key: str, values: dict, user_email: str) -> None:
+    clean = {f: (values.get(f) or "").strip()[:5000] for f in TEXT_FIELDS}
+    conn = _db()
+    conn.executescript(PROVIDER_SQL)
+    conn.execute("INSERT OR REPLACE INTO provider_email_templates (key, subject, heading, intro, outro, button_text,"
+                 " updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)",
+                 (key, *[clean[f] for f in TEXT_FIELDS], user_email))
+    conn.commit()
+    conn.close()
+
+
+def reset_provider_template(key: str) -> None:
+    conn = _db()
+    conn.executescript(PROVIDER_SQL)
+    conn.execute("DELETE FROM provider_email_templates WHERE key = ?", (key,))
+    conn.commit()
+    conn.close()
 
 
 def save_template(tenant_id: int, key: str, values: dict, user_email: str) -> None:
@@ -465,8 +594,9 @@ def render(tenant_id: int, key: str, ctx: dict, *, preview: bool = False,
     spec = TEMPLATES.get(key)
     if spec is None:
         return key, f"<p>Event: <strong>{html.escape(key)}</strong></p>", False
-    t = template or get_template(tenant_id, key)
-    d = design or get_design(tenant_id)
+    provider = spec["audience"] == "provider"
+    t = template or (get_provider_template(key) if provider else get_template(tenant_id, key))
+    d = design or get_design(0 if provider else tenant_id)     # provider emails: the default design
     c = _prepare(key, ctx)
     client = spec["audience"] == "client"
     font = FONTS.get(d["font"], FONTS["system"])[1]

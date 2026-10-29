@@ -1,0 +1,20 @@
+{% extends "console/base.html" %}
+{% block title %}{{ spec.name }} — Provider console{% endblock %}
+{% block page_title %}{{ spec.name }}{% endblock %}
+{% block content %}
+<form method="post" action="/emails/{{ key }}" class="section"><div class="card"><div class="card-body">
+  <p class="text-sm text-muted" style="margin:0 0 10px">Placeholders: {% for p in placeholders %}<code>{{ "{" ~ p ~ "}" }}</code> {% endfor %}·
+    a blank line starts a paragraph · <code>**bold**</code>.</p>
+  {% for f, label in (("subject", "Subject"), ("heading", "Heading"), ("intro", "Intro"), ("button_text", "Button text"), ("outro", "Closing text")) %}
+  <label style="display:block;margin-top:10px">{{ label }}<br>
+    {% if f in ("intro", "outro") %}<textarea name="{{ f }}" rows="4" style="width:100%">{{ t[f] }}</textarea>
+    {% else %}<input name="{{ f }}" value="{{ t[f] }}" style="width:100%">{% endif %}</label>
+  {% endfor %}
+  <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn btn-primary btn-sm">Save</button>
+    {% if t.customized %}<button class="btn btn-ghost btn-sm" name="action" value="reset" data-confirm="Go back to the default text?">Reset</button>{% endif %}
+    <a class="btn btn-ghost btn-sm" href="/emails/{{ key }}/preview" target="_blank" rel="noopener">Preview</a>
+    <a class="btn btn-ghost btn-sm" href="/emails">Back</a>
+  </div>
+</div></div></form>
+{% endblock %}

@@ -28,6 +28,8 @@ async def emails_index(request: Request, current_user: dict = Depends(require_au
     require_perm(current_user, _CAP)
     groups = {c: [] for c in et.CATEGORIES}
     for key, spec in et.TEMPLATES.items():
+        if spec["audience"] == "provider":
+            continue                    # ours, edited in the provider console
         t = et.get_template(current_user["tenant_id"], key)
         groups[spec["category"]].append({
             "key": key, "name": spec["name"], "audience": spec["audience"],
@@ -123,7 +125,7 @@ async def preview(request: Request, current_user: dict = Depends(require_auth)):
     """Render an unsaved draft (template text and/or design) with sample data."""
     require_perm(current_user, _CAP)
     body = await request.json()
-    key = body.get("key") if body.get("key") in et.TEMPLATES else "device_registered"
+    key = body.get("key") if body.get("key") in et.tenant_keys() else "device_registered"
     tid = current_user["tenant_id"]
     subject, html, _ = et.render(
         tid, key, et.TEMPLATES[key]["sample"], preview=True,
@@ -137,7 +139,7 @@ async def preview(request: Request, current_user: dict = Depends(require_auth)):
 async def send_test(request: Request, key: str, current_user: dict = Depends(require_auth)):
     """Send the saved version of one email, with sample data, to the signed-in user."""
     require_perm(current_user, _CAP)
-    if key not in et.TEMPLATES:
+    if key not in et.tenant_keys():
         return JSONResponse({"ok": False, "error": "Unknown email."})
     tid = current_user["tenant_id"]
     settings = get_settings(tid)
@@ -162,7 +164,7 @@ async def send_test(request: Request, key: str, current_user: dict = Depends(req
 @router.get("/admin/emails/{key}", response_class=HTMLResponse)
 async def template_page(request: Request, key: str, current_user: dict = Depends(require_auth)):
     require_perm(current_user, _CAP)
-    if key not in et.TEMPLATES:
+    if key not in et.tenant_keys():
         _set_flash(request, "error", "Unknown email template.")
         return RedirectResponse("/admin/emails", status_code=303)
     spec = et.TEMPLATES[key]
@@ -176,7 +178,7 @@ async def template_page(request: Request, key: str, current_user: dict = Depends
 @router.post("/admin/emails/{key}")
 async def template_save(request: Request, key: str, current_user: dict = Depends(require_auth)):
     require_perm(current_user, _CAP)
-    if key not in et.TEMPLATES:
+    if key not in et.tenant_keys():
         return RedirectResponse("/admin/emails", status_code=303)
     form = await request.form()
     name = et.TEMPLATES[key]["name"]

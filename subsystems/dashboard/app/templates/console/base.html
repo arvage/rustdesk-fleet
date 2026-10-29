@@ -47,6 +47,7 @@
         {{ item('/billing', 'Overview', request.url.path == '/billing') }}
         {{ item('/plans', 'Plans', request.url.path.startswith('/plans')) }}
         {{ item('/signups', 'Sign-ups', request.url.path.startswith('/signups')) }}
+        {{ item('/emails', 'Emails', request.url.path.startswith('/emails')) }}
         {{ item('/jobs', 'Jobs', request.url.path.startswith('/jobs')) }}
         {{ item('/audit', 'Audit log', request.url.path == '/audit') }}
       </div>
