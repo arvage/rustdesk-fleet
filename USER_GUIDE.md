@@ -509,6 +509,96 @@ Everything support does is in **Logs**, marked `support:<their email>`, and
 your admins are emailed when a support session starts. The Support access
 page lists every grant and session.
 
+## 15. Your own domain
+
+Your dashboard and your clients' download links can live on a domain you
+own, such as `rds.yourcompany.com`, as well as on the address your provider
+gave you (`yourcompany.rds.example.com`). That original address always keeps
+working, whatever happens to your own domain. Devices never use your own
+domain: installers keep talking to your relay, so changing or losing a domain
+can't cut off a single device. Admins manage this under **Admin → Domains**.
+
+### Adding a domain
+
+1. **Admin → Domains → Add a domain.** Type the hostname (for example
+   `rds.yourcompany.com`) and click **Add domain**. You can have up to 3.
+2. The page shows the record to create at your DNS host, with copy buttons.
+   The recommended one is a **CNAME**:
+
+   | Type | Name | Value |
+   |---|---|---|
+   | CNAME | `rds` (the part before your domain) | your original address, e.g. `yourcompany.rds.example.com` |
+
+3. Wait. We check the record right away and then every 5 minutes for 7 days.
+   When it's right, we get a certificate for the domain automatically (a few
+   minutes), and the domain shows **Active**. The admins get an email.
+4. Optional: **Make primary** so emails, invitations, download links and
+   your client guides use your own domain.
+
+**Can't use a CNAME?** That happens on a bare domain (`yourcompany.com`
+itself) and at some DNS hosts. Open "Can't use a CNAME?" on the Domains page
+and create instead:
+
+| Type | Name | Value |
+|---|---|---|
+| A | `rds` | the server address shown on the page |
+| TXT | `_rdf-verify.rds` | the code shown on the page (starts with `rdf-verify-`) |
+
+Remove any AAAA (IPv6) record for the same name unless the page shows an IPv6
+address to use.
+
+### Where to create the record
+
+- **Cloudflare:** DNS → Records → **Add record**. Type `CNAME`, Name `rds`,
+  Target your original address. Set **Proxy status** to **DNS only** (the
+  grey cloud). With the orange cloud, Cloudflare answers instead of us and
+  the check fails with a message about a CDN. On a bare domain Cloudflare
+  turns the CNAME into A records, so add the TXT record too.
+- **GoDaddy:** My Products → your domain → **DNS** → **Add New Record**.
+  Type `CNAME`, Name `rds`, Value your original address, TTL 1 hour.
+  GoDaddy doesn't allow a CNAME on the bare domain (`@`): use the A + TXT
+  records there.
+- **Amazon Route 53:** Hosted zones → your domain → **Create record**.
+  Record name `rds`, Record type `CNAME`, Value your original address,
+  TTL 300, Simple routing. For the bare domain, use A + TXT (an Alias record
+  can't point at us).
+- **Microsoft 365** (if Microsoft hosts your DNS): Microsoft 365 admin
+  center → Settings → **Domains** → your domain → **DNS records** → **Add
+  record**. Type `CNAME`, Host name `rds`, Points to address your original
+  address, TTL 1 hour.
+- **Azure DNS:** DNS zones → your zone → **+ Record set**. Name `rds`,
+  Type `CNAME`, Alias your original address, TTL 1 hour.
+
+If your domain has **CAA** records (they say which certificate authorities
+may issue for it), one of them must allow `letsencrypt.org`. The page says so
+if one doesn't.
+
+### What each status means
+
+| Status | Meaning |
+|---|---|
+| Checking DNS… | We're looking at the record now. |
+| Waiting for DNS | The record isn't there or isn't right yet. The message says what we found. We check every 5 minutes for 7 days; **Check now** checks at once. |
+| Getting a certificate… | The record is right; we're getting the certificate. If that fails we retry at most once an hour, and stop after 5 tries. |
+| Active | Your domain works, with its own certificate (renewed automatically). |
+| DNS broken | It worked, but the record no longer points at us (we check daily). It keeps working for 7 days in case you're moving it. If it isn't fixed by then, we stop serving it and your links go back to your original address. You get an email both times. |
+| Failed | We gave up (7 days without the record, 5 failed certificate tries, or broken for 7 days). Fix the record and press **Check now** to start again. |
+
+**Remove** takes the domain off at once and revokes its certificate. Any
+link already sent on that domain (download links, invitations) stops
+working. If it was primary, your original address becomes primary again.
+
+### Passkeys on your own domain
+
+Your passkeys belong to your original address, so they keep working whatever
+happens to your own domain. Current browsers (Chrome and Edge 128 or later,
+Safari 18 or later, Firefox 152 or later) also accept them on your own domain
+directly. In an older browser, choosing your passkey on your own domain takes
+you to your original address to sign in, then brings you straight back
+signed in. Passwords work on your own domain as usual. To add a passkey in
+an older browser, add it on your original address (My Account there); it then
+works on both.
+
 ## Quick task index
 
 | I want to… | Go to |
@@ -519,6 +609,7 @@ page lists every grant and session.
 | Group devices by customer | Client Groups → create group, set device groups |
 | Push auto-update / lock settings | Client Groups → group → Client Settings |
 | Give a colleague access | Admin → Users → add user + role |
+| Use my own domain for the dashboard and links | Admin → Domains → Add a domain |
 | Limit what a role can do | Admin → Roles & permissions |
 | Set up off-site backups | Admin → Backup & Restore |
 | Restore the server | Admin → Backup & Restore → Restore |

@@ -162,8 +162,72 @@ installers never name a custom domain, so a tenant that changes or loses one
 never strands devices. Tenant #1 keeps its single name for both (kind
 `legacy`) and gets no relay subdomain.
 
-`tenant_domains.kind` `custom` (a tenant's CNAME) is phase 1d;
-`verified_at`, `tls_status` and `cert_expires_at` are already there for it.
+Custom domains (kind `custom`, phase 1d) are web hostnames only: see below.
+
+## Custom domains
+
+`tenant_domains` rows come in three kinds:
+
+| Kind | What | Status |
+|---|---|---|
+| `legacy` | tenant #1's original host (`rds.pacificmit.com` on the live box): its web host and its relay host | always `active` |
+| `provider_subdomain` | `<slug>.<PROVIDER_DOMAIN>` for console-made tenants | always `active` |
+| `custom` | a hostname the tenant owns and points at us (phase 1d, `app/domains.py`) | below |
+
+The `legacy` or `provider_subdomain` row is the tenant's **own host**
+(`domains.home_host`). It always works, can't be removed, is the CNAME
+target for custom domains and the passkey RP ID (below), and is primary
+unless an active custom domain is. Exactly one row per tenant is primary
+(`is_primary`): emails, invitations, download links and the client guides
+use it (`domains.primary_host`). The console's support sign-in always uses
+the own host.
+
+**Pointing a custom domain at us** (`app/domain_dns.py`, rules in
+`rdf_helper.py`):
+
+- a CNAME chain that reaches the tenant's own host (a chain reaching another
+  tenant's subdomain or the console is reported only as "points at a
+  different account"), or
+- A/AAAA records that are exactly `PUBLIC_IPV4`/`PUBLIC_IPV6`, plus a TXT
+  record `_rdf-verify.<domain>` holding the domain's token,
+
+according to every resolver in `DNS_CHECK_RESOLVERS`, with CAA records (if
+any) allowing `letsencrypt.org`. A domain proxied through a CDN gets its own
+message.
+
+**Who may add what:** a valid public hostname (no IP, wildcard or
+local-network name, at most 200 characters), not `PROVIDER_DOMAIN` or under
+it, not a hostname any tenant already has (pending ones included; a claim
+that failed or went 7 days unverified is released), at most
+`MAX_CUSTOM_DOMAINS`, trial and active tenants only, capability
+`manage_domains` (admin only; withheld from provider support).
+
+**Statuses** (`tenant_domains.status`, kind `custom`):
+
+| Status | Meaning | Reaches the tenant |
+|---|---|---|
+| `verifying` | queued for a DNS check now (just added, or Check now) | no |
+| `pending_dns` | DNS doesn't point here yet; re-checked every 5 minutes until `pending_until` (7 days) | no |
+| `issuing_certificate` | DNS passes; rdf-helper is issuing (at most one attempt an hour, at most 5 failures) | no |
+| `active` | served with its own certificate; DNS re-checked daily | yes |
+| `dns_broken` | was active, DNS left; still served for 7 days from `broken_since`, then released | yes |
+| `failed` | gave up (7 days without DNS, 5 failed issuances, or broken for 7 days); the hostname is free for anyone; Check now starts over | no |
+
+A domain whose removal is queued (`remove_reason`, by the tenant or a
+provider admin) stops reaching the tenant at once; the worker then releases
+it (`rdf-helper release-domain`) and deletes the row. Purge releases every
+custom domain; suspension and cancellation keep them (cancelled tenants show
+the usual "not active" and export pages on every host).
+
+All of this runs in one background thread (`domains.start()`), never in the
+request worker: DNS lookups and certificate issuance take seconds to
+minutes. `rdf-helper` re-checks DNS itself before issuing a certificate or
+writing a vhost for a custom domain, and refuses domains that aren't a
+`custom` row of a trial or active tenant.
+
+**Devices never use a custom domain** (see below): installers take
+`api-server` from the `provider_subdomain` row (tenant #1: its host), never
+from the primary domain.
 
 ## Passkeys on custom domains
 

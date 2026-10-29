@@ -1014,6 +1014,77 @@ Steps:
 7. Cancel again, then "Purge now" (type the slug). `https://e2etest…` stops
    answering, the tenant shows as purged, and its port block stays reserved.
 
+### Custom domains (phase 1d)
+
+Tenants can serve their dashboard and download links on their own domain
+(Admin → Domains; TENANCY.md, "Custom domains"). Devices never use one:
+installers keep the relay host and the provider subdomain.
+
+Settings in `/etc/rustdesk-fleet/dashboard.env` (all optional):
+
+| Setting | Default | What |
+|---|---|---|
+| `PUBLIC_IPV4` | none | This box's public IPv4 address. With it, a tenant that can't use a CNAME (bare domains, CNAME-flattening DNS hosts) may point A records here and prove ownership with a TXT record. Without it only the CNAME method is offered. |
+| `PUBLIC_IPV6` | none | This box's public IPv6 address, if it has one. A custom domain's AAAA records must be exactly this (or absent). |
+| `DNS_CHECK_RESOLVERS` | `1.1.1.1,8.8.8.8` | Public resolvers the DNS checks ask (IP addresses only). A check passes only if they all agree, so a cached or split-horizon answer can't mislead it. |
+| `MAX_CUSTOM_DOMAINS` | `3` | Custom domains per tenant. Chrome honours at most 5 distinct names in a tenant's related-origins list, so stay at or below 5. |
+
+The dashboard and `rdf-helper` read the same rules (the helper's file); the
+helper runs the DNS check itself before it issues a certificate or writes a
+vhost for a custom domain, and refuses domains that aren't a `custom` row of
+a trial or active tenant. New helper subcommand: `release-domain DOMAIN`
+(remove a custom domain's vhost and certificate whatever its DNS says).
+
+Packages: `dnsutils` (`dig`), installed by `install.sh`.
+
+nginx: `/etc/nginx/conf.d/rdf-default.conf` holds the default servers (port
+80: ACME challenges only, everything else closed with 444; port 443:
+`ssl_reject_handshake on`), so a hostname with no block of its own gets no
+certificate. Debian's stock `default` site is disabled for it. A custom
+domain's vhost (in `/etc/nginx/rdf-tenants/`, written by the helper) has its
+own port-80 block for renewals and the HTTPS redirect. certbot renews every
+certificate on its timer; `/etc/letsencrypt/renewal-hooks/deploy/` reloads
+nginx afterwards (`install.sh` adds `rdf-reload-nginx.sh` unless a hook that
+reloads nginx is already there).
+
+### Upgrading the live box to phase 1d
+
+What changes, and what to expect:
+
+- **Nobody is signed out**, and tenant #1 notices nothing: same host,
+  certificate, relay, devices and installers. Its passkeys keep their RP ID
+  (its own host); existing credentials are given that RP ID on startup.
+- An unknown hostname pointed at the box now gets a refused TLS handshake
+  (until now: the console's certificate), and on port 80 nothing but ACME
+  challenges.
+- The nginx location that logs one-time sign-in tokens without the query
+  now covers `/login/handoff` as well as `/support/enter`; `install.sh`
+  swaps it into existing vhosts.
+
+Steps:
+
+1. Back up: `sudo python3 ~/rustdesk-fleet/subsystems/single-tenant/backup.py run`,
+   and a plain copy of the control database (`~/fleet-pre-1d.sqlite3`).
+2. Note tenant #1's container start times:
+   `sudo docker inspect hbbs hbbr --format '{{.Name}} {{.State.StartedAt}}'`.
+3. Add `PUBLIC_IPV4=<this box's public IPv4>` (and `PUBLIC_IPV6` if it has
+   one) to `/etc/rustdesk-fleet/dashboard.env`.
+4. Merge the branch in `~/rustdesk-fleet`, then
+   `./install.sh --provider-only --provider-domain rds.example.com --yes`. It
+   installs `dnsutils` and the new helper, writes the default servers
+   (disabling the stock default site), adds the renewal hook, updates the
+   token location in the existing vhosts, reloads nginx (`nginx -t`, no new
+   `[emerg]`), and restarts the dashboard, whose startup adds the new
+   columns and the `login_handoffs` table.
+5. Check: `sudo nginx -t` passes and the error log has no new `[emerg]`;
+   tenant #1's site and the console load and passkey sign-in works on both;
+   container start times from step 2 are unchanged; devices still
+   heartbeat; an unknown name gets a refused handshake:
+   `openssl s_client -connect 127.0.0.1:443 -servername nothing.example </dev/null`
+   ends in an alert (`handshake failure` / `unrecognized name`) with no
+   certificate, and `curl -sI -H 'Host: nothing.example' http://127.0.0.1/`
+   gets an empty reply.
+
 ## Verify everything
 
 ```bash

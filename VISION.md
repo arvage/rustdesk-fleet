@@ -106,8 +106,17 @@ Provider console (phase 1b, built: see [`DEPLOYMENT.md`](DEPLOYMENT.md) §11):
   recorded daily for billing later.
 - **Support access** to a tenant's dashboard needs the tenant's consent and
   is time-limited: built in phase 1c (above).
-- **Custom domains** (a tenant's CNAME, verification, per-domain
-  certificates): phase 1d.
+- **Custom domains** (phase 1d, built: see
+  [`subsystems/dashboard/TENANCY.md`](subsystems/dashboard/TENANCY.md), "Custom
+  domains"): a tenant points its own domain at us with a CNAME to its
+  provider subdomain (or A records plus a TXT record where a CNAME can't be
+  used), we verify it from public resolvers and issue its certificate, and it
+  can become the primary domain for emails and links. The provider subdomain
+  always keeps working. **Devices never use a custom domain**: installers keep
+  the relay host and the provider subdomain, so losing a domain can't strand
+  a device. Passkeys belong to the provider subdomain and work on custom
+  domains through WebAuthn related origins, with a sign-in handoff for older
+  browsers.
 
 - **Client PDF guides** ([`client-docs/`](client-docs/README.md)) are
   generated per tenant when the tenant is created (provider console), with

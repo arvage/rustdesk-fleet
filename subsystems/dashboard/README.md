@@ -69,6 +69,7 @@ admins; every action lands in the provider audit log.
 | `GET /tenants/{id}` | Relay ports and key, domains, admins and pending invites, usage (devices, technicians, session hours this and last month, daily history), plan, lifecycle |
 | `POST /tenants/{id}/plan` · `/activate` · `/extend-trial` · `/suspend` · `/reactivate` · `/cancel` · `/extend-grace` · `/purge`, `POST /tenants/{id}/invites/{invite}/resend` | Plan and lifecycle actions (cancel and purge need the slug typed; not for tenant #1) |
 | `POST /tenants/{id}/support/open` | Open the tenant's dashboard as provider support (needs an active grant and a reason) |
+| `GET /domains`, `POST /tenants/{id}/domains/{domain}/remove` | Custom domains needing attention (DNS broken, failed, certificate expiring within 14 days); remove a tenant's custom domain with a reason (logged, tenant emailed). The console never adds domains |
 | `GET /relays`, `POST /relays/{tenant}/start\|stop\|restart\|upgrade`, `POST /relays/upgrade-all` | Relay health, versions and operations (upgrade-all goes one relay at a time, stopping at the first failure) |
 | `GET /jobs`, `GET /jobs/{id}` (+ `.json`) | Background jobs and their live progress |
 | `GET /audit` | Provider audit log, filterable by event, tenant, admin, text |
@@ -261,6 +262,9 @@ Staff pages (all require login):
 | `GET /admin` | Admin landing: tool cards + fleet stats (any admin-area capability) |
 | `GET /admin/support`, `POST /admin/support/grant` · `/revoke` | Support access: status, history, grant, change, revoke (`manage_support_access`) |
 | `GET /support/enter?token=…`, `POST /support/end` | Provider support's way in (single-use token from the console) and End session |
+| `GET /admin/domains`, `POST /admin/domains` · `/{id}/check` · `/{id}/primary` · `/{id}/remove` | Custom domains: list with the DNS records to create, add, check now, make primary, remove (`manage_domains`; provider support may view). Checks and certificates run in a background worker (`app/domains.py`) |
+| `GET /.well-known/webauthn` | On the tenant's own host: its served custom domains as WebAuthn related origins |
+| `GET /login/handoff/start?to=…` · `/login/handoff/go` · `/login/handoff?token=…` | Passkey sign-in handoff for custom domains in browsers without related origins (single-use 60-second token; TENANCY.md) |
 | `POST /csp-report` | CSP violation reports from browsers: logged, size-capped, rate-limited |
 | `GET /admin/reports`, `GET /admin/reports/{key}`, `GET /admin/reports/{key}/{section}.csv` | Reports catalogue, one report (`?group=<slug>\|__none__&days=7\|30\|90\|180\|365`), and any of its tables as CSV (any admin-area capability) |
 | `GET /admin/emails`, `GET/POST /admin/emails/{key}`, `GET/POST /admin/emails/design`, `GET /admin/emails/logo.png` | Email templates: list, per-email editor (save / reset), shared design + logo upload (`manage_notifications`) |
