@@ -311,11 +311,28 @@ if i >= 0:
   done
 }
 
+# certbot renews every certificate (console, tenants' subdomains and custom
+# domains) on its own timer; nginx only serves a renewed one after a reload.
+write_renewal_hook() {
+  local dir=/etc/letsencrypt/renewal-hooks/deploy
+  sudo mkdir -p "$dir"
+  if sudo grep -lsq 'reload nginx' "$dir"/* && ! sudo test -f "$dir/rdf-reload-nginx.sh"; then
+    return 0      # a hook that reloads nginx is already there
+  fi
+  sudo tee "$dir/rdf-reload-nginx.sh" >/dev/null <<'SH'
+#!/bin/sh
+# RustDesk Fleet (install.sh): load renewed certificates.
+nginx -t -q && systemctl reload nginx
+SH
+  sudo chmod 0755 "$dir/rdf-reload-nginx.sh"
+}
+
 provider_setup() {
   log "Setting up the provider console pieces"
   install_helper
   write_log_format
   write_default_servers
+  write_renewal_hook
   drop_docker_group
   secure_relay_compose
   [[ $DOCKER_GROUP_DROPPED -eq 1 ]] && sudo systemctl restart rustdesk-dashboard.service

@@ -35,6 +35,7 @@ STATUSES = ("verifying", "pending_dns", "issuing_certificate", "active", "dns_br
 SERVED = ("active", "dns_broken")
 
 PENDING_DAYS = 7          # how long a new domain is checked before we give up
+HEALTH_EVERY_H = 24       # served domains: DNS re-checked daily
 BROKEN_DAYS = 7           # how long a broken domain is still served
 CHECK_EVERY_MIN = 5       # pending domains
 ISSUE_EVERY_MIN = 60      # Let's Encrypt: at most one attempt an hour per domain
@@ -298,11 +299,17 @@ def run_due(at: datetime | None = None) -> None:
     checks = conn.execute(
         "SELECT id, tenant_id FROM tenant_domains WHERE kind = 'custom' AND remove_reason IS NULL"
         " AND status IN ('verifying', 'pending_dns', 'issuing_certificate') AND next_check_at <= ?", (fmt(t),)).fetchall()
+    served = conn.execute(
+        "SELECT id, tenant_id FROM tenant_domains WHERE kind = 'custom' AND remove_reason IS NULL"
+        " AND status IN ('active', 'dns_broken') AND (last_checked_at IS NULL OR last_checked_at <= ?"
+        " OR next_check_at <= ?)", (fmt(t - timedelta(hours=HEALTH_EVERY_H)), fmt(t))).fetchall()
     conn.close()
     for r in removals:
         _remove(r["tenant_id"], r["id"])
     for r in checks:
         _advance(r["tenant_id"], r["id"], t)
+    for r in served:
+        _health(r["tenant_id"], r["id"], t)
     while _guides:
         _rebuild_guides(_guides.pop())
 
@@ -400,6 +407,77 @@ def _issue(conn, tenant_id: int, domain_id: int, host: str, t: datetime) -> None
     notify_admins(tenant_id, f"{host} is live",
                   [f"https://{host}/ now opens your dashboard, with its own certificate. To use it in emails, "
                    "invitations and download links, make it the primary domain in Admin → Domains."])
+
+
+def _health(tenant_id: int, domain_id: int, t: datetime) -> None:
+    """Daily re-check of a served domain. DNS gone: 'dns_broken', still
+    served for BROKEN_DAYS (the certificate is valid; maybe they're mid-
+    migration), then released, with the home host primary again. DNS back:
+    'active' again. Suspended and cancelled tenants keep their domains as
+    they are (reversible), so they aren't checked."""
+    from app.console import web
+    from app.deps import get_db
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM tenant_domains WHERE id = ? AND tenant_id = ?", (domain_id, tenant_id)).fetchone()
+        tenant = _tenant_row(conn, tenant_id)
+        if row is None or tenant is None or tenant["status"] not in tenancy.OPEN_STATUSES:
+            return
+        host = row["hostname"]
+        result = _dns_check(host, home_host(conn, tenant_id), row["verify_token"])
+        conn.execute("UPDATE tenant_domains SET last_checked_at = ?, last_check_ok = ?, last_check_message = ?,"
+                     " check_method = COALESCE(?, check_method), next_check_at = NULL WHERE id = ? AND tenant_id = ?",
+                     (fmt(t), 1 if result.ok else 0, "" if result.ok else result.reason, result.method or None,
+                      domain_id, tenant_id))
+        if result.ok:
+            if row["status"] == "dns_broken":
+                conn.execute("UPDATE tenant_domains SET status = 'active', broken_since = NULL WHERE id = ? AND tenant_id = ?",
+                             (domain_id, tenant_id))
+                _log(conn, tenant_id, "domain_dns_restored", host)
+                conn.commit()
+                notify_admins(tenant_id, f"{host} works again",
+                              [f"The DNS record for {host} points at us again, so nothing changes: it keeps working."])
+            conn.commit()
+            return
+        if row["status"] == "active":
+            conn.execute("UPDATE tenant_domains SET status = 'dns_broken', broken_since = ? WHERE id = ? AND tenant_id = ?",
+                         (fmt(t), domain_id, tenant_id))
+            _log(conn, tenant_id, "domain_dns_broken", f"{host}: {result.reason[:200]}")
+            conn.commit()
+            notify_admins(tenant_id, f"{host}: DNS no longer points at us", [
+                f"Our daily check found that {host} no longer points at us: {result.reason}",
+                f"It keeps working for {BROKEN_DAYS} days in case you're moving it. If the record isn't fixed by "
+                f"then, we stop serving {host}, and your links go back to {home_host(conn, tenant_id)}."])
+            return
+        since = parse(row["broken_since"]) or t
+        if t - since < timedelta(days=BROKEN_DAYS):
+            conn.commit()
+            return
+        try:
+            web.release(host)
+        except Exception as e:
+            conn.execute("UPDATE tenant_domains SET next_check_at = ? WHERE id = ? AND tenant_id = ?",
+                         (fmt(t + timedelta(hours=1)), domain_id, tenant_id))
+            _log(conn, tenant_id, "domain_release_failed", f"{host}: {str(e)[-200:]}")
+            conn.commit()
+            return
+        if row["is_primary"]:
+            _fall_back_to_home(conn, tenant_id)
+        home = home_host(conn, tenant_id)
+        conn.execute(
+            "UPDATE tenant_domains SET status = 'failed', is_primary = 0, tls_status = NULL, cert_expires_at = NULL,"
+            " last_check_message = ? WHERE id = ? AND tenant_id = ?",
+            (f"We stopped serving {host} after its DNS pointed elsewhere for {BROKEN_DAYS} days. Fix the record and "
+             "press Check now to set it up again.", domain_id, tenant_id))
+        _log(conn, tenant_id, "domain_released", f"{host}: DNS broken for {BROKEN_DAYS} days")
+        conn.commit()
+        tenancy.invalidate_cache()
+        notify_admins(tenant_id, f"We stopped serving {host}", [
+            f"{host} hasn't pointed at us for {BROKEN_DAYS} days, so we removed it and its certificate. "
+            f"Your dashboard, emails and links use {home} now.",
+            "To use it again, fix the DNS record and press Check now in Admin → Domains."])
+    finally:
+        conn.close()
 
 
 def _remove(tenant_id: int, domain_id: int) -> None:
