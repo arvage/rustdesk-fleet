@@ -71,6 +71,7 @@ class FakeStripe(HTTPClient):
         self.portal_sessions: list[dict] = []
         self.portal_configurations: dict[str, dict] = {}
         self.meter_events: dict[str, dict] = {}
+        self.meters: dict[str, dict] = {}
         self.coupons: dict[str, dict] = {"FRIENDS": {"id": "FRIENDS", "object": "coupon", "valid": True}}
         self.fail: dict[str, tuple[int, str]] = {}      # path prefix -> (status, message)
         self.versions: set[str] = set()
@@ -90,6 +91,12 @@ class FakeStripe(HTTPClient):
             "nickname": None,
         }
         return pid
+
+    def add_meter(self, event_name: str = "rdf_devices") -> str:
+        mid = new_id("mtr")
+        self.meters[mid] = {"id": mid, "object": "billing.meter", "event_name": event_name,
+                            "default_aggregation": {"formula": "sum"}}
+        return mid
 
     def add_card(self, customer: str, fingerprint: str = "fp_card_1", default: bool = True, kind: str = "card") -> str:
         pm = new_id("pm")
@@ -298,6 +305,8 @@ class FakeStripe(HTTPClient):
                 data = [i for i in self.invoices.values() if i["customer"] == p.get("customer")]
                 return {"object": "list", "data": data, "has_more": False}
             return self.invoices[seg[1]]
+        if seg[0] == "billing" and seg[1] == "meters":
+            return self.meters[seg[2]]
         if seg[0] == "billing" and seg[1] == "meter_events":
             ident = p.get("identifier") or new_id("mev")
             if ident in self.meter_events:

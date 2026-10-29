@@ -70,3 +70,9 @@ def dashboard_url(kind: str, object_id: str) -> str:
     """A link to an object in the Stripe dashboard (test or live)."""
     base = "https://dashboard.stripe.com/" + ("test/" if mode() == "test" else "")
     return f"{base}{kind}/{object_id}"
+
+
+def plain(obj):
+    """A Stripe object as plain dicts and lists (stripe-python's objects
+    aren't dicts), so the rest of the code reads it with .get()."""
+    return obj.to_dict() if hasattr(obj, "to_dict") else obj

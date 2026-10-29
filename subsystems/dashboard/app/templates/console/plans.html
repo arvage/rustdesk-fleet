@@ -1,0 +1,28 @@
+{% extends "console/base.html" %}
+{% block title %}Plans — Provider console{% endblock %}
+{% block page_title %}Plans{% endblock %}
+{% block topbar_actions %}<a href="/plans/new" class="btn btn-primary btn-sm">New plan</a>{% endblock %}
+{% block content %}
+{% if billing_missing %}<div class="flash error">Billing is off: set {{ billing_missing | join(", ") }} in dashboard.env. Plans can't be checked with Stripe until then.</div>
+{% elif mode == "test" %}<div class="flash warning">Stripe is in test mode.</div>{% endif %}
+<p class="text-muted text-sm" style="margin:0 0 16px">A plan maps to prices you create in the Stripe dashboard: a flat price,
+  a per-technician price and a per-device price, any of them optional. Public plans appear on the pricing section and the
+  sign-up form, in order. Archived plans are hidden from sign-up; existing subscribers stay on them.</p>
+<div class="section"><div class="card"><div class="card-body" style="padding:0">
+  {% if plans %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Plan</th><th>Prices</th><th>Soft limits</th><th>Subscribers</th><th>Shown</th><th></th></tr></thead>
+    <tbody>{% for p in plans %}<tr>
+      <td><a href="/plans/{{ p.id }}">{{ p.name }}</a> <span class="text-muted text-sm">{{ p.key }}</span></td>
+      <td class="text-sm">{% for pr in p.prices %}<div>{{ pr.unit_type }}: {{ pr.summary }}</div>{% endfor %}</td>
+      <td class="text-sm">{{ p.max_technicians if p.max_technicians is not none else "—" }} technicians ·
+        {{ p.max_devices if p.max_devices is not none else "—" }} devices</td>
+      <td>{{ p.subscribers }}</td>
+      <td>{% if p.archived_at %}<span class="badge badge-offline">archived</span>{% elif p.is_public %}<span class="badge badge-active">public #{{ p.sort_order }}</span>{% else %}<span class="badge badge-pending">hidden</span>{% endif %}</td>
+      <td><form method="post" action="/plans/{{ p.id }}/{{ 'unarchive' if p.archived_at else 'archive' }}" style="margin:0">
+        <button class="btn btn-ghost btn-sm">{{ "Restore" if p.archived_at else "Archive" }}</button></form></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="text-muted" style="padding:16px;margin:0">No plans yet. Create the prices in Stripe first, then add a plan here.</p>{% endif %}
+</div></div></div>
+{% endblock %}

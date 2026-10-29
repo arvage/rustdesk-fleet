@@ -1,0 +1,35 @@
+{% extends "console/base.html" %}
+{% block title %}{{ plan.name if plan else "New plan" }} — Provider console{% endblock %}
+{% block page_title %}{{ plan.name if plan else "New plan" }}{% endblock %}
+{% block content %}
+{% if billing_missing %}<div class="flash error">Billing is off: set {{ billing_missing | join(", ") }} in dashboard.env.</div>{% endif %}
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+{% set f = form if form else (plan or {}) %}
+<form method="post" action="{{ '/plans/' ~ plan.id if plan else '/plans' }}" class="section" data-busy="Checking with Stripe…"><div class="card"><div class="card-body">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
+    <label>Key<br><input name="key" value="{{ f.key or '' }}" required pattern="[a-z][a-z0-9\-]{1,30}[a-z0-9]" placeholder="standard"></label>
+    <label>Name<br><input name="name" value="{{ f.name or '' }}" required placeholder="Standard"></label>
+    <label>Sort order<br><input type="number" name="sort_order" value="{{ f.sort_order or 0 }}"></label>
+  </div>
+  <label style="display:block;margin-top:10px">Description (shown on the pricing section)<br>
+    <input name="description" value="{{ f.description or '' }}" maxlength="500" style="width:100%"></label>
+  <label style="display:block;margin-top:10px"><input type="checkbox" name="is_public" value="1" {% if f.is_public %}checked{% endif %}> Public: offered on the pricing section and sign-up</label>
+  <h2 style="font-size:14px;margin:18px 0 6px">Stripe prices</h2>
+  <p class="text-sm text-muted" style="margin:0 0 10px">Paste Price IDs from the Stripe dashboard. Each is fetched and checked when you save:
+    one currency and one billing interval for the whole plan, only the device price may be usage-based (with a Billing Meter).
+    To include some technicians or devices, use a <strong>graduated tiered</strong> price whose first tier is free
+    (e.g. up to 2 at $0, then $5 each).</p>
+  {% for unit, label in units.items() %}
+  <label style="display:block;margin-top:8px">{{ unit | capitalize }} price ({{ label }}, optional)<br>
+    <input name="price_{{ unit }}" value="{{ form['price_' ~ unit] if form else (prices[unit].stripe_price_id if unit in prices else '') }}" placeholder="price_…" style="width:100%;max-width:420px">
+    {% if unit in prices and not form %}<span class="text-sm text-muted">{{ prices[unit].summary }}{% if prices[unit].included_quantity %} · {{ prices[unit].included_quantity }} included{% endif %}</span>{% endif %}</label>
+  {% endfor %}
+  <h2 style="font-size:14px;margin:18px 0 6px">Soft limits</h2>
+  <p class="text-sm text-muted" style="margin:0 0 10px">Going over warns the tenant and flags it here; nothing is blocked. Empty means no limit.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <label>Max technicians<br><input type="number" min="0" name="max_technicians" value="{{ f.max_technicians if f.max_technicians is not none else '' }}"></label>
+    <label>Max devices<br><input type="number" min="0" name="max_devices" value="{{ f.max_devices if f.max_devices is not none else '' }}"></label>
+  </div>
+  <div style="margin-top:16px"><button class="btn btn-primary btn-sm">Save</button> <a href="/plans" class="btn btn-ghost btn-sm">Back</a></div>
+</div></div></form>
+{% endblock %}
