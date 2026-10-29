@@ -70,6 +70,8 @@ class Tenant:
     relay: Relay | None
     hostname: str = ""      # the domain this request came in on ("" for jobs)
     trial_ends_at: str | None = None   # UTC, while on trial (or suspended at its end)
+    billing_mode: str = "manual"       # stripe, manual or internal (phase 2)
+    billing_suspended: bool = False    # suspended by billing: its admins can still reach Billing
 
     @property
     def is_open(self) -> bool:
@@ -107,7 +109,9 @@ def _load(conn, tenant_id: int, hostname: str = "") -> Tenant | None:
     r = conn.execute("SELECT * FROM relays WHERE tenant_id = ?", (tenant_id,)).fetchone()
     return Tenant(id=t["id"], slug=t["slug"], display_name=t["display_name"], status=t["status"],
                   relay=_relay_from_row(r) if r else None, hostname=hostname,
-                  trial_ends_at=t["trial_ends_at"] if "trial_ends_at" in t.keys() else None)
+                  trial_ends_at=t["trial_ends_at"] if "trial_ends_at" in t.keys() else None,
+                  billing_mode=t["billing_mode"] if "billing_mode" in t.keys() else "manual",
+                  billing_suspended=bool(t["billing_suspended"]) if "billing_suspended" in t.keys() else False)
 
 
 def load_tenant(tenant_id: int, conn=None) -> Tenant | None:
@@ -342,10 +346,21 @@ class TenantMiddleware:
             if tenant.status == "cancelled" and _export_allowed(path):
                 if path == "/":
                     return await _redirect(send, "/export")
+            elif tenant.status == "suspended" and tenant.billing_suspended and _billing_allowed(path):
+                # Suspended for non-payment: the admins can still sign in and pay.
+                if path == "/":
+                    return await _redirect(send, "/admin/billing")
             else:
                 return await _plain(send, 403, _INACTIVE_HTML)
         scope.setdefault("state", {})["tenant"] = tenant
         return await self.app(scope, receive, send)
+
+
+def _billing_allowed(path: str) -> bool:
+    """Paths a tenant suspended for billing can still reach: sign-in and the
+    Billing page (to pay)."""
+    return (path in ("/", "/login", "/logout", "/admin/billing", "/.well-known/webauthn")
+            or path.startswith(("/login/webauthn", "/login/handoff", "/static/", "/admin/billing/")))
 
 
 def _export_allowed(path: str) -> bool:

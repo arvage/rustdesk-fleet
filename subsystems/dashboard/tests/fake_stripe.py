@@ -336,6 +336,9 @@ def signed(payload: dict, secret: str = "whsec_test_fake", at: int | None = None
     return body, f"t={ts},v1={sig}"
 
 
-def event(etype: str, obj: dict, eid: str | None = None) -> dict:
+def event(etype: str, obj: dict, eid: str | None = None, previous: dict | None = None) -> dict:
+    data = {"object": obj}
+    if previous:
+        data["previous_attributes"] = previous
     return {"id": eid or new_id("evt"), "object": "event", "type": etype, "api_version": "2026-09-30.endive",
-            "created": int(time.time()), "data": {"object": obj}}
+            "created": int(time.time()), "data": data}

@@ -66,6 +66,14 @@ def _set(conn, tenant_id: int, **cols) -> None:
 def guard(tenant_id: int, action: str) -> None:
     if tenant_id == LEGACY_TENANT_ID and action in ("cancel", "purge"):
         raise LifecycleError(f"Tenant #1 can't be {'cancelled' if action == 'cancel' else 'purged'}.")
+    if action == "purge":
+        conn = get_db()
+        live = conn.execute("SELECT s.status FROM billing_subscriptions s JOIN tenants t ON t.id = s.tenant_id"
+                            " WHERE s.tenant_id = ? AND t.billing_mode = 'stripe'"
+                            " AND s.status NOT IN ('canceled', 'incomplete_expired')", (tenant_id,)).fetchone()
+        conn.close()
+        if live:
+            raise LifecycleError(f"Its Stripe subscription is {live[0]}; cancel it first (purging requires that).")
 
 
 def admin_emails(conn, tenant_id: int) -> list[str]:
@@ -80,7 +88,7 @@ def suspend(tenant_id: int, by: str) -> None:
     if t is None or t["status"] not in ("trial", "active"):
         conn.close()
         raise LifecycleError("Only a trial or active tenant can be suspended.")
-    _set(conn, tenant_id, status="suspended")
+    _set(conn, tenant_id, status="suspended", billing_suspended=0)     # a provider's: paying doesn't lift it
     provider_log(conn, "tenant_suspended", t["slug"], by, tenant_id)
     conn.close()
 
@@ -203,9 +211,16 @@ def _reactivate(job) -> None:
         conn = get_db()
         trial = {} if status == "trial" else {"trial_ends_at": None, "trial_warning_sent_at": None}
         _set(conn, job.tenant_id, status=status, cancelled_at=None, purge_after=None, purge_warning_sent_at=None,
-             **trial)
+             billing_suspended=0, **trial)
         provider_log(conn, "tenant_reactivated", row["slug"], job.created_by, job.tenant_id)
         conn.close()
+    if row["billing_mode"] == "stripe":
+        # Stripe decides trial or active, and the dates.
+        from app import billing
+        sub = billing.subscription_of(job.tenant_id)
+        if sub is not None:
+            with job.step("Sync the subscription from Stripe"):
+                billing.sync_subscription(sub["stripe_subscription_id"])
 
 
 def purge_now(tenant_id: int, job=None, by: str = "") -> None:
@@ -291,8 +306,9 @@ def daily(now: datetime | None = None) -> None:
 
 
 def _trials(conn, now: datetime) -> None:
-    rows = conn.execute("SELECT * FROM tenants WHERE status = 'trial' AND trial_ends_at IS NOT NULL AND id != ?",
-                        (LEGACY_TENANT_ID,)).fetchall()
+    # Only manual tenants: Stripe runs Stripe tenants' trials, internal ones have none.
+    rows = conn.execute("SELECT * FROM tenants WHERE status = 'trial' AND trial_ends_at IS NOT NULL AND id != ?"
+                        " AND billing_mode = 'manual'", (LEGACY_TENANT_ID,)).fetchall()
     for t in rows:
         due = datetime.strptime(t["trial_ends_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         if due <= now:

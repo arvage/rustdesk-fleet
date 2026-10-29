@@ -2,8 +2,20 @@
 {% block title %}Export your data — RustDesk Fleet{% endblock %}
 {% block page_title %}Export your data{% endblock %}
 {% block content %}
-{% if tenant.status == "cancelled" %}
+{% if resubscribed %}
+<div class="flash success">Thanks! Your subscription is being set up; the account reopens in a minute or two, with the same relay, keys and devices.</div>
+{% elif tenant.status == "cancelled" %}
 <div class="flash error">This account was cancelled. You can download your data here until it is deleted for good.</div>
+{% endif %}
+{% if can_resubscribe and not resubscribed %}
+<div class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 6px">Changed your mind?</h2>
+  <p class="text-sm" style="margin:0 0 12px">Subscribe again before the data is deleted and everything comes back as it was:
+    the same relay, keys, devices and settings. A card is required; there is no new trial.</p>
+  <form method="post" action="/export/resubscribe" data-busy="Opening the payment page…">
+    <button type="submit" class="btn btn-primary btn-sm">Resubscribe</button>
+  </form>
+</div></div></div>
 {% endif %}
 <div class="section"><div class="card"><div class="card-body">
   <p style="margin:0 0 12px">Download your data as CSV files:</p>

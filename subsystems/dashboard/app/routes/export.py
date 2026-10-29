@@ -5,7 +5,7 @@ import csv
 import io
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.auth import require_auth
 from app.deps import get_db, get_devices
@@ -73,8 +73,36 @@ def _rows(tenant: Tenant, name: str) -> tuple[list[str], list[list]]:
 async def export_page(request: Request, current_user: dict = Depends(require_auth),
                       tenant: Tenant = Depends(get_tenant)):
     require_perm(current_user, "manage_users")
+    from app.permissions import user_can
+    can_resubscribe = (tenant.billing_mode == "stripe" and tenant.status == "cancelled"
+                       and user_can(current_user, "manage_billing") and not current_user.get("is_support"))
     return templates.TemplateResponse(request, "export.html", {
-        "current_user": current_user, "exports": EXPORTS, "tenant": tenant})
+        "current_user": current_user, "exports": EXPORTS, "tenant": tenant, "can_resubscribe": can_resubscribe,
+        "resubscribed": request.query_params.get("resubscribed") == "1"})
+
+
+@router.post("/export/resubscribe")
+def export_resubscribe(request: Request, current_user: dict = Depends(require_auth),
+                       tenant: Tenant = Depends(get_tenant)):
+    """Subscribe again during the cancellation grace period: a new Checkout
+    Session for the same Stripe customer (card required). The webhook
+    reopens the tenant with the same relay, keys and devices."""
+    require_perm(current_user, "manage_billing")
+    if current_user.get("is_support") or tenant.billing_mode != "stripe" or tenant.status != "cancelled":
+        return RedirectResponse("/export", status_code=303)
+    from app import billing, domains, signup
+    conn = get_db()
+    home = domains.home_host(conn, tenant.id)
+    conn.close()
+    try:
+        url = billing.resubscribe_url(tenant.id, home)
+    except signup.SignupError as e:
+        request.session["flash"] = {"type": "error", "msg": str(e)}
+        return RedirectResponse("/export", status_code=303)
+    except Exception:
+        request.session["flash"] = {"type": "error", "msg": "We couldn't reach our payment provider; try again shortly."}
+        return RedirectResponse("/export", status_code=303)
+    return RedirectResponse(url, status_code=303)
 
 
 @router.get("/export/{name}.csv")

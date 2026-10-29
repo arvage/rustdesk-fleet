@@ -127,8 +127,12 @@
   {% if t.id != 1 and t.status in ("trial", "active", "suspended") %}
   <form method="post" action="/tenants/{{ t.id }}/cancel" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px">
     <input name="confirm" placeholder="type {{ t.slug }} to cancel" required>
+    {% if t.billing_mode == "stripe" %}
+    <select name="when"><option value="now">Cancel the subscription now</option>
+      <option value="period_end">Cancel at the end of the paid period</option></select>
+    {% endif %}
     <button class="btn btn-ghost btn-sm" style="color:var(--danger)">Cancel tenant</button>
-    <span class="text-sm text-muted">Stops the relay now; data is kept for 30 days for export or reactivation, then purged.</span>
+    <span class="text-sm text-muted">Stops the relay{% if t.billing_mode == "stripe" %} (now, or when the period ends){% endif %}; data is kept for 30 days for export or reactivation, then purged.{% if t.billing_mode == "stripe" %} The Stripe subscription is cancelled too.{% endif %}</span>
   </form>
   {% endif %}
   {% if t.status == "cancelled" %}

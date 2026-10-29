@@ -92,7 +92,8 @@ def run_once() -> None:
                  refresh_cert_expiry,
                  _lifecycle,
                  _support_expiry,
-                 _signups):
+                 _signups,
+                 _billing):
         try:
             step()
         except Exception:
@@ -109,6 +110,19 @@ def _missing(day: date) -> bool:
 def _support_expiry() -> None:
     from app import support
     support.sweep()
+
+
+def _billing() -> None:
+    """Once a day: reconcile every Stripe tenant with Stripe (missed
+    webhooks, past-due suspensions, cards)."""
+    from app import billing, provider_config, stripe_api
+    if not stripe_api.enabled():
+        return
+    today = datetime.now(timezone.utc).date().isoformat()
+    if provider_config.get("billing_reconciled_on") == today:
+        return
+    billing.reconcile()
+    provider_config.set_many({"billing_reconciled_on": today})
 
 
 def _signups() -> None:

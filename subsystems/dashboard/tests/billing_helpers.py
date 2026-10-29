@@ -64,9 +64,9 @@ def start_signup(b, slug="abc", email="ada@abc.example", ip="203.0.113.5", plan=
     return sql("SELECT * FROM signups WHERE slug = ?", slug)[0]
 
 
-def deliver(etype, obj, eid=None):
+def deliver(etype, obj, eid=None, previous=None):
     """Post a signed event to the webhook and run the queued jobs."""
-    body, sig = fake_stripe.signed(fake_stripe.event(etype, obj, eid))
+    body, sig = fake_stripe.signed(fake_stripe.event(etype, obj, eid, previous))
     r = new_client(PUBLIC).post("/stripe/webhook", content=body,
                                 headers={"Stripe-Signature": sig, "Content-Type": "application/json"})
     jobs.run_pending()

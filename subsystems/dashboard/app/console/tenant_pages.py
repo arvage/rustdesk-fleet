@@ -311,6 +311,24 @@ async def tenant_cancel(request: Request, tenant_id: int, confirm: str = Form(""
     if confirm != row["slug"]:
         _flash(request, "error", "Type the tenant's slug to confirm.")
         return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+    if row["billing_mode"] == "stripe":
+        # Cancel the subscription in Stripe; its webhook (or the sync below)
+        # cancels the tenant. At period end, nothing changes until then.
+        form = await request.form()
+        from app import billing
+        try:
+            billing.cancel_subscription(tenant_id, at_period_end=form.get("when") == "period_end",
+                                        by=user["email"])
+        except Exception as e:
+            _flash(request, "error", f"Stripe: {e}")
+            return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+        if form.get("when") == "period_end":
+            _flash(request, "success", "The subscription will end at the end of the current period; the tenant stays "
+                                       "open until then.")
+            return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
+        if not jobs.active_for(tenant_id) and row["status"] != "cancelled":
+            return _queue(request, "cancel_tenant", row, user)
+        return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
     return _queue(request, "cancel_tenant", row, user)
 
 

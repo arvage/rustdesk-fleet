@@ -89,4 +89,8 @@ def ensure_tables(conn) -> None:
                      " CHECK (billing_mode IN ('stripe', 'manual', 'internal'))")
         # Existing tenants were made by hand: manual. Tenant #1 is ours.
         conn.execute("UPDATE tenants SET billing_mode = 'internal' WHERE id = ?", (LEGACY_TENANT_ID,))
+    if "billing_suspended" not in cols:
+        # 1 = suspended because of billing: paying lifts it. A provider's
+        # suspension (0) is never lifted by a payment.
+        conn.execute("ALTER TABLE tenants ADD COLUMN billing_suspended INTEGER NOT NULL DEFAULT 0")
     conn.commit()

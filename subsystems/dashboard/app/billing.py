@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app import settings, signup, stripe_api
 from app.console import jobs
@@ -70,6 +70,8 @@ def receive(body: bytes, signature: str) -> str:
         event = json.loads(body)
         event_id, etype = event["id"], event["type"]
         obj = (event.get("data") or {}).get("object") or {}
+        # A detached payment method no longer names its customer.
+        before = (event.get("data") or {}).get("previous_attributes") or {}
     except Exception:
         raise WebhookRejected("bad signature or body")
     if not isinstance(event_id, str) or not event_id.startswith("evt_") or not isinstance(etype, str):
@@ -88,7 +90,8 @@ def receive(body: bytes, signature: str) -> str:
     if etype in HANDLED:
         jobs.enqueue("stripe_event", None, {"event_id": event_id, "type": etype,
                                             "object_id": str(obj.get("id") or ""),
-                                            "customer": str(obj.get("customer") or "")}, "stripe")
+                                            "customer": str(obj.get("customer") or before.get("customer") or "")},
+                     "stripe")
     else:
         _done(event_id, "")
     return "queued"
@@ -117,7 +120,8 @@ def process(etype: str, object_id: str, customer: str) -> None:
     if etype == "checkout.session.completed":
         checkout_completed(object_id)
     elif etype in SUBSCRIPTION_EVENTS:
-        sync_subscription(object_id)
+        if sync_subscription(object_id) is not None and etype == "customer.subscription.trial_will_end":
+            _trial_ending(object_id)
     elif etype in INVOICE_EVENTS:
         invoice = stripe_api.plain(stripe_api.client().v1.invoices.retrieve(object_id))
         sub = _invoice_subscription(invoice)
@@ -305,7 +309,11 @@ def _period_end(sub: dict) -> str | None:
     return _ts(max(ends)) if ends else None
 
 
-def sync_subscription(sub_id: str) -> dict | None:
+class _Synced(dict):
+    _changed: str | None = None
+
+
+def sync_subscription(sub_id: str, at: datetime | None = None, quiet: bool = False) -> dict | None:
     """Fetch a subscription from Stripe and record it (and, step 5, apply it
     to the tenant). Returns the subscription, or None if it isn't ours."""
     conn = get_db()
@@ -324,9 +332,241 @@ def sync_subscription(sub_id: str) -> dict | None:
                   _ts(sub.get("trial_end")), 1 if has_card else 0, row["tenant_id"]))
     conn.commit()
     conn.close()
-    apply_status(row["tenant_id"], sub)
-    return sub
+    out = _Synced(sub)
+    out._changed = apply_status(row["tenant_id"], sub, at)
+    return out
 
 
-def apply_status(tenant_id: int, sub: dict) -> None:
-    """Make the tenant follow its subscription (step 5)."""
+# ── Stripe status drives the tenant (billing_mode = stripe only) ───────────
+#
+#   trialing            trial (ends at Stripe's trial_end; no local timer)
+#   active              active
+#   past_due            stays open with a banner; suspended after
+#                       PAST_DUE_SUSPEND_DAYS
+#   unpaid, paused      suspended
+#   incomplete          sign-up not finished: nothing to do
+#   incomplete_expired  the creation is undone
+#   canceled            cancelled: relay stopped, 30-day grace, export, purge
+#   cancel_at_period_end  unchanged, with a banner saying when it ends
+#
+# A suspension billing made (tenants.billing_suspended = 1) is lifted when
+# the subscription is good again; one a provider admin made is not.
+
+def _tenant(conn, tenant_id: int):
+    return conn.execute("SELECT * FROM tenants WHERE id = ?", (tenant_id,)).fetchone()
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def _fmt(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def apply_status(tenant_id: int, sub: dict, at: datetime | None = None) -> str | None:
+    """Make a Stripe tenant follow its subscription. Returns what changed
+    (for the reconciliation log), or None."""
+    from app.console import lifecycle
+    from app.tenancy import invalidate_cache
+    now = at or _now()
+    conn = get_db()
+    t = _tenant(conn, tenant_id)
+    if t is None or tenant_id == LEGACY_TENANT_ID or t["billing_mode"] != "stripe" or t["status"] == "purged":
+        conn.close()
+        return None
+    status, current = sub["status"], t["status"]
+    bs = conn.execute("SELECT * FROM billing_subscriptions WHERE tenant_id = ?", (tenant_id,)).fetchone()
+    changed = None
+    good = status in ("trialing", "active")
+    # past_due bookkeeping
+    if status == "past_due" and not bs["past_due_since"]:
+        conn.execute("UPDATE billing_subscriptions SET past_due_since = ? WHERE tenant_id = ?", (_fmt(now), tenant_id))
+        conn.commit()
+        _email(tenant_id, "payment_failed")
+    elif status != "past_due" and bs["past_due_since"]:
+        conn.execute("UPDATE billing_subscriptions SET past_due_since = NULL WHERE tenant_id = ?", (tenant_id,))
+        conn.commit()
+    trial_end = _ts(sub.get("trial_end")) if status == "trialing" else None
+    if good and current in ("trial", "active"):
+        want = "trial" if status == "trialing" else "active"
+        if current != want or t["trial_ends_at"] != trial_end:
+            lifecycle._set(conn, tenant_id, status=want, trial_ends_at=trial_end)
+            changed = f"{current} → {want}" if current != want else f"trial ends {trial_end}"
+    elif good and current == "suspended" and t["billing_suspended"]:
+        want = "trial" if status == "trialing" else "active"
+        lifecycle._set(conn, tenant_id, status=want, trial_ends_at=trial_end, billing_suspended=0)
+        provider_log(conn, "tenant_reactivated", f"{t['slug']}: paid ({status})", "stripe", tenant_id)
+        changed = f"suspended → {want} (paid)"
+        _email(tenant_id, "reactivated")
+    elif good and current == "cancelled" and t["purge_after"] and t["purge_after"] > _fmt(now):
+        # Resubscribed during the grace period: same relay, keys and devices.
+        if not jobs.active_for(tenant_id):
+            jobs.enqueue("reactivate_tenant", tenant_id, {"reason": "resubscribed"}, "stripe")
+            changed = "cancelled → reactivating (resubscribed)"
+            _email(tenant_id, "reactivated")
+    elif status == "past_due" and current in ("trial", "active"):
+        since = datetime.strptime((bs["past_due_since"] or _fmt(now))[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        if now - since >= timedelta(days=settings.past_due_suspend_days()):
+            changed = _billing_suspend(conn, t, "past due for " + str(settings.past_due_suspend_days()) + " days")
+    elif status in ("unpaid", "paused") and current in ("trial", "active"):
+        changed = _billing_suspend(conn, t, status)
+    elif status == "canceled" and current in ("trial", "active", "suspended"):
+        if not jobs.active_for(tenant_id):
+            jobs.enqueue("cancel_tenant", tenant_id, {"reason": "subscription canceled in Stripe"}, "stripe")
+            changed = f"{current} → cancelling (subscription canceled)"
+    elif status == "incomplete_expired" and current in ("trial", "active"):
+        # The sign-up lets go of the tenant first (it references it).
+        conn.execute("UPDATE signups SET status = 'failed', failure_reason = 'payment never completed', tenant_id = NULL,"
+                     " updated_at = datetime('now') WHERE tenant_id = ?", (tenant_id,))
+        conn.commit()
+        conn.close()
+        from app.console.tenants import undo_creation
+        undo_creation(tenant_id, t["slug"])
+        conn = get_db()
+        changed = "creation undone (payment never completed)"
+    conn.close()
+    _card_check(tenant_id, sub)
+    if changed:
+        invalidate_cache()
+        log.info("tenant %s: %s", tenant_id, changed)
+    return changed
+
+
+def _billing_suspend(conn, t, why: str) -> str:
+    from app.console import lifecycle
+    lifecycle._set(conn, t["id"], status="suspended", billing_suspended=1)
+    provider_log(conn, "tenant_suspended", f"{t['slug']}: {why} (billing)", "stripe", t["id"])
+    _email(t["id"], "suspended")
+    return f"{t['status']} → suspended ({why})"
+
+
+def _card_check(tenant_id: int, sub: dict) -> None:
+    """A trial or active subscription with no default card: the admins see a
+    banner (has_card = 0) and get one email. At the trial's end Stripe
+    cancels it (missing_payment_method = cancel); at a renewal the invoice
+    fails and past_due takes over."""
+    conn = get_db()
+    bs = conn.execute("SELECT has_card, card_warning_sent_at FROM billing_subscriptions WHERE tenant_id = ?",
+                      (tenant_id,)).fetchone()
+    if bs is None:
+        conn.close()
+        return
+    if sub["status"] in ("trialing", "active") and not bs["has_card"] and not bs["card_warning_sent_at"]:
+        conn.execute("UPDATE billing_subscriptions SET card_warning_sent_at = datetime('now') WHERE tenant_id = ?",
+                     (tenant_id,))
+        conn.commit()
+        conn.close()
+        _email(tenant_id, "card_missing")
+        return
+    if bs["has_card"] and bs["card_warning_sent_at"]:
+        conn.execute("UPDATE billing_subscriptions SET card_warning_sent_at = NULL WHERE tenant_id = ?", (tenant_id,))
+        conn.commit()
+    conn.close()
+
+
+def _trial_ending(sub_id: str) -> None:
+    """Stripe's trial_will_end (3 days before): one email per trial."""
+    conn = get_db()
+    row = conn.execute("SELECT tenant_id, trial_warning_sent_at FROM billing_subscriptions WHERE stripe_subscription_id = ?",
+                       (sub_id,)).fetchone()
+    if row and not row["trial_warning_sent_at"]:
+        conn.execute("UPDATE billing_subscriptions SET trial_warning_sent_at = datetime('now') WHERE tenant_id = ?",
+                     (row["tenant_id"],))
+        conn.commit()
+        conn.close()
+        _email(row["tenant_id"], "trial_ending")
+        return
+    conn.close()
+
+
+def _email(tenant_id: int, kind: str) -> None:
+    try:
+        from app import billing_emails
+        billing_emails.lifecycle(tenant_id, kind)
+    except Exception:
+        log.exception("billing email %s for tenant %s", kind, tenant_id)
+
+
+def reconcile(at: datetime | None = None) -> list[str]:
+    """Daily: fetch every Stripe tenant's subscription and fix any drift
+    (missed webhooks), logging what changed. Also applies the past-due
+    suspension once its days are up."""
+    conn = get_db()
+    rows = conn.execute("SELECT s.tenant_id, s.stripe_subscription_id, s.status, t.status AS tenant_status, t.slug"
+                        " FROM billing_subscriptions s JOIN tenants t ON t.id = s.tenant_id"
+                        " WHERE t.billing_mode = 'stripe' AND t.status <> 'purged' AND t.id <> ?",
+                        (LEGACY_TENANT_ID,)).fetchall()
+    conn.close()
+    changes = []
+    for r in rows:
+        try:
+            sub = sync_subscription(r["stripe_subscription_id"], at=at, quiet=True)
+        except Exception as e:
+            changes.append(f"{r['slug']}: sync failed ({e})")
+            continue
+        conn = get_db()
+        after = conn.execute("SELECT s.status, t.status FROM billing_subscriptions s JOIN tenants t ON t.id = s.tenant_id"
+                             " WHERE s.tenant_id = ?", (r["tenant_id"],)).fetchone()
+        what = []
+        if after[0] != r["status"]:
+            what.append(f"subscription {r['status']} → {after[0]}")
+        if sub is not None and getattr(sub, "_changed", None):
+            what.append(sub._changed)
+        if what:
+            provider_log(conn, "billing_reconciled", f"{r['slug']}: " + "; ".join(what), "scheduled", r["tenant_id"])
+            changes.append(f"{r['slug']}: " + "; ".join(what))
+        conn.close()
+    return changes
+
+
+# ── Provider actions that act on Stripe ──────────────────────────────────────
+
+def subscription_of(tenant_id: int):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM billing_subscriptions WHERE tenant_id = ?", (tenant_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def cancel_subscription(tenant_id: int, at_period_end: bool, by: str) -> None:
+    """The console's Cancel for a Stripe tenant: cancel the subscription now
+    or at the end of the period, then sync."""
+    if tenant_id == LEGACY_TENANT_ID:
+        raise ValueError("Tenant #1 is never billed.")
+    row = subscription_of(tenant_id)
+    if row is None:
+        return
+    client = stripe_api.client()
+    if at_period_end:
+        client.v1.subscriptions.update(row["stripe_subscription_id"], {"cancel_at_period_end": True})
+    elif row["status"] not in ("canceled", "incomplete_expired"):
+        client.v1.subscriptions.cancel(row["stripe_subscription_id"])
+    conn = get_db()
+    provider_log(conn, "subscription_cancelled", f"{row['stripe_subscription_id']}"
+                 + (" at period end" if at_period_end else " now"), by, tenant_id)
+    conn.close()
+    sync_subscription(row["stripe_subscription_id"])
+
+
+def resubscribe_url(tenant_id: int, home_host: str) -> str:
+    """A Checkout Session to subscribe again during the cancellation grace
+    period: the same Stripe customer and plan, no trial, card required
+    (signup.checkout_params, like sign-up)."""
+    conn = get_db()
+    cus = conn.execute("SELECT stripe_customer_id FROM billing_customers WHERE tenant_id = ?", (tenant_id,)).fetchone()
+    sub = conn.execute("SELECT plan_id FROM billing_subscriptions WHERE tenant_id = ?", (tenant_id,)).fetchone()
+    plan_id = sub["plan_id"] if sub and sub["plan_id"] else None
+    from app import plans
+    if plan_id is None or (plans.get(conn, plan_id) or {"archived_at": 1})["archived_at"]:
+        offered = plans.public_plans(conn)
+        plan_id = offered[0]["id"] if offered else None
+    if cus is None or plan_id is None:
+        conn.close()
+        raise signup.SignupError("Resubscribing isn't available for this account; contact your provider.")
+    params = signup.checkout_params(cus[0], plan_id, trial=False, conn=conn,
+                                    metadata={"resubscribe_tenant_id": str(tenant_id), "plan_id": str(plan_id)},
+                                    success_url=f"https://{home_host}/export?resubscribed=1",
+                                    cancel_url=f"https://{home_host}/export")
+    conn.close()
+    return stripe_api.client().v1.checkout.sessions.create(params).url
