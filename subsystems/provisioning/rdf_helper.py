@@ -173,7 +173,12 @@ class Config:
 
 
 def _run(args: list[str], timeout: int = 300, stdin: str | None = None) -> tuple[int, str]:
-    p = subprocess.run(args, capture_output=True, text=True, timeout=timeout, input=stdin)
+    try:
+        p = subprocess.run(args, capture_output=True, text=True, timeout=timeout, input=stdin)
+    except subprocess.TimeoutExpired:
+        return 124, f"{args[0]} timed out after {timeout}s"
+    except OSError as e:
+        return 127, f"can't run {args[0]}: {e}"
     return p.returncode, (p.stdout + p.stderr).strip()
 
 
@@ -542,6 +547,254 @@ def relay_status(cfg: Config) -> str:
             states[name] = status.strip()[:100]
     return json.dumps(states, sort_keys=True)
 
+
+
+# ── Custom domains: DNS checks ───────────────────────────────────────────────
+# A tenant's own domain (tenant_domains kind 'custom') is "pointed at us" when
+#   - its CNAME chain reaches that tenant's own <slug>.<PROVIDER_DOMAIN>, or
+#   - its A/AAAA records are exactly this box's public addresses (PUBLIC_IPV4,
+#     PUBLIC_IPV6) and the TXT record _rdf-verify.<domain> holds the tenant's
+#     verification token for that domain,
+# according to every resolver in DNS_CHECK_RESOLVERS (they must agree), and
+# its CAA records (if any) let Let's Encrypt issue. The dashboard uses these
+# same functions (it loads this file), so the two can't disagree; the helper
+# runs them itself before issuing a certificate or writing a vhost.
+
+import ipaddress as _ip
+
+DEFAULT_RESOLVERS = ("1.1.1.1", "8.8.8.8")
+MAX_CUSTOM_DOMAIN_LEN = 200
+VERIFY_LABEL = "_rdf-verify"
+TOKEN_RE = re.compile(r"^rdf-verify-[A-Za-z0-9_-]{16,64}$")
+# Names that only mean something on a local network.
+LOCAL_SUFFIXES = ("localhost", "local", "localdomain", "internal", "invalid", "arpa", "lan", "home", "test")
+
+# CDN edge networks: a domain whose A/AAAA records land here is proxied, and
+# the proxy (not us) would answer. Cloudflare (cloudflare.com/ips), Fastly,
+# Amazon CloudFront's most common ranges.
+CDN_NETWORKS = tuple(_ip.ip_network(n) for n in (
+    "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18",
+    "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17",
+    "162.158.0.0/15", "104.16.0.0/13", "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+    "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32", "2405:8100::/32",
+    "2a06:98c0::/29", "2c0f:f248::/32",
+    "151.101.0.0/16", "199.232.0.0/16", "2a04:4e40::/32",
+    "13.32.0.0/15", "13.224.0.0/14", "18.64.0.0/14", "54.230.0.0/16", "54.239.128.0/18", "99.84.0.0/16",
+    "205.251.192.0/19", "2600:9000::/28",
+))
+
+
+def custom_domain_problem(domain: str, provider_domain: str) -> str | None:
+    """Why DOMAIN can't be a tenant's custom domain (format only; the
+    dashboard also checks who else has it), or None."""
+    if not isinstance(domain, str) or not domain or domain != domain.strip().lower():
+        return "Enter the domain in lowercase, without spaces."
+    if len(domain) > MAX_CUSTOM_DOMAIN_LEN:
+        return f"That's longer than {MAX_CUSTOM_DOMAIN_LEN} characters."
+    if "*" in domain:
+        return "Wildcard domains can't be used; enter one hostname, like rds.abc.example."
+    try:
+        _ip.ip_address(domain)
+        return "Enter a domain name, not an IP address."
+    except ValueError:
+        pass
+    if not DOMAIN_RE.match(domain):
+        return "That isn't a valid domain name. Enter a hostname like rds.abc.example."
+    if domain.rsplit(".", 1)[-1] in LOCAL_SUFFIXES or domain.split(".", 1)[0] == "localhost":
+        return "That name only works on a local network; use a public domain."
+    pd = (provider_domain or "").lower()
+    if pd and (domain == pd or domain.endswith("." + pd)):
+        return f"Domains under {pd} are ours; use a domain you own."
+    return None
+
+
+def parse_resolvers(raw: str) -> tuple[str, ...]:
+    """DNS_CHECK_RESOLVERS: comma-separated IP addresses (nothing else ever
+    reaches dig's command line)."""
+    out = []
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if part:
+            try:
+                out.append(str(_ip.ip_address(part)))
+            except ValueError:
+                raise HelperError(f"DNS_CHECK_RESOLVERS: {part!r} is not an IP address")
+    return tuple(out) or DEFAULT_RESOLVERS
+
+
+def _clean(name: str) -> str:
+    return name.strip().lower().rstrip(".")
+
+
+def dig_query(run, resolver: str, name: str, rtype: str) -> tuple[str, list[tuple[str, str, str]]]:
+    """(status, [(owner, type, data)]) for one query at one resolver, through
+    dig. status is the DNS rcode (NOERROR, NXDOMAIN, SERVFAIL…) or "TIMEOUT"."""
+    _ip.ip_address(resolver)
+    bare = name[len(VERIFY_LABEL) + 1:] if name.startswith(VERIFY_LABEL + ".") else name
+    if rtype not in ("A", "AAAA", "CNAME", "TXT", "CAA") or not DOMAIN_RE.match(bare):
+        raise HelperError(f"bad DNS query {name!r} {rtype}")
+    code, out = run(["dig", f"@{resolver}", "+noall", "+comments", "+answer", "+time=3", "+tries=2",
+                     name, rtype], 20)
+    m = re.search(r"status: ([A-Z]+)", out)
+    if not m:
+        return "TIMEOUT", []
+    records = []
+    for line in out.splitlines():
+        if not line.strip() or line.startswith(";"):
+            continue
+        parts = line.split(None, 4)
+        if len(parts) == 5 and parts[2] == "IN":
+            records.append((_clean(parts[0]), parts[3], parts[4].strip()))
+    return m.group(1), records
+
+
+def _txt_strings(data: str) -> str:
+    """'"abc" "def"' -> 'abcdef' (a TXT record split into strings)."""
+    pieces = re.findall(r'"((?:[^"\\]|\\.)*)"', data)
+    return "".join(pieces) if pieces else data.strip()
+
+
+def _in_cdn(addresses) -> bool:
+    for a in addresses:
+        try:
+            addr = _ip.ip_address(a)
+        except ValueError:
+            continue
+        if any(addr in net for net in CDN_NETWORKS):
+            return True
+    return False
+
+
+class DnsResult:
+    """ok, the method that passed ('cname' or 'txt'), a machine code for a
+    failure and a plain-words reason the tenant can act on."""
+
+    def __init__(self, ok: bool, code: str = "", reason: str = "", method: str = ""):
+        self.ok, self.code, self.reason, self.method = ok, code, reason, method
+
+    def __repr__(self) -> str:
+        return f"DnsResult(ok={self.ok}, code={self.code!r}, method={self.method!r})"
+
+
+def _check_one(query, resolver: str, domain: str, target: str, provider_domain: str, token: str,
+               ipv4: str, ipv6: str) -> DnsResult:
+    status4, rec4 = query(resolver, domain, "A")
+    status6, rec6 = query(resolver, domain, "AAAA")
+    if status4 not in ("NOERROR", "NXDOMAIN") or status6 not in ("NOERROR", "NXDOMAIN"):
+        bad = status4 if status4 not in ("NOERROR", "NXDOMAIN") else status6
+        return DnsResult(False, "lookup_failed",
+                         f"Looking up {domain} failed ({bad}). Check the domain at your DNS host; "
+                         "we'll keep trying.")
+    records = rec4 + rec6
+    cnames = {owner: _clean(data) for owner, rtype, data in records if rtype == "CNAME"}
+    chain, name = [], domain
+    while name in cnames and len(chain) < 10:
+        name = cnames[name]
+        chain.append(name)
+    addrs4 = sorted({d for o, t, d in rec4 if t == "A"})
+    addrs6 = sorted({d.lower() for o, t, d in rec6 if t == "AAAA"})
+    if chain:
+        if target in chain:
+            return DnsResult(True, method="cname")
+        pd = provider_domain.lower()
+        if any(n == pd or n.endswith("." + pd) for n in chain):
+            return DnsResult(False, "other_account",
+                             f"{domain} points at a different account. Change the CNAME's target to {target}.")
+        if _in_cdn(addrs4 + addrs6):
+            return DnsResult(False, "cdn", _CDN_REASON.format(domain=domain))
+        return DnsResult(False, "cname_elsewhere",
+                         f"{domain} is a CNAME for {chain[0]}, not {target}. Change the CNAME's target to {target}.")
+    if not addrs4 and not addrs6:
+        return DnsResult(False, "no_record",
+                         f"We couldn't find a DNS record for {domain} yet. Create the CNAME record shown below; "
+                         "if you just did, it can take a few minutes to show up.")
+    if _in_cdn(addrs4 + addrs6):
+        return DnsResult(False, "cdn", _CDN_REASON.format(domain=domain))
+    if not ipv4:
+        return DnsResult(False, "a_mismatch",
+                         f"{domain} has A records ({', '.join(addrs4 + addrs6)}). Use a CNAME to {target} instead.")
+    if addrs4 != [ipv4]:
+        found = ", ".join(addrs4) or "none"
+        return DnsResult(False, "a_mismatch",
+                         f"{domain}'s A record ({found}) doesn't point at this server ({ipv4}). Use a CNAME to "
+                         f"{target}, or set the A record to {ipv4} and add the TXT record.")
+    ok6 = {ipv6.lower()} if ipv6 else set()
+    if addrs6 and not set(addrs6) <= ok6:
+        want = f"set it to {ipv6}" if ipv6 else "remove it"
+        return DnsResult(False, "aaaa_mismatch",
+                         f"{domain} has an AAAA (IPv6) record ({', '.join(addrs6)}) that doesn't point at this "
+                         f"server: {want}.")
+    txt_name = f"{VERIFY_LABEL}.{domain}"
+    status, rec = query(resolver, txt_name, "TXT")
+    if status not in ("NOERROR", "NXDOMAIN"):
+        return DnsResult(False, "lookup_failed", f"Looking up {txt_name} failed ({status}); we'll keep trying.")
+    values = [_txt_strings(d) for o, t, d in rec if t == "TXT" and o == txt_name]
+    if not values:
+        return DnsResult(False, "txt_missing",
+                         f"The A record is right, but the TXT record {txt_name} is missing. Add it with the value "
+                         "shown below.")
+    if not token or token not in values:
+        return DnsResult(False, "txt_wrong",
+                         f"The TXT record {txt_name} doesn't hold this domain's verification code. Set it to the "
+                         "value shown below.")
+    return DnsResult(True, method="txt")
+
+
+_CDN_REASON = ("{domain} is proxied through a CDN (Cloudflare or similar), so the CDN answers instead of us. "
+               "Switch the record to “DNS only” (in Cloudflare: the grey cloud), then check again.")
+
+
+def check_caa(query, resolver: str, domain: str) -> DnsResult:
+    """RFC 8659: the CAA set that applies is the first one found climbing from
+    the domain towards the top. It allows us if it has no `issue` property or
+    one naming letsencrypt.org."""
+    labels = domain.split(".")
+    for i in range(len(labels) - 1):
+        name = ".".join(labels[i:])
+        status, rec = query(resolver, name, "CAA")
+        if status not in ("NOERROR", "NXDOMAIN"):
+            return DnsResult(False, "lookup_failed", f"Looking up the CAA records of {name} failed ({status}); "
+                                                     "we'll keep trying.")
+        caa = [d for o, t, d in rec if t == "CAA"]
+        if not caa:
+            continue
+        issuers = []
+        for data in caa:
+            parts = data.split(None, 2)
+            if len(parts) == 3 and parts[1].lower() == "issue":
+                issuers.append(_txt_strings(parts[2]).split(";", 1)[0].strip().lower())
+        if not issuers or "letsencrypt.org" in issuers:
+            return DnsResult(True)
+        return DnsResult(False, "caa",
+                         f"The CAA records on {name} don't allow Let's Encrypt to issue certificates for {domain}. "
+                         f'Add a CAA record on {name}: 0 issue "letsencrypt.org".')
+    return DnsResult(True)
+
+
+def check_domain(query, domain: str, target: str, provider_domain: str, token: str, ipv4: str = "",
+                 ipv6: str = "", resolvers=DEFAULT_RESOLVERS) -> DnsResult:
+    """Is DOMAIN pointed at us, for the tenant whose web host is TARGET, by
+    every resolver? query(resolver, name, type) -> (status, records)."""
+    results = [_check_one(query, r, domain, target, provider_domain, token, ipv4, ipv6) for r in resolvers]
+    if all(r.ok for r in results):
+        methods = {r.method for r in results}
+        if len(methods) != 1:
+            return DnsResult(False, "disagree", _DISAGREE.format(domain=domain, detail="they see different records"))
+    else:
+        codes = {r.code for r in results}
+        if len(codes) == 1:
+            return next(r for r in results if not r.ok)
+        detail = "; ".join(f"{res}: {r.reason if not r.ok else 'points here'}" for res, r in zip(resolvers, results))
+        return DnsResult(False, "disagree", _DISAGREE.format(domain=domain, detail=detail))
+    for r in resolvers:
+        caa = check_caa(query, r, domain)
+        if not caa.ok:
+            return caa
+    return results[0]
+
+
+_DISAGREE = ("DNS servers give different answers for {domain} ({detail}). DNS changes can take a while to "
+             "spread; we'll keep checking.")
 
 COMMANDS = {
     "issue-cert": (issue_cert, (1, 2)),

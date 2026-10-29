@@ -371,9 +371,9 @@ EOF
 
 if [[ $PROVIDER_ONLY -eq 1 ]]; then
   [[ -f "$ETC_DIR/dashboard.env" ]] || die "--provider-only needs an installed box ($ETC_DIR/dashboard.env is missing)."
-  log "Installing certbot and reportlab"
+  log "Installing certbot, reportlab and dnsutils"
   sudo apt-get update -qq
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot python3-reportlab
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot python3-reportlab dnsutils
   provider_setup
   log "Done (provider pieces only)."
   exit 0
@@ -519,9 +519,10 @@ fi
 # ── 2. System packages ───────────────────────────────────────────────────────
 log "Installing system packages"
 sudo apt-get update -qq
-# certbot issues tenants' and the console's certificates (webroot), and
-# reportlab builds tenants' client PDF guides.
-PKGS=(docker.io docker-compose-v2 python3 python3-pip nsis nginx gnupg certbot python3-reportlab)
+# certbot issues tenants' and the console's certificates (webroot),
+# reportlab builds tenants' client PDF guides, and dig (dnsutils) checks
+# tenants' custom domains.
+PKGS=(docker.io docker-compose-v2 python3 python3-pip nsis nginx gnupg certbot python3-reportlab dnsutils)
 [[ "$TLS_MODE" == "letsencrypt" ]] && PKGS+=(python3-certbot-nginx)
 [[ "$TLS_MODE" == "selfsigned" ]] && PKGS+=(openssl)
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PKGS[@]}"

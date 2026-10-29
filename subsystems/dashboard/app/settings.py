@@ -3,6 +3,12 @@ derived from them. Read on each call, so tests can change them.
 
 CSP_MODE             report-only (default) or enforce: whether the
                      Content-Security-Policy is only reported or enforced.
+PUBLIC_IPV4,         this box's public addresses: a custom domain may point
+PUBLIC_IPV6          here with A/AAAA records (plus a TXT record) instead
+                     of a CNAME.
+DNS_CHECK_RESOLVERS  resolvers custom-domain DNS checks ask (default
+                     1.1.1.1,8.8.8.8; they must agree).
+MAX_CUSTOM_DOMAINS   custom domains per tenant (default 3).
 PROVIDER_DOMAIN      e.g. rds.example.com. Tenants live at <slug>.<domain>
                      (web) and <slug>.relay.<domain> (relay); the provider
                      console at admin.<domain>. Empty = no console and no new
@@ -114,3 +120,47 @@ def relay_port_max() -> int:
 
 def helper_path() -> str:
     return _env("RDF_HELPER", "/usr/local/sbin/rdf-helper")
+
+
+# ── Custom domains (phase 1d) ────────────────────────────────────────────────
+
+def _ip_setting(name: str, version: int) -> str:
+    raw = _env(name)
+    if not raw:
+        return ""
+    try:
+        addr = ipaddress.ip_address(raw)
+    except ValueError:
+        raise RuntimeError(f"{name} must be an IPv{version} address, got {raw!r}.")
+    if addr.version != version:
+        raise RuntimeError(f"{name} must be an IPv{version} address, got {raw!r}.")
+    return str(addr)
+
+
+def public_ipv4() -> str:
+    """This box's public IPv4 address, for custom domains pointed here with an
+    A record (plus a TXT record). Empty = only the CNAME method works."""
+    return _ip_setting("PUBLIC_IPV4", 4)
+
+
+def public_ipv6() -> str:
+    return _ip_setting("PUBLIC_IPV6", 6)
+
+
+def dns_check_resolvers() -> tuple[str, ...]:
+    """DNS_CHECK_RESOLVERS: public resolvers custom-domain checks ask (they
+    must all agree). Default 1.1.1.1,8.8.8.8."""
+    from app import domain_dns
+    try:
+        return domain_dns.helper().parse_resolvers(_env("DNS_CHECK_RESOLVERS"))
+    except domain_dns.helper().HelperError as e:
+        raise RuntimeError(str(e))
+
+
+def max_custom_domains() -> int:
+    raw = _env("MAX_CUSTOM_DOMAINS")
+    try:
+        value = int(raw) if raw else 3
+    except ValueError:
+        raise RuntimeError(f"MAX_CUSTOM_DOMAINS must be a number, got {raw!r}.")
+    return max(0, value)
