@@ -143,6 +143,7 @@ def test_every_page_and_dialog_runs_under_the_enforced_policy(server, browser, c
         assert not page.is_visible("#create-modal")
         page.click("button[data-onclick=toggleColumnMenu]")
         assert page.is_visible("#column-menu")
+        page.wait_for_timeout(100)   # the menu listens for outside clicks from the next tick
         page.evaluate("document.body.click()")   # an outside click closes it
         assert not page.is_visible("#column-menu")
         _visit(page, watch, base + f"/groups/{a['group_slug']}")
@@ -151,6 +152,7 @@ def test_every_page_and_dialog_runs_under_the_enforced_policy(server, browser, c
         _visit(page, watch, base + "/devices")
         page.click("button[data-onclick=toggleColumnMenu]")
         assert page.is_visible("#column-menu")
+        page.wait_for_timeout(100)   # the menu listens for outside clicks from the next tick
         page.evaluate("document.body.click()")   # an outside click closes it
         assert not page.is_visible("#column-menu")
         page.locator("button[data-onclick=openDetailModal]").first.click()
