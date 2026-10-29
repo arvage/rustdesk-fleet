@@ -438,19 +438,15 @@ def _uptime_s() -> float | None:
 
 def _container_states(tenant: Tenant) -> dict[str, dict]:
     """{'hbbs': {running, status}, 'hbbr': {...}} for the tenant's relay
-    containers (named in its compose file), from `docker ps`."""
+    containers (named in its compose file), from `docker ps` through rdf-helper."""
     from setup_server import relay_containers
     relay = dataclasses.asdict(tenant.relay) if tenant.relay else None
     by_role = {("hbbr" if "hbbr" in n else "hbbs"): n for n in relay_containers(relay)}
     states = {role: {"running": False, "status": "not running"} for role in ("hbbs", "hbbr")}
-    try:
-        result = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}\t{{.Status}}"],
-            capture_output=True, text=True, timeout=3,
-        )
-    except Exception:
+    from app.console.system import SYSTEM
+    running = SYSTEM.running_containers()
+    if running is None:
         return {role: {"running": None, "status": "unknown"} for role in states}
-    running = dict(line.partition("\t")[::2] for line in result.stdout.splitlines())
     for role, name in by_role.items():
         if name in running:
             states[role] = {"running": True, "status": running[name] or "running"}

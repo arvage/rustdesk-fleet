@@ -132,13 +132,17 @@ def relay_containers(relay: dict | None) -> list[str]:
 # Server lifecycle (singleton)
 # ---------------------------------------------------------------------------
 
-def docker_compose_up(compose_path: Path = COMPOSE_DST) -> None:
-    result = subprocess.run(
-        ["docker", "compose", "-f", str(compose_path), "up", "-d"],
-        capture_output=True, text=True,
-    )
+HELPER = os.environ.get("RDF_HELPER") or "/usr/local/sbin/rdf-helper"
+
+
+def relay_helper(*args: str, timeout: int = 900) -> str:
+    """Run rdf-helper (through sudo; install.sh allows exactly that binary).
+    The dashboard user has no Docker access: the helper renders tenant #1's
+    compose file and runs docker compose on it."""
+    result = subprocess.run(["sudo", "-n", HELPER, *args], capture_output=True, text=True, timeout=timeout)
     if result.returncode != 0:
-        raise ProvisioningError(f"docker compose up failed:\n{result.stderr}")
+        raise ProvisioningError(f"rdf-helper {' '.join(args)} failed:\n{(result.stderr or result.stdout).strip()}")
+    return result.stdout.strip()
 
 
 IMAGE_TAG_RE = re.compile(r"rustdesk/rustdesk-server:([\w.\-]+)")
@@ -181,39 +185,6 @@ def get_latest_server_version() -> str | None:
     return tag
 
 
-def update_server(tenant_id: int, version: str, user_email: str = "") -> None:
-    """Pin a tenant's relay compose file to `version`, pull the new image, and
-    restart that relay."""
-    relay = get_relay(tenant_id)
-    compose = relay_compose_path(relay)
-    if relay is None or not compose.exists():
-        raise ProvisioningError("Server not initialised — nothing to update.")
-
-    conn = get_db()
-    current = get_server_version(relay)
-
-    text = compose.read_text()
-    new_text = IMAGE_TAG_RE.sub(f"rustdesk/rustdesk-server:{version}", text)
-    compose.write_text(new_text)
-
-    log_event(conn, "server_update_start", f"{current} -> {version}", user_email, tenant_id=tenant_id)
-    try:
-        pull = subprocess.run(
-            ["docker", "compose", "-f", str(compose), "pull"],
-            capture_output=True, text=True,
-        )
-        if pull.returncode != 0:
-            raise ProvisioningError(f"docker compose pull failed:\n{pull.stderr}")
-
-        docker_compose_up(compose)
-        conn.execute("UPDATE relays SET updated_at=datetime('now') WHERE tenant_id=?", (tenant_id,))
-        conn.commit()
-        log_event(conn, "server_updated", f"{current} -> {version}", user_email, tenant_id=tenant_id)
-    except Exception as e:
-        log_event(conn, "server_update_failed", str(e)[:500], user_email, tenant_id=tenant_id)
-        raise
-
-
 def wait_for_pubkey(timeout_s: int = 30) -> str:
     pubkey_file = FLEET_ROOT / "data" / "id_ed25519.pub"
     deadline = time.time() + timeout_s
@@ -245,8 +216,6 @@ def init_server(host: str, hbbs_port: int = 21116, hbbr_port: int = 21117) -> di
 
     data_dir = FLEET_ROOT / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
-    COMPOSE_DST.write_text(COMPOSE_SRC.read_text())
-    event("compose_written", str(COMPOSE_DST))
 
     if tenancy:
         if not conn.execute("SELECT 1 FROM relays WHERE tenant_id = ?", (tid,)).fetchone():
@@ -270,9 +239,17 @@ def init_server(host: str, hbbs_port: int = 21116, hbbr_port: int = 21117) -> di
         )
     conn.commit()
 
+    # The relay row exists now, so the helper can render the compose file. An
+    # existing one is left alone (re-running init must never change the
+    # running version); a new one gets the version pinned in the repo's file.
+    if not COMPOSE_DST.exists():
+        version = IMAGE_TAG_RE.search(COMPOSE_SRC.read_text()).group(1)
+        relay_helper("relay-write-compose", str(tid), version)
+        event("compose_written", str(COMPOSE_DST))
+
     event("stack_up_attempt")
     try:
-        docker_compose_up()
+        relay_helper("relay-up", str(tid))
         event("stack_up")
 
         pubkey = wait_for_pubkey()

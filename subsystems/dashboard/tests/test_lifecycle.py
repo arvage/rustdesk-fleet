@@ -29,7 +29,8 @@ def run(c, path, **form):
 
 
 def compose_calls(fake, tid=2):
-    return [" ".join(c[4:]) for c in fake.calls if c[:3] == ["docker", "compose", "-f"] and f"/tenants/{tid}/" in c[3]]
+    """The relay actions run for a tenant (through rdf-helper)."""
+    return fake.relay_calls(tid)
 
 
 def test_suspend_keeps_the_relay_and_reactivate_reopens(two_tenants, fake_system):
@@ -77,7 +78,7 @@ def test_reactivate_within_the_grace_period_starts_the_relay_again(two_tenants, 
     run(c, "/tenants/2/reactivate")
     t = status()
     assert t["status"] == "active" and t["cancelled_at"] is None and t["purge_after"] is None
-    assert compose_calls(fake_system) == ["stop", "up -d"]
+    assert compose_calls(fake_system) == ["stop", "up"]
     # After the grace period it's too late.
     run(c, "/tenants/2/cancel", confirm="globex")
     conn = get_db()
@@ -121,8 +122,8 @@ def test_warning_a_week_before_and_purge_after_the_grace_period(two_tenants, fak
     assert db_rows("SELECT * FROM tenant_domains WHERE tenant_id = 2") == []
     assert not (DATA_DIR / "tenants" / "2").exists()
     # ...the relay, the vhost and the certificate were removed...
-    assert "down --remove-orphans" in compose_calls(fake_system)
-    helper = [" ".join(c[3:]) for c in fake_system.calls if c[:2] == ["sudo", "-n"]]
+    assert "down" in compose_calls(fake_system)
+    helper = [" ".join(c[3:]) for c in fake_system.calls if c[:2] == ["sudo", "-n"] and not c[3].startswith("relay-")]
     assert helper == ["purge-relay-data 2", f"remove-vhost {HOST_B}", "reload-nginx", f"revoke-cert {HOST_B}"]
     # ...and what we keep is kept: usage, the provider log, the slug, the host is gone.
     assert db_rows("SELECT devices FROM tenant_usage_daily WHERE tenant_id = 2")[0][0] == 7

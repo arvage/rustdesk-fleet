@@ -31,17 +31,6 @@ def test_blocks_are_allocated_in_order_and_never_reused(monkeypatch):
     conn.close()
 
 
-def test_compose_follows_the_port_layout():
-    text = relays.render_compose(7, "acme", "acme.relay.rds.example.com", relays.Block(21260), "1.1.16")
-    assert "name: rdf-tenant-7" in text
-    assert "command: hbbs -p 21261 -r acme.relay.rds.example.com:21262" in text
-    assert "command: hbbr -p 21262" in text
-    assert text.count("network_mode: host") == 2
-    assert text.count("image: rustdesk/rustdesk-server:1.1.16") == 2
-    assert "container_name: rdf-t7-hbbs" in text and "container_name: rdf-t7-hbbr" in text
-    assert "-k" not in text   # same key handling as tenant #1's stack (hbbs enforces its key by default)
-
-
 def _new_tenant(tid=2, slug="acme"):
     conn = get_db()
     conn.execute("INSERT INTO tenants (id, slug, display_name, status) VALUES (?, ?, ?, 'trial')", (tid, slug, slug.title()))
@@ -59,7 +48,7 @@ def test_provision_records_the_relay_and_its_key(fake_system):
     assert (t.relay.host, t.relay.hbbs_port, t.relay.hbbr_port) == ("acme.relay.rds.example.com", 21201, 21202)
     assert t.relay.compose_path.endswith("/tenants/2/relay/docker-compose.yml")
     assert t.relay.hbbs_db_path.endswith("/tenants/2/relay/data/db_v2.sqlite3")
-    assert fake_system.commands("docker compose -f") == [f"docker compose -f {t.relay.compose_path} up -d"]
+    assert fake_system.relay_calls(2) == ["write-compose 1.1.16", "up"]
     assert relays.health(t) == {"hbbs": {"running": True, "status": "Up 5 minutes", "name": "rdf-t2-hbbs"},
                                 "hbbr": {"running": True, "status": "Up 5 minutes", "name": "rdf-t2-hbbr"}}
 
@@ -75,7 +64,7 @@ def test_stop_start_and_upgrade(fake_system):
     relays.upgrade(load_tenant(2), "1.1.16")
     assert relays.running_version(load_tenant(2)) == "1.1.16"
     assert db_rows("SELECT server_version FROM relays WHERE tenant_id = 2")[0][0] == "1.1.16"
-    assert f"docker compose -f {t.relay.compose_path} pull" in fake_system.commands("docker compose")
+    assert fake_system.relay_calls(2)[-2:] == ["write-compose 1.1.16", "up"]
 
 
 def test_upgrade_all_goes_one_by_one_and_stops_at_the_first_failure(fake_system):
@@ -84,9 +73,8 @@ def test_upgrade_all_goes_one_by_one_and_stops_at_the_first_failure(fake_system)
         conn, block = _new_tenant(tid, slug)
         relays.provision(conn, tid, slug, block, "1.1.15")
         conn.close()
-    t1 = load_tenant(1)
-    Path(t1.relay.compose_path).write_text("services:\n  hbbs:\n    image: rustdesk/rustdesk-server:1.1.15\n")
-    fake_system.fail["tenants/3/relay/docker-compose.yml pull"] = "pull: network unreachable"
+    fake_system.relay("write-compose", 1, "1.1.15")
+    fake_system.fail["relay-up 3"] = "pull: network unreachable"
     job_id = jobs.enqueue("relay_upgrade_all", None, {"version": "1.1.16"}, "ops@example.com")
     jobs.run_pending()
     job = jobs.get(job_id)
@@ -99,8 +87,7 @@ def test_upgrade_all_goes_one_by_one_and_stops_at_the_first_failure(fake_system)
 def test_console_relay_actions_run_as_jobs(fake_system):
     c = provider_client()
     from pathlib import Path
-    t1 = load_tenant(1)
-    Path(t1.relay.compose_path).write_text("services:\n  hbbs:\n    image: rustdesk/rustdesk-server:1.1.16\n    container_name: hbbs\n")
+    fake_system.relay("write-compose", 1, "1.1.16")
     assert c.get("/relays").status_code == 200
     r = c.post("/relays/1/restart", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"].startswith("/jobs/")
@@ -108,7 +95,7 @@ def test_console_relay_actions_run_as_jobs(fake_system):
     job_id = int(r.headers["location"].rsplit("/", 1)[1])
     assert c.get(f"/jobs/{job_id}.json").json()["status"] == "succeeded"
     assert c.get(f"/jobs/{job_id}").status_code == 200
-    assert f"docker compose -f {t1.relay.compose_path} restart" in fake_system.commands("docker compose")
+    assert "restart" in fake_system.relay_calls(1)
     assert db_rows("SELECT 1 FROM provisioning_events WHERE event = 'relay_restart' AND source = 'provider' AND tenant_id = 1")
     assert c.post("/relays/99/restart", follow_redirects=False).headers["location"] == "/relays"
 

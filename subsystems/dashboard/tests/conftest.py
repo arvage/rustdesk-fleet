@@ -317,53 +317,92 @@ def all_routes() -> list[tuple[str, str]]:
 
 class FakeSystem:
     """Stands in for app.console.system.SYSTEM: records every command, keeps
-    track of which compose stacks are up, writes the public key hbbs would
-    write on `up`, and fails any command containing a string in `fail`."""
+    track of which relays are up, renders compose files with rdf-helper's own
+    templates on relay-write-compose, writes the public key hbbs would write
+    on up, and fails any command containing a string in `fail`."""
+
+    HELPER = "/usr/local/sbin/rdf-helper"
 
     def __init__(self):
         self.calls: list[list[str]] = []
         self.fail: dict[str, str] = {}
-        self.up: dict[str, list[str]] = {}      # compose path -> container names
+        self.up: dict[int, list[str]] = {}      # tenant id -> running container names
 
-    def _result(self, args):
+    def _result(self, args, stdout=""):
         from app.console.system import Result
         joined = " ".join(args)
         for needle, msg in self.fail.items():
             if needle in joined:
                 return Result(1, "", msg)
-        return Result(0, "", "")
+        return Result(0, stdout, "")
 
     def run(self, args, timeout=300):
         self.calls.append(list(args))
-        if args[:2] == ["docker", "ps"]:
-            from app.console.system import Result
-            lines = [f"{n}\tUp 5 minutes" for names in self.up.values() for n in names]
-            return Result(0, "\n".join(lines), "")
         return self._result(args)
 
-    def compose(self, compose_path, *args, timeout=300):
-        r = self.run(["docker", "compose", "-f", compose_path, *args], timeout)
-        if r.ok and args and args[0] in ("up", "restart", "start"):
-            import re
-            text = Path(compose_path).read_text() if Path(compose_path).exists() else ""
-            names = re.findall(r"container_name:\s*(\S+)", text) or ["hbbs", "hbbr"]
-            self.up[compose_path] = names
-            pub = Path(compose_path).parent / "data" / "id_ed25519.pub"
-            if not pub.exists():
-                pub.parent.mkdir(parents=True, exist_ok=True)
-                pub.write_text("PUB-" + Path(compose_path).parent.parent.name)
-        elif r.ok and args and args[0] in ("stop", "down"):
-            self.up.pop(compose_path, None)
+    def helper(self, *args, timeout=300):
+        r = self.run(["sudo", "-n", self.HELPER, *args], timeout)
+        if r.ok and args and args[0].startswith("relay-"):
+            return self._relay(args[0][len("relay-"):], args[1:])
         return r
 
-    def helper(self, *args, timeout=300):
-        return self.run(["sudo", "-n", "/usr/local/sbin/rdf-helper", *args], timeout)
+    def relay(self, action, tenant_id, *args, timeout=300):
+        return self.helper(f"relay-{action}", str(int(tenant_id)), *args, timeout=timeout)
+
+    def _relay(self, action, args):
+        import json
+        import re
+        from app.console.system import Result
+        if action == "status":
+            return Result(0, json.dumps({n: "Up 5 minutes" for names in self.up.values() for n in names}), "")
+        tid = int(args[0])
+        row = db_rows("SELECT r.compose_path, r.host, r.hbbs_port, r.hbbr_port, t.slug FROM relays r"
+                      " LEFT JOIN tenants t ON t.id = r.tenant_id WHERE r.tenant_id = ?", tid)[0]
+        compose = Path(row["compose_path"])
+        if action == "write-compose":
+            version = args[1]
+            if tid == 1:
+                text = HELPER_MODULE.LEGACY_COMPOSE.format(version=version)
+            else:
+                hbbs, hbbr = row["hbbs_port"], row["hbbr_port"]
+                text = HELPER_MODULE.TENANT_COMPOSE.format(tid=tid, slug=row["slug"], host=row["host"], version=version,
+                                                           nat=hbbs - 1, hbbs=hbbs, hbbr=hbbr, ws_id=hbbs + 2,
+                                                           ws_relay=hbbr + 2)
+            compose.parent.mkdir(parents=True, exist_ok=True)
+            compose.write_text(text)
+        elif action in ("up", "start", "restart"):
+            text = compose.read_text() if compose.exists() else ""
+            self.up[tid] = re.findall(r"container_name:\s*(\S+)", text) or ["hbbs", "hbbr"]
+            pub = compose.parent / "data" / "id_ed25519.pub"
+            if not pub.exists():
+                pub.parent.mkdir(parents=True, exist_ok=True)
+                pub.write_text(f"PUB-{tid}")
+        elif action in ("stop", "down"):
+            self.up.pop(tid, None)
+        return Result(0, "ok", "")
 
     def running_containers(self):
         return {n: "Up 5 minutes" for names in self.up.values() for n in names}
 
     def commands(self, prefix: str) -> list[str]:
         return [" ".join(c) for c in self.calls if " ".join(c).startswith(prefix)]
+
+    def relay_calls(self, tid: int) -> list[str]:
+        """The relay-<action> calls for one tenant, as "action [args]"."""
+        return [" ".join([c[3][len("relay-"):], *c[5:]]) for c in self.calls
+                if c[:3] == ["sudo", "-n", self.HELPER] and c[3].startswith("relay-") and c[4:5] == [str(tid)]]
+
+
+def _load_helper():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "rdf_helper", DASH_DIR.parent / "provisioning" / "rdf_helper.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+HELPER_MODULE = _load_helper()
 
 
 @pytest.fixture

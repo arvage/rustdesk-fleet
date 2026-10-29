@@ -100,9 +100,11 @@ ask() {  # ask "prompt" "default(y/n)" -> returns 0 for yes
 }
 
 # ── Provider console pieces (also run alone with --provider-only) ───────────
-# rdf-helper is the dashboard's only root access: certificates and nginx
-# vhosts for tenant domains and the console. It is copied out of the repo
-# (root never runs repo files) and the sudoers entry allows exactly it.
+# rdf-helper is the dashboard's only root access: relays (docker compose,
+# with compose files it renders itself), certificates and nginx vhosts for
+# tenant domains and the console. It is copied out of the repo (root never
+# runs repo files) and the sudoers entry allows exactly it. The dashboard
+# user is NOT in the docker group: that would be root by another name.
 HELPER=/usr/local/sbin/rdf-helper
 TENANT_VHOST_DIR=/etc/nginx/rdf-tenants
 
@@ -117,13 +119,60 @@ reload_nginx_checked() {   # nginx -t, reload, and no [emerg] after the reload
   fi
 }
 
-provider_setup() {
-  log "Setting up the provider console pieces"
+install_helper() {
   sudo install -m 0755 -o root -g root "$REPO_DIR/subsystems/provisioning/rdf_helper.py" "$HELPER"
   echo "$RUN_USER ALL=(root) NOPASSWD: $HELPER" | sudo tee /etc/sudoers.d/rdf-helper >/dev/null
   sudo chmod 0440 /etc/sudoers.d/rdf-helper
   sudo visudo -cf /etc/sudoers.d/rdf-helper >/dev/null || die "the rdf-helper sudoers entry is invalid"
   info "Installed $HELPER and its sudoers entry (for $RUN_USER)."
+}
+
+DOCKER_GROUP_DROPPED=0
+drop_docker_group() {   # older installs added the dashboard user to it
+  if id -nG "$RUN_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+    sudo gpasswd -d "$RUN_USER" docker >/dev/null
+    DOCKER_GROUP_DROPPED=1
+    info "Removed $RUN_USER from the docker group (Docker now goes through $HELPER)."
+  fi
+}
+
+# Re-render every relay's existing compose file through the helper, so it is
+# root-owned and exactly the helper's template. Tenant #1's comes out
+# byte-for-byte the same; nothing is restarted or recreated.
+secure_relay_compose() {
+  local rows
+  rows=$(sudo python3 - "$FLEET_ROOT/fleet.sqlite3" <<'PY'
+import re, sqlite3, sys
+from pathlib import Path
+db = Path(sys.argv[1])
+if not db.exists():
+    sys.exit()
+conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='relays'").fetchone():
+    sys.exit()
+for tid, path in conn.execute("SELECT tenant_id, compose_path FROM relays ORDER BY tenant_id"):
+    try:
+        m = re.search(r"rustdesk/rustdesk-server:(\d+\.\d+\.\d+)\b", Path(path).read_text())
+    except OSError:
+        continue
+    if m:
+        print(tid, m.group(1))
+PY
+)
+  local tid version
+  while read -r tid version; do
+    [[ -n "$tid" ]] || continue
+    sudo "$HELPER" relay-write-compose "$tid" "$version" >/dev/null \
+      || die "rdf-helper couldn't re-render tenant $tid's compose file (see the message above)."
+  done <<< "$rows"
+}
+
+provider_setup() {
+  log "Setting up the provider console pieces"
+  install_helper
+  drop_docker_group
+  secure_relay_compose
+  [[ $DOCKER_GROUP_DROPPED -eq 1 ]] && sudo systemctl restart rustdesk-dashboard.service
 
   if [[ -n "$PROVIDER_DOMAIN" ]]; then
     PROVIDER_DOMAIN="${PROVIDER_DOMAIN,,}"
@@ -331,8 +380,7 @@ PKGS=(docker.io docker-compose-v2 python3 python3-pip nsis nginx gnupg certbot p
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PKGS[@]}"
 sudo systemctl enable --now docker
 
-log "Adding $RUN_USER to the docker group"
-sudo usermod -aG docker "$RUN_USER"   # takes effect in new logins; we use `sg docker` below
+drop_docker_group
 
 # ── 3. Python dependencies (system-wide; PEP 668 override) ───────────────────
 log "Installing Python dependencies"
@@ -348,13 +396,7 @@ sudo chown "$RUN_USER:$RUN_USER" "$FLEET_ROOT"
 sudo chmod 0750 "$FLEET_ROOT"
 sudo mkdir -p "$ETC_DIR"
 
-# ── 5. Bring up the relay (hbbs/hbbr) ────────────────────────────────────────
-log "Starting the hbbs/hbbr relay (this also generates the server keypair)"
-# `sg docker` runs with the docker group active without needing a re-login.
-sg docker -c "cd '$ST_DIR' && python3 setup_server.py init --host '$HOST'"
-sg docker -c "cd '$ST_DIR' && python3 setup_server.py status" || true
-
-# ── 6. Dashboard env (generate a session secret once; never overwrite) ───────
+# ── 5. Dashboard env (generate a session secret once; never overwrite) ───────
 log "Configuring the dashboard"
 if [[ ! -f "$ETC_DIR/dashboard.env" ]]; then
   SECRET="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
@@ -366,6 +408,14 @@ EOF
 else
   info "$ETC_DIR/dashboard.env already exists — leaving it."
 fi
+
+# ── 6. Bring up the relay (hbbs/hbbr) ────────────────────────────────────────
+log "Starting the hbbs/hbbr relay (this also generates the server keypair)"
+# setup_server.py runs as the dashboard user and asks rdf-helper to render
+# tenant #1's compose file and run docker compose on it.
+install_helper
+(cd "$ST_DIR" && python3 setup_server.py init --host "$HOST")
+(cd "$ST_DIR" && python3 setup_server.py status) || true
 
 # A setup token locks /setup until the first admin exists. Add one only while
 # there are no users yet and the env file has none; never touch other lines.
@@ -639,7 +689,7 @@ fi
 # ── 11. Installer assets (optional, large download) ──────────────────────────
 if [[ $INSTALLER_ASSETS -eq 1 ]]; then
   log "Downloading RustDesk client binaries for installer builds"
-  sg docker -c "cd '$ST_DIR' && python3 generate_installer.py update-version" \
+  (cd "$ST_DIR" && python3 generate_installer.py update-version) \
     || warn "Could not fetch client binaries now — do it later from the dashboard (Server Status → Update installers) or: python3 $ST_DIR/generate_installer.py update-version"
 else
   info "Skipping installer-asset download (run with --with-installer-assets to fetch now, or do it from the dashboard later)."

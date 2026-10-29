@@ -3,7 +3,6 @@ signing, host health and its alerts, the pinned RustDesk client version and
 provider settings. These used to live on tenant #1's dashboard."""
 from __future__ import annotations
 
-import subprocess
 import threading
 from pathlib import Path
 
@@ -25,18 +24,15 @@ def _set_flash(request: Request, type_: str, msg: str) -> None:
 
 def restart_all_relays() -> tuple[bool, str]:
     """Restart every tenant's relay (after a restore). Returns (ok, errors)."""
+    from app.console.system import SYSTEM
     from app.tenancy import active_tenants
     failed = []
     for t in active_tenants():
         if not t.relay or t.status == "cancelled":
             continue
-        try:
-            r = subprocess.run(["docker", "compose", "-f", t.relay.compose_path, "restart"],
-                               capture_output=True, text=True, timeout=120)
-            if r.returncode != 0:
-                failed.append(f"{t.slug}: {(r.stderr or 'restart failed').strip()[:200]}")
-        except Exception as e:
-            failed.append(f"{t.slug}: {str(e)[:200]}")
+        r = SYSTEM.relay("restart", t.id, timeout=120)
+        if not r.ok:
+            failed.append(f"{t.slug}: {r.error()[:200]}")
     return not failed, "; ".join(failed)
 
 

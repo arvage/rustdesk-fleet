@@ -44,7 +44,8 @@ def create(c=None, slug="acme", name="Acme IT", email="boss@acme.example.com"):
 
 
 def helper(fake):
-    return [" ".join(c[3:]) for c in fake.calls if c[:3] == ["sudo", "-n", "/usr/local/sbin/rdf-helper"]]
+    return [" ".join(c[3:]) for c in fake.calls
+            if c[:3] == ["sudo", "-n", "/usr/local/sbin/rdf-helper"] and not c[3].startswith("relay-")]
 
 
 def nothing_left(slug="acme"):
@@ -82,7 +83,7 @@ def test_create_a_tenant(fakes):
 
 
 @pytest.mark.parametrize("step,breaker", [
-    ("Provision the relay", lambda f, mp: f.fail.update({"up -d": "docker: image not found"})),
+    ("Provision the relay", lambda f, mp: f.fail.update({"relay-up": "docker: image not found"})),
     ("Publish", lambda f, mp: f.fail.update({"issue-cert": "certbot: DNS problem"})),
     ("Publish", lambda f, mp: f.fail.update({"reload-nginx": "[emerg] duplicate zone"})),
     ("Generate the client guides", lambda f, mp: mp.setattr(tenants, "generate_guides",
@@ -106,8 +107,8 @@ def test_a_failed_step_undoes_everything_but_the_port_block(fakes, monkeypatch, 
         assert blocks == [(21200,)]
     assert db_rows("SELECT 1 FROM provisioning_events WHERE event = 'tenant_create_failed'")
     # The relay and the domain were taken down again.
-    if any(c[:2] == ["docker", "compose"] and "up" in c for c in fakes.calls):
-        assert any(c[:2] == ["docker", "compose"] and "down" in c for c in fakes.calls)
+    if any("relay-up" in c for c in fakes.calls):
+        assert any("relay-down" in c for c in fakes.calls)
     if f"write-vhost {WEB}" in helper(fakes):
         assert f"remove-vhost {WEB}" in helper(fakes)
     # Retrying is safe: the slug is free, and a new block is used.
