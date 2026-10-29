@@ -63,6 +63,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Provider billing (phase 2). Pinned: the dashboard pins the Stripe API
+# version this release of the library speaks (app/stripe_api.py).
+STRIPE_PIP="stripe==16.0.1"
+
 log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 warn() { printf '\033[1;33m[warn]\033[0m %s\n' "$*" >&2; }
@@ -399,9 +403,10 @@ EOF
 
 if [[ $PROVIDER_ONLY -eq 1 ]]; then
   [[ -f "$ETC_DIR/dashboard.env" ]] || die "--provider-only needs an installed box ($ETC_DIR/dashboard.env is missing)."
-  log "Installing certbot, reportlab and dnsutils"
+  log "Installing certbot, reportlab, dnsutils and the Stripe library"
   sudo apt-get update -qq
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot python3-reportlab dnsutils
+  sudo pip3 install --break-system-packages -q "$STRIPE_PIP"
   provider_setup
   log "Done (provider pieces only)."
   exit 0
@@ -561,7 +566,7 @@ drop_docker_group
 # ── 3. Python dependencies (system-wide; PEP 668 override) ───────────────────
 log "Installing Python dependencies"
 sudo pip3 install --break-system-packages -q \
-  fastapi uvicorn jinja2 bcrypt python-multipart itsdangerous requests webauthn boto3
+  fastapi uvicorn jinja2 bcrypt python-multipart itsdangerous requests webauthn boto3 "$STRIPE_PIP"
 
 # ── 4. Fleet data dir (owned by the dashboard user, NOT root) ────────────────
 log "Preparing $FLEET_ROOT"

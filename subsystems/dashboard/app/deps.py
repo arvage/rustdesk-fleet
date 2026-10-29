@@ -616,5 +616,7 @@ def run_migrations(db_path=None) -> None:
     from app import handoff as _handoff, webauthn_config as _webauthn
     _handoff.ensure_table(conn)
     _webauthn.ensure_rp_column(conn)
+    from app import billing_schema as _billing
+    _billing.ensure_tables(conn)
 
     conn.close()

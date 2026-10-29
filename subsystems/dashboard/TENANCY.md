@@ -25,6 +25,10 @@ There are no exceptions: child tables such as `webauthn_credentials` and
 | `tenant_domains` | provider | direct `tenant_id` | `hostname`; one `is_primary` per tenant |
 | `server_config` | legacy, unused | — | Kept for one release in case of rollback; nothing reads it |
 | `backup_config` | provider | — (singleton) | `id = 1` |
+| `plans`, `plan_prices` | provider | — (phase 2: billing plans as configuration, mapped to Stripe Price IDs) | `plans.key`; one price per unit type per plan |
+| `billing_customers` | provider | direct `tenant_id` (the tenant's Stripe customer; kept after purge, like usage) | `tenant_id`; `stripe_customer_id` |
+| `billing_subscriptions` | provider | direct `tenant_id` (the tenant's subscription as last synced from Stripe; kept after purge) | `tenant_id`; `stripe_subscription_id` |
+| `stripe_events` | provider | — (webhook events received, for idempotency and errors) | `event_id` |
 | `signing_config` | provider | — (singleton) | `id = 1` |
 | `sqlite_sequence` | SQLite internal | — | — |
 | `client_groups` | tenant | direct | `(tenant_id, slug)`; `(tenant_id, id)` for composite foreign keys |

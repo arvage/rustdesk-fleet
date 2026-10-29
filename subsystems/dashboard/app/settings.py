@@ -9,6 +9,8 @@ PUBLIC_IPV6          here with A/AAAA records (plus a TXT record) instead
 DNS_CHECK_RESOLVERS  resolvers custom-domain DNS checks ask (default
                      1.1.1.1,8.8.8.8; they must agree).
 MAX_CUSTOM_DOMAINS   custom domains per tenant (default 3).
+STRIPE_*, PUBLIC_SITE_HOST, TERMS_URL, PRIVACY_URL, SIGNUP_*, SIGNUPS_PER_DAY,
+PAST_DUE_SUSPEND_DAYS: provider billing and sign-up (phase 2; DEPLOYMENT.md).
 PROVIDER_DOMAIN      e.g. rds.example.com. Tenants live at <slug>.<domain>
                      (web) and <slug>.relay.<domain> (relay); the provider
                      console at admin.<domain>. Empty = no console and no new
@@ -164,3 +166,84 @@ def max_custom_domains() -> int:
     except ValueError:
         raise RuntimeError(f"MAX_CUSTOM_DOMAINS must be a number, got {raw!r}.")
     return max(0, value)
+
+
+# ── Provider billing (phase 2) ──────────────────────────────────────────────
+
+def stripe_secret_key() -> str:
+    """A restricted key (rk_…) with only the permissions DEPLOYMENT.md lists."""
+    return _env("STRIPE_SECRET_KEY")
+
+
+def stripe_webhook_secret() -> str:
+    return _env("STRIPE_WEBHOOK_SECRET")
+
+
+def stripe_api_version() -> str:
+    from app.stripe_api import API_VERSION
+    return _env("STRIPE_API_VERSION") or API_VERSION
+
+
+def stripe_tax() -> bool:
+    """STRIPE_TAX=on: Stripe Tax calculates tax on sign-up and invoices."""
+    return _env("STRIPE_TAX").lower() in ("on", "1", "yes", "true")
+
+
+def stripe_proration() -> str:
+    """How quantity changes are prorated (Stripe's proration_behavior)."""
+    v = _env("STRIPE_PRORATION") or "create_prorations"
+    if v not in ("create_prorations", "none", "always_invoice"):
+        raise RuntimeError(f"STRIPE_PRORATION must be create_prorations, none or always_invoice, got {v!r}.")
+    return v
+
+
+def public_site_host() -> str:
+    """The product page, pricing and sign-up: a provider host like the
+    console (default www.<PROVIDER_DOMAIN>)."""
+    raw = _env("PUBLIC_SITE_HOST")
+    if raw:
+        return normalize_host(raw)
+    d = provider_domain()
+    return f"www.{d}" if d else ""
+
+
+def terms_url() -> str:
+    return _env("TERMS_URL")
+
+
+def privacy_url() -> str:
+    return _env("PRIVACY_URL")
+
+
+def _int_setting(name: str, default: int, minimum: int = 0) -> int:
+    raw = _env(name)
+    try:
+        value = int(raw) if raw else default
+    except ValueError:
+        raise RuntimeError(f"{name} must be a whole number, got {raw!r}.")
+    return max(minimum, value)
+
+
+def signups_per_day() -> int:
+    """At most this many tenants created by self-service sign-up per day."""
+    return _int_setting("SIGNUPS_PER_DAY", 20)
+
+
+def signup_min_free_blocks() -> int:
+    """Sign-up closes when fewer relay port blocks than this are free."""
+    return _int_setting("SIGNUP_MIN_FREE_BLOCKS", 5)
+
+
+def signup_ip_limit() -> int:
+    """Sign-up form submissions per IP per hour."""
+    return _int_setting("SIGNUP_IP_LIMIT", 5, 1)
+
+
+def signup_email_limit() -> int:
+    """Sign-up form submissions per email address per day."""
+    return _int_setting("SIGNUP_EMAIL_LIMIT", 3, 1)
+
+
+def past_due_suspend_days() -> int:
+    """A past-due Stripe tenant is suspended after this many days."""
+    return _int_setting("PAST_DUE_SUSPEND_DAYS", 7, 1)
