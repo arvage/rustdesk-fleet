@@ -480,6 +480,9 @@ def run_migrations(db_path=None) -> None:
             updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
         );
     """)
+    # The singleton rows exist from the start, so the console pages only read.
+    conn.execute("INSERT OR IGNORE INTO backup_config (id) VALUES (1)")
+    conn.execute("INSERT OR IGNORE INTO signing_config (id) VALUES (1)")
     conn.commit()
 
     # Roles ("permission levels"): a named capability set users reference by key.

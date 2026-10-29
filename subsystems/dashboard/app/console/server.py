@@ -42,8 +42,6 @@ def restart_all_relays() -> tuple[bool, str]:
 
 def _backup_cfg() -> dict:
     conn = get_db()
-    conn.execute("INSERT OR IGNORE INTO backup_config (id) VALUES (1)")
-    conn.commit()
     row = conn.execute("SELECT * FROM backup_config WHERE id = 1").fetchone()
     conn.close()
     return dict(row)
@@ -54,8 +52,6 @@ def _backup_cfg() -> dict:
 
 def _signing_cfg() -> dict:
     conn = get_db()
-    conn.execute("INSERT OR IGNORE INTO signing_config (id) VALUES (1)")
-    conn.commit()
     row = conn.execute("SELECT * FROM signing_config WHERE id = 1").fetchone()
     conn.close()
     return dict(row)

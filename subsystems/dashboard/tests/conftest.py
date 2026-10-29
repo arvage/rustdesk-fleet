@@ -82,9 +82,11 @@ def fresh_state():
     yield
 
 
-def new_client(host: str = HOST) -> TestClient:
-    # The session cookie is https_only, so talk to the app over https.
-    return TestClient(app, base_url=f"https://{host}")
+def new_client(host: str = HOST, headers: dict | None = None) -> TestClient:
+    # The session cookie is https_only, so talk to the app over https. Send
+    # what a browser sends on a same-origin form post (app/security.py).
+    return TestClient(app, base_url=f"https://{host}",
+                      headers={"Sec-Fetch-Site": "same-origin", **(headers or {})})
 
 
 @pytest.fixture

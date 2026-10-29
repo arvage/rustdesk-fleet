@@ -93,6 +93,10 @@ app.add_middleware(
 # Added last, so it runs first: every request is matched to a tenant by its
 # Host before anything else (unknown hosts get a 404 without a session).
 app.add_middleware(TenantMiddleware)
+# Outermost: refuse cross-origin state changes on every host, the console
+# included, before the tenant is even resolved.
+from app.security import SecurityMiddleware  # noqa: E402
+app.add_middleware(SecurityMiddleware)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
