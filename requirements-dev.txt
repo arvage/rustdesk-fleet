@@ -2,3 +2,4 @@
 # The dashboard's runtime dependencies are installed by install.sh.
 pytest
 httpx
+playwright      # tests/test_csp_browser.py; then: python3 -m playwright install chromium
