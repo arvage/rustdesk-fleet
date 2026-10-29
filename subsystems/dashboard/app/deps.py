@@ -611,5 +611,7 @@ def run_migrations(db_path=None) -> None:
     _maintenance.ensure_table(conn)
     from app import support as _support
     _support.ensure_tables(conn)
+    from app import domains as _domains
+    _domains.ensure_columns(conn)
 
     conn.close()

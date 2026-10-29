@@ -159,7 +159,10 @@ def resolve_host(raw_host: str) -> Tenant | None:
     from app.deps import get_db
     conn = get_db()
     try:
-        row = conn.execute("SELECT tenant_id FROM tenant_domains WHERE hostname = ?", (hostname,)).fetchone()
+        # A custom domain reaches its tenant only while it is served (nginx has
+        # its vhost); one still being checked, or given up on, is unknown.
+        row = conn.execute("SELECT tenant_id FROM tenant_domains WHERE hostname = ?"
+                           " AND (kind <> 'custom' OR status IN ('active', 'dns_broken'))", (hostname,)).fetchone()
         tenant = _load(conn, row["tenant_id"], hostname) if row else None
     finally:
         conn.close()

@@ -41,7 +41,7 @@ DURATIONS = {                 # form value -> label
 # role and support-access management, the user's own account (support has
 # none), and the cancelled-tenant export page (that's for the tenant).
 SUPPORT_FORBIDDEN_PATHS = ("/users", "/admin/roles", "/admin/support", "/account", "/export")
-SUPPORT_WITHHELD_PERMS = {"manage_users", "manage_roles", "manage_support_access"}
+SUPPORT_WITHHELD_PERMS = {"manage_users", "manage_roles", "manage_support_access", "manage_domains"}
 
 SCHEMA = """
     -- A tenant's consent to provider support access, until ends_at.

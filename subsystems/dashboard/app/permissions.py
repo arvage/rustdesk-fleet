@@ -37,6 +37,8 @@ CAPABILITIES = [
      "Create and edit permission levels", "Administration"),
     ("manage_support_access", "Manage support access",
      "Grant, change and revoke provider support access to this dashboard", "Administration"),
+    ("manage_domains", "Manage custom domains",
+     "Add, check, remove custom domains and choose the primary one", "Administration"),
 ]
 CAP_KEYS = [c[0] for c in CAPABILITIES]
 CAP_LABELS = {c[0]: c[1] for c in CAPABILITIES}
