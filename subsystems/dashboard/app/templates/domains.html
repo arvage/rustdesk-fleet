@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Domains — RustDesk Fleet{% endblock %}
+{% block page_title %}Domains{% endblock %}
+
+{% block content %}
+<style>
+.dm-rec { display: grid; grid-template-columns: 70px minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 8px 12px;
+          align-items: center; font-size: 13px; padding: 8px 0; border-top: 1px solid var(--border); }
+.dm-rec code { overflow-wrap: anywhere; }
+.dm-rec .k { color: var(--text-3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+@media (max-width: 640px) { .dm-rec { grid-template-columns: 1fr auto; } .dm-rec .k { grid-column: 1 / -1; } }
+.dm-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.dm-actions form { margin: 0; }
+</style>
+
+<p class="text-muted text-sm" style="max-width:720px;margin:0 0 18px">
+  Your dashboard and download links can use your own domain, like <code>rds.yourcompany.com</code>, as well as
+  <code>{{ home }}</code>. {{ home }} always keeps working, whatever happens to your own domain. Devices never use
+  your own domain: installers keep connecting to your relay, so changing or losing a domain can't strand a device.
+</p>
+
+{% for d in items %}
+<div class="section"><div class="card"><div class="card-body">
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <h2 style="font-size:15px;margin:0;overflow-wrap:anywhere">{{ d.hostname }}</h2>
+    <span class="badge {{ d.badge }}">{{ d.label }}</span>
+    {% if d.is_primary %}<span class="badge badge-built">Primary</span>{% endif %}
+    {% if d.kind != 'custom' %}<span class="text-muted text-sm">Part of your account</span>{% endif %}
+  </div>
+  <p class="text-sm text-muted" style="margin:6px 0 0">
+    {% if d.cert_expires_at %}Certificate valid until {{ d.cert_expires_at | localtime("%Y-%m-%d") }}{% if d.expiring %}
+      <strong style="color:var(--danger)">— expires soon; we renew it automatically, so if this stays, check the domain's DNS</strong>{% endif %}.{% endif %}
+    {% if d.kind == 'custom' and d.last_checked_at %}Last checked {{ d.last_checked_at | localtime }}{% if d.check_method %}
+      ({{ "CNAME" if d.check_method == 'cname' else "A record + TXT" }}){% endif %}.{% endif %}
+    {% if d.status == 'dns_broken' and d.broken_since %}DNS stopped pointing here on {{ d.broken_since | localtime("%Y-%m-%d") }}.{% endif %}
+  </p>
+  {% if d.kind == 'custom' and d.last_check_message %}
+  <div class="flash {{ 'error' if d.status in ('failed', 'dns_broken') else 'warning' }}" style="margin:12px 0 0">{{ d.last_check_message }}</div>
+  {% endif %}
+
+  {% if d.kind == 'custom' and d.status not in ('active', 'removing') %}
+  <div style="margin-top:14px">
+    <div class="text-sm" style="font-weight:600;margin-bottom:4px">Create this record at your DNS host (recommended)</div>
+    <div class="dm-rec">
+      <span class="k">Type</span><span class="k">Name</span><span class="k">Value</span><span></span>
+      <code>CNAME</code><code>{{ d.hostname }}</code><code>{{ home }}</code>
+      <button type="button" class="btn-copy" data-copy="{{ home }}">Copy</button>
+    </div>
+    <p class="text-sm text-muted" style="margin:6px 0 0">If your DNS host proxies records (Cloudflare's orange cloud),
+      switch this one to <strong>DNS only</strong>.</p>
+    {% if ipv4 %}
+    <details style="margin-top:10px">
+      <summary class="text-sm" style="cursor:pointer">Can't use a CNAME (for example, on a bare domain)? Use A records and a TXT record instead</summary>
+      <div class="dm-rec">
+        <span class="k">Type</span><span class="k">Name</span><span class="k">Value</span><span></span>
+        <code>A</code><code>{{ d.hostname }}</code><code>{{ ipv4 }}</code>
+        <button type="button" class="btn-copy" data-copy="{{ ipv4 }}">Copy</button>
+        {% if ipv6 %}<code>AAAA</code><code>{{ d.hostname }}</code><code>{{ ipv6 }}</code>
+        <button type="button" class="btn-copy" data-copy="{{ ipv6 }}">Copy</button>{% endif %}
+        <code>TXT</code><code>_rdf-verify.{{ d.hostname }}</code><code>{{ d.verify_token }}</code>
+        <button type="button" class="btn-copy" data-copy="{{ d.verify_token }}">Copy</button>
+      </div>
+      <p class="text-sm text-muted" style="margin:6px 0 0">{% if not ipv6 %}Remove any AAAA (IPv6) record for {{ d.hostname }}. {% endif %}
+        The A records must point only here.</p>
+    </details>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if can_manage and d.status != 'removing' %}
+  <div class="dm-actions">
+    {% if d.kind == 'custom' and d.status != 'active' %}
+    <form method="post" action="/admin/domains/{{ d.id }}/check"><button type="submit" class="btn btn-ghost btn-sm">Check now</button></form>
+    {% endif %}
+    {% if not d.is_primary and (d.kind != 'custom' or d.status == 'active') %}
+    <form method="post" action="/admin/domains/{{ d.id }}/primary"
+          data-confirm="Make {{ d.hostname }} the primary domain? Emails, invitations, download links and your client guides will use it.">
+      <button type="submit" class="btn btn-ghost btn-sm">Make primary</button></form>
+    {% endif %}
+    {% if d.kind == 'custom' %}
+    <form method="post" action="/admin/domains/{{ d.id }}/remove"
+          data-confirm="Remove {{ d.hostname }}? Its certificate is revoked, and any link already sent on that domain (download links, invitations) stops working.{% if d.is_primary %} {{ home }} becomes primary again.{% endif %}">
+      <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger)">Remove</button></form>
+    {% endif %}
+  </div>
+  {% endif %}
+</div></div></div>
+{% endfor %}
+
+{% if can_manage and open %}
+<div class="section"><div class="card"><div class="card-body">
+  <h2 style="font-size:14px;margin:0 0 6px">Add a domain</h2>
+  {% if custom_count < limit %}
+  <p class="text-sm text-muted" style="margin:0 0 12px">A hostname you own, like <code>rds.yourcompany.com</code>.
+    After adding it, create the DNS record we show; we check it every few minutes for {{ pending_days }} days.
+    You can add up to {{ limit }}.</p>
+  <form method="post" action="/admin/domains" class="form-grid" data-busy="Adding…">
+    <input type="text" name="hostname" placeholder="rds.yourcompany.com" required maxlength="200" autocomplete="off"
+           autocapitalize="none" spellcheck="false" style="flex:1 1 260px">
+    <button type="submit" class="btn btn-primary btn-sm">Add domain</button>
+  </form>
+  {% else %}
+  <p class="text-sm text-muted" style="margin:0">You have {{ custom_count }} of {{ limit }} custom domains. Remove one to add another.</p>
+  {% endif %}
+</div></div></div>
+{% elif not can_manage %}
+<p class="text-sm text-muted">Only your administrators can change domains.</p>
+{% endif %}
+
+{% if busy %}
+<script nonce="{{ request.state.csp_nonce }}">
+// Something is being checked or set up in the background: refresh to show progress.
+setTimeout(() => window.location.reload(), 10000);
+</script>
+{% endif %}
+{% endblock %}

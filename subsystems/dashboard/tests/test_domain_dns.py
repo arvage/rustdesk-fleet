@@ -163,7 +163,7 @@ def test_caa_allowing_lets_encrypt_passes():
 def test_dashboard_uses_the_helpers_rules(monkeypatch):
     monkeypatch.setenv("PUBLIC_IPV4", BOX)
     monkeypatch.setattr(domain_dns, "QUERY", Zone({DOMAIN: [("CNAME", TARGET)], **ours()}))
-    assert domain_dns.check(DOMAIN, "abc", TOKEN).ok
+    assert domain_dns.check(DOMAIN, TARGET, TOKEN).ok
     assert domain_dns.helper().check_domain.__module__ == "rdf_helper_rules"
 
 

@@ -51,10 +51,11 @@ def domain_problem(domain: str) -> str | None:
     return helper().custom_domain_problem(domain, settings.provider_domain())
 
 
-def check(domain: str, slug: str, token: str):
-    """Is DOMAIN pointed at the tenant with this slug? A DnsResult (.ok,
-    .method 'cname'/'txt', .code, .reason in plain words). Blocking: call
-    from a background job."""
-    return helper().check_domain(_query, domain, settings.tenant_web_host(slug), settings.provider_domain(),
+def check(domain: str, target: str, token: str):
+    """Is DOMAIN pointed at the tenant whose own web host (CNAME target) is
+    TARGET: its provider subdomain, or tenant #1's legacy host? A DnsResult
+    (.ok, .method 'cname'/'txt', .code, .reason in plain words). Blocking:
+    call from a background job."""
+    return helper().check_domain(_query, domain, target, settings.provider_domain(),
                                  token, settings.public_ipv4(), settings.public_ipv6(),
                                  settings.dns_check_resolvers())

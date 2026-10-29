@@ -150,7 +150,8 @@ def _email_link(request: Request, conn, link_id: int, to_email: str, recipient_n
     if link is None or link_state(link) != "active":
         return False, "That link is no longer active."
 
-    url = f"{str(request.base_url).rstrip('/')}/d/{link['token']}"
+    from app.domains import primary_base_url
+    url = f"{primary_base_url(tid)}/d/{link['token']}"   # the primary domain
     ok, err = send_download_link_email(
         tid,
         to_email=to_email,

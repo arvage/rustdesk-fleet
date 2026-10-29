@@ -201,7 +201,9 @@ async def tenant_support_open(request: Request, tenant_id: int, reason: str = Fo
         if not reason:
             _flash(request, "error", "Give a reason for opening the tenant's dashboard.")
             return RedirectResponse(f"/tenants/{tenant_id}", status_code=303)
-        domain = conn.execute("SELECT hostname FROM tenant_domains WHERE tenant_id = ? ORDER BY is_primary DESC, id"
+        # The tenant's own host (never a custom domain): it always works.
+        domain = conn.execute("SELECT hostname FROM tenant_domains WHERE tenant_id = ? AND kind <> 'custom'"
+                              " ORDER BY is_primary DESC, id"
                               " LIMIT 1", (tenant_id,)).fetchone()
         if domain is None:
             _flash(request, "error", "The tenant has no web domain.")

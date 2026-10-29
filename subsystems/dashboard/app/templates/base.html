@@ -63,10 +63,10 @@
         </a>
       </div>
       {% set p = (current_user.permissions if current_user else []) or [] %}
-      {% if current_user and ('manage_system' in p or 'manage_users' in p or 'manage_roles' in p or 'manage_notifications' in p or 'manage_support_access' in p) %}
+      {% if current_user and ('manage_system' in p or 'manage_users' in p or 'manage_roles' in p or 'manage_notifications' in p or 'manage_support_access' in p or 'manage_domains' in p or current_user.is_support) %}
       <div class="nav-section">
         <div class="nav-label">Admin</div>
-        <a href="/admin" class="nav-item {% if request.url.path == '/admin' or (request.url.path.startswith('/admin/') and not request.url.path.startswith('/admin/reports') and not request.url.path.startswith('/admin/emails')) %}active{% endif %}">
+        <a href="/admin" class="nav-item {% if request.url.path == '/admin' or (request.url.path.startswith('/admin/') and not request.url.path.startswith('/admin/reports') and not request.url.path.startswith('/admin/emails') and not request.url.path.startswith('/admin/domains')) %}active{% endif %}">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 2l7 4v6c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
           Admin
         </a>
@@ -88,6 +88,12 @@
         <a href="/admin/emails" class="nav-item {% if request.url.path.startswith('/admin/emails') %}active{% endif %}">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>
           Email templates
+        </a>
+        {% endif %}
+        {% if 'manage_domains' in p or current_user.is_support %}
+        <a href="/admin/domains" class="nav-item {% if request.url.path.startswith('/admin/domains') %}active{% endif %}">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          Domains
         </a>
         {% endif %}
         {% if 'manage_support_access' in p %}

@@ -124,7 +124,9 @@ def test_warning_a_week_before_and_purge_after_the_grace_period(two_tenants, fak
     # ...the relay, the vhost and the certificate were removed...
     assert "down" in compose_calls(fake_system)
     helper = [" ".join(c[3:]) for c in fake_system.calls if c[:2] == ["sudo", "-n"] and not c[3].startswith("relay-")]
-    assert helper == ["purge-relay-data 2", f"remove-vhost {HOST_B}", "reload-nginx", f"revoke-cert {HOST_B}"]
+    # The provider subdomain is unpublished; the custom domain released (DNS no longer matters).
+    assert helper == ["purge-relay-data 2", f"remove-vhost {HOST_B}", "reload-nginx", f"revoke-cert {HOST_B}",
+                      "release-domain rds.b.example"]
     # ...and what we keep is kept: usage, the provider log, the slug, the host is gone.
     assert db_rows("SELECT devices FROM tenant_usage_daily WHERE tenant_id = 2")[0][0] == 7
     assert db_rows("SELECT 1 FROM provisioning_events WHERE tenant_id = 2 AND event = 'tenant_cancelled' AND source = 'provider'")

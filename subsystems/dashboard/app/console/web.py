@@ -59,6 +59,12 @@ def unpublish(host: str, revoke: bool = True) -> None:
         raise WebError("; ".join(problems))
 
 
+def release(host: str) -> None:
+    """Stop serving a custom domain: its vhost and certificate go and nginx
+    reloads. Works whatever its DNS says now (rdf-helper release-domain)."""
+    _helper("release-domain", host, timeout=600)
+
+
 def purge_relay_data(tenant_id: int) -> None:
     _helper("purge-relay-data", str(int(tenant_id)))
 

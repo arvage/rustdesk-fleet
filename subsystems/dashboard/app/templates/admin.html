@@ -43,6 +43,15 @@
   </div></div>
   {% endif %}
 
+  <!-- Domains -->
+  {% if 'manage_domains' in (current_user.permissions or []) %}
+  <div class="card"><div class="card-body">
+    <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Domains</h2>
+    <p class="text-muted text-sm" style="margin:0 0 14px">Serve your dashboard and download links on your own domain.</p>
+    <a href="/admin/domains" class="btn btn-ghost btn-sm">Manage domains</a>
+  </div></div>
+  {% endif %}
+
   <!-- Reports -->
   <div class="card"><div class="card-body">
     <h2 style="font-size:14px;font-weight:600;margin:0 0 4px">Reports</h2>

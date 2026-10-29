@@ -127,7 +127,8 @@ async def group_detail(
     ).fetchone()
     conn.close()
 
-    base_url = str(request.base_url).rstrip("/")
+    from app.domains import primary_base_url
+    base_url = primary_base_url(tenant.id)   # links go out on the primary domain
     new_link_token = request.session.pop("new_link_token", None)
     links = [
         {**dict(r), "state": link_state(r), "url": f"{base_url}/d/{r['token']}",

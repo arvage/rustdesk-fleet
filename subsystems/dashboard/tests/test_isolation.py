@@ -37,6 +37,7 @@ def tenant_param(path: str, name: str):
         "user_id": ("user_id", MISSING_INT),
         "cred_id": ("cred_id", MISSING_INT),
         "link_id": ("link_id", MISSING_INT),
+        "domain_id": ("domain_id", MISSING_INT),
         "token": ("token", "no-such-token-" + "x" * 20),
     }.get(name)
 

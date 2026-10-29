@@ -272,6 +272,11 @@ def populate(tenant_id: int, hbbs: Path, tag: str) -> dict:
                  (tenant_id, f"smtp-{tag}.example.com", f"ops@{tag}.example.com"))
     conn.execute("INSERT INTO provisioning_events (tenant_id, event, detail) VALUES (?, 'group_created', ?)",
                  (tenant_id, f"Event-{tag.upper()}-secret"))
+    # A custom domain, served (phase 1d): rds.<tag>.example.
+    domain_id = conn.execute(
+        "INSERT INTO tenant_domains (tenant_id, hostname, kind, status, verified_at, verify_token, check_method)"
+        " VALUES (?, ?, 'custom', 'active', datetime('now'), ?, 'cname')",
+        (tenant_id, f"rds.{tag}.example", f"rdf-verify-{tag}-" + "v" * 24)).lastrowid
     conn.commit()
     from app.console.tenants import create_invite
     invite_token = create_invite(conn, tenant_id, f"t{tag}", f"new@{tag}.example.com", "New", "test").rsplit("/", 1)[1]
@@ -280,7 +285,8 @@ def populate(tenant_id: int, hbbs: Path, tag: str) -> dict:
             "group_slug": f"group-{tag}", "rid": rid, "uuid": uuid, "installer_id": iid,
             "installer_file": inst_file.name, "link_id": lid, "token": token, "dynamic_group_id": dgid,
             "role_key": f"role_{tag}", "cred_id": cred, "user_id": tech_user["id"], "session_id": sid,
-            "hbbs": hbbs, "secret": f"{tag.upper()}-secret", "invite_token": invite_token}
+            "hbbs": hbbs, "secret": f"{tag.upper()}-secret", "invite_token": invite_token,
+            "domain_id": domain_id, "custom_host": f"rds.{tag}.example"}
 
 
 @pytest.fixture

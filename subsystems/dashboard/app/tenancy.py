@@ -160,9 +160,11 @@ def resolve_host(raw_host: str) -> Tenant | None:
     conn = get_db()
     try:
         # A custom domain reaches its tenant only while it is served (nginx has
-        # its vhost); one still being checked, or given up on, is unknown.
+        # its vhost) and not being removed; one still being checked, or given
+        # up on, is unknown.
         row = conn.execute("SELECT tenant_id FROM tenant_domains WHERE hostname = ?"
-                           " AND (kind <> 'custom' OR status IN ('active', 'dns_broken'))", (hostname,)).fetchone()
+                           " AND (kind <> 'custom' OR (status IN ('active', 'dns_broken') AND remove_reason IS NULL))",
+                           (hostname,)).fetchone()
         tenant = _load(conn, row["tenant_id"], hostname) if row else None
     finally:
         conn.close()

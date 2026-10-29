@@ -27,6 +27,7 @@ from app.routes.timeline import router as timeline_router
 from app.routes.invites import router as invites_router
 from app.routes.export import router as export_router
 from app.routes.support import router as support_router
+from app.routes.domains import router as domains_router
 from app.deps import run_migrations
 from app.security import TENANT_COOKIE
 from app.tenancy import TenantMiddleware, UnknownTenant
@@ -122,6 +123,8 @@ async def startup():
     jobs.start_worker()
     from app.console import maintenance
     maintenance.start()
+    from app import domains
+    domains.start()
 
 
 @app.exception_handler(_AuthRedirect)
@@ -165,3 +168,4 @@ app.include_router(timeline_router)
 app.include_router(invites_router)
 app.include_router(export_router)
 app.include_router(support_router)
+app.include_router(domains_router)

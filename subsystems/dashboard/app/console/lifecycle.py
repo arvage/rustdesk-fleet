@@ -231,12 +231,14 @@ def purge_now(tenant_id: int, job=None, by: str = "") -> None:
         except (relays.RelayError, web.WebError) as e:
             raise LifecycleError(str(e))
     conn = get_db()
-    hosts = [r[0] for r in conn.execute("SELECT hostname FROM tenant_domains WHERE tenant_id = ?", (tenant_id,))]
+    hosts = conn.execute("SELECT hostname, kind FROM tenant_domains WHERE tenant_id = ?", (tenant_id,)).fetchall()
     conn.close()
-    for host in hosts:
+    for host, kind in hosts:
         with step(f"Remove https://{host} (vhost and certificate)"):
             try:
-                web.unpublish(host)
+                # A custom domain is released whatever its DNS says now (the
+                # tenant is cancelled, so the helper won't treat it as live).
+                web.release(host) if kind == "custom" else web.unpublish(host)
             except web.WebError as e:
                 raise LifecycleError(str(e))
     with step("Delete the tenant's files"):

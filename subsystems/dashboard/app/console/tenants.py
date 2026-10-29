@@ -163,7 +163,8 @@ def create_invite(conn, tenant_id: int, slug: str, email: str, name: str, create
         (tenant_id, email.lower().strip(), name.strip(), role, _hash(token),
          (datetime.now(timezone.utc) + INVITE_TTL).strftime("%Y-%m-%d %H:%M:%S"), created_by))
     conn.commit()
-    return f"https://{settings.tenant_web_host(slug)}/invite/{token}"
+    from app.domains import primary_host
+    return f"https://{primary_host(conn, tenant_id) or settings.tenant_web_host(slug)}/invite/{token}"
 
 
 def find_invite(conn, tenant_id: int, token: str):
