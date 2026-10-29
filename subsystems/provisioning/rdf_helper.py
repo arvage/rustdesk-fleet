@@ -10,6 +10,7 @@ repository, because the repository is writable by that user.
     rdf-helper write-vhost HOST          nginx server block for HOST (needs its cert)
     rdf-helper remove-vhost HOST
     rdf-helper revoke-cert HOST          revoke and delete HOST's certificate
+    rdf-helper release-domain DOMAIN     a custom domain's vhost and certificate, gone
     rdf-helper reload-nginx              nginx -t, reload, then check for [emerg]
     rdf-helper purge-relay-data ID       delete tenant ID's relay data (root-owned keypair, hbbs DB)
     rdf-helper relay-write-compose ID VERSION   (re)write tenant ID's compose file
@@ -28,14 +29,21 @@ text is what docker reads (on stdin), so a file the dashboard user swapped in
 is refused and can't be raced in. The image is always
 rustdesk/rustdesk-server:<VERSION> with VERSION like 1.1.16.
 
-HOST must be <slug>.<PROVIDER_DOMAIN> for a valid, non-reserved slug, or the
-console host admin.<PROVIDER_DOMAIN>. Later phases will add verified custom
-domains. Arguments are validated strictly and never passed through a shell.
+HOST must be <slug>.<PROVIDER_DOMAIN> for a valid, non-reserved slug, the
+console host admin.<PROVIDER_DOMAIN>, or a tenant's custom domain. A custom
+domain is accepted only when the control database (read-only) has it as kind
+'custom' for a trial or active tenant, and for issue-cert and write-vhost
+only when the helper's own DNS check passes (the rules below): the dashboard's
+verdict is never trusted, because this is the last gate before a certificate
+is issued for someone's domain. release-domain removes a custom domain's
+vhost and certificate whatever its DNS or tenant status. Arguments are
+validated strictly and never passed through a shell.
 PROVIDER_DOMAIN and FLEET_DATA_DIR come from /etc/rustdesk-fleet/dashboard.env
 (root-readable), never from the caller's environment.
 """
 from __future__ import annotations
 
+import ipaddress as _ip
 import os
 import re
 import shutil
@@ -131,8 +139,12 @@ class Config:
 
     def __init__(self, provider_domain: str, data_dir: Path, vhost_dir: Path = VHOST_DIR,
                  webroot: Path = ACME_WEBROOT, le_live: Path = LE_LIVE, error_log: Path = NGINX_ERROR_LOG,
-                 run=None, sleep=time.sleep, port_base: int = 21200, port_max: int = 21999):
+                 run=None, sleep=time.sleep, port_base: int = 21200, port_max: int = 21999,
+                 public_ipv4: str = "", public_ipv6: str = "", resolvers: tuple = (), dns=None):
         self.provider_domain = provider_domain
+        self.public_ipv4, self.public_ipv6 = public_ipv4, public_ipv6
+        self.resolvers = tuple(resolvers) or DEFAULT_RESOLVERS
+        self.dns = dns          # query(resolver, name, type); None = dig through run
         self.data_dir = Path(data_dir)
         self.port_base = port_base
         self.port_max = port_max
@@ -163,7 +175,21 @@ class Config:
             raise HelperError("RELAY_PORT_BASE / RELAY_PORT_MAX must be numbers")
         if not 1024 < base < top <= 65535:
             raise HelperError("RELAY_PORT_BASE / RELAY_PORT_MAX are out of range")
-        return cls(domain, Path(values.get("FLEET_DATA_DIR") or "/opt/rustdesk-fleet"), port_base=base, port_max=top)
+        ips = {}
+        for key, version in (("PUBLIC_IPV4", 4), ("PUBLIC_IPV6", 6)):
+            raw = values.get(key, "")
+            if raw:
+                try:
+                    addr = _ip.ip_address(raw)
+                except ValueError:
+                    addr = None
+                if addr is None or addr.version != version:
+                    raise HelperError(f"{key} is not an IPv{version} address in dashboard.env")
+                raw = str(addr)
+            ips[key] = raw
+        return cls(domain, Path(values.get("FLEET_DATA_DIR") or "/opt/rustdesk-fleet"), port_base=base, port_max=top,
+                   public_ipv4=ips["PUBLIC_IPV4"], public_ipv6=ips["PUBLIC_IPV6"],
+                   resolvers=parse_resolvers(values.get("DNS_CHECK_RESOLVERS", "")))
 
     def need_domain(self) -> str:
         """Tenant domains need PROVIDER_DOMAIN; tenant #1's relay doesn't."""
@@ -198,10 +224,78 @@ def check_host(cfg: Config, host: str) -> str:
     return host
 
 
+def _custom_row(cfg: Config, host: str):
+    """(tenant id, tenant status, verify token, the tenant's own web host) for
+    a custom domain in the control database, or HelperError."""
+    import sqlite3
+    db = cfg.data_dir / "fleet.sqlite3"
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            row = conn.execute(
+                "SELECT d.tenant_id, d.kind, d.verify_token, t.status FROM tenant_domains d"
+                " JOIN tenants t ON t.id = d.tenant_id WHERE d.hostname = ?", (host,)).fetchone()
+            home = conn.execute(
+                "SELECT hostname, kind FROM tenant_domains WHERE tenant_id = ? AND kind <> 'custom'"
+                " ORDER BY kind = 'provider_subdomain' DESC, id LIMIT 1", (row[0],)).fetchone() if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        raise HelperError(f"can't read the control database: {e}")
+    if row is None or row[1] != "custom":
+        raise HelperError(f"{host!r} is not a tenant's custom domain")
+    if home is None:
+        raise HelperError(f"tenant {row[0]} has no web host of its own")
+    home_host, home_kind = home
+    if home_kind == "provider_subdomain":
+        check_host(cfg, home_host)
+    elif not DOMAIN_RE.match(home_host or ""):
+        raise HelperError(f"tenant {row[0]}'s web host is invalid")
+    return row[0], row[3], row[2] or "", home_host
+
+
+def check_web_host(cfg: Config, host: str, dns: bool = False, any_status: bool = False) -> str:
+    """HOST if it's a provider host (check_host) or a custom domain the helper
+    has checked for itself: kind 'custom' for a trial or active tenant (any
+    status with any_status), and with dns=True pointed at that tenant now."""
+    if not isinstance(host, str) or host != host.strip().lower():
+        raise HelperError(f"invalid host {host!r}")
+    domain = cfg.need_domain()
+    if host == domain or host.endswith("." + domain):
+        return check_host(cfg, host)
+    problem = custom_domain_problem(host, domain)
+    if problem:
+        raise HelperError(f"{host!r}: {problem}")
+    tid, status, token, home = _custom_row(cfg, host)
+    if not any_status and status not in ("trial", "active"):
+        raise HelperError(f"{host} belongs to tenant {tid}, which is {status}")
+    if dns:
+        query = cfg.dns or (lambda r, n, t: dig_query(cfg.run, r, n, t))
+        result = check_domain(query, host, home, domain, token, cfg.public_ipv4, cfg.public_ipv6, cfg.resolvers)
+        if not result.ok:
+            raise HelperError(f"DNS for {host} doesn't point at tenant {tid}: {result.reason}")
+    return host
+
+
+def is_custom(cfg: Config, host: str) -> bool:
+    domain = cfg.need_domain()
+    return not (host == domain or host.endswith("." + domain))
+
+
 def vhost_text(cfg: Config, host: str) -> str:
     live = cfg.le_live / host
+    # A custom domain has no wildcard port-80 block (rdf-provider.conf covers
+    # *.<PROVIDER_DOMAIN> only): give it one, for HTTPS redirects and renewals.
+    http = "" if not is_custom(cfg, host) else f"""server {{
+    listen 80;
+    listen [::]:80;
+    server_name {host};
+    location /.well-known/acme-challenge/ {{ root {cfg.webroot}; }}
+    location / {{ return 301 https://$host$request_uri; }}
+}}
+"""
     return f"""# Written by rdf-helper for {host}. Do not edit by hand.
-server {{
+{http}server {{
     listen 443 ssl;
     listen [::]:443 ssl;
     server_name {host};
@@ -215,7 +309,7 @@ server {{
 
 
 def issue_cert(cfg: Config, host: str, email: str = "") -> str:
-    check_host(cfg, host)
+    check_web_host(cfg, host, dns=True)
     if email and not EMAIL_RE.match(email):
         raise HelperError("invalid email")
     cfg.webroot.mkdir(parents=True, exist_ok=True)
@@ -229,7 +323,7 @@ def issue_cert(cfg: Config, host: str, email: str = "") -> str:
 
 
 def write_vhost(cfg: Config, host: str) -> str:
-    check_host(cfg, host)
+    check_web_host(cfg, host, dns=True)
     live = cfg.le_live / host
     if not (live / "fullchain.pem").exists():
         raise HelperError(f"no certificate for {host}; run issue-cert first")
@@ -243,14 +337,18 @@ def write_vhost(cfg: Config, host: str) -> str:
 
 
 def remove_vhost(cfg: Config, host: str) -> str:
-    check_host(cfg, host)
+    check_web_host(cfg, host)
     target = cfg.vhost_dir / f"{host}.conf"
     target.unlink(missing_ok=True)
     return f"removed {target}"
 
 
 def revoke_cert(cfg: Config, host: str) -> str:
-    check_host(cfg, host)
+    check_web_host(cfg, host)
+    return _revoke(cfg, host)
+
+
+def _revoke(cfg: Config, host: str) -> str:
     if not (cfg.le_live / host).exists():
         return f"no certificate for {host}"
     code, out = cfg.run(["certbot", "revoke", "--cert-name", host, "--delete-after-revoke",
@@ -261,6 +359,25 @@ def revoke_cert(cfg: Config, host: str) -> str:
             raise HelperError(f"certbot couldn't revoke or delete {host}: {out[-800:]}")
         return f"deleted the certificate for {host} (revoking failed)"
     return f"revoked and deleted the certificate for {host}"
+
+
+def release_domain(cfg: Config, host: str) -> str:
+    """A custom domain's vhost and certificate, gone, and nginx reloaded if a
+    vhost was removed: for removal, purge and domains whose DNS left us, so it
+    works whatever the DNS says now and whatever the tenant's status. Only
+    custom domains: never a provider host or tenant #1's."""
+    domain = cfg.need_domain()
+    if host == domain or host.endswith("." + domain):
+        raise HelperError(f"{host} is not a custom domain")
+    check_web_host(cfg, host, any_status=True)
+    target = cfg.vhost_dir / f"{host}.conf"
+    had_vhost = target.exists()
+    target.unlink(missing_ok=True)
+    done = [f"removed {target}" if had_vhost else "no vhost"]
+    if had_vhost:
+        done.append(reload_nginx(cfg))
+    done.append(_revoke(cfg, host))
+    return "; ".join(done)
 
 
 def reload_nginx(cfg: Config) -> str:
@@ -560,8 +677,6 @@ def relay_status(cfg: Config) -> str:
 # same functions (it loads this file), so the two can't disagree; the helper
 # runs them itself before issuing a certificate or writing a vhost.
 
-import ipaddress as _ip
-
 DEFAULT_RESOLVERS = ("1.1.1.1", "8.8.8.8")
 MAX_CUSTOM_DOMAIN_LEN = 200
 VERIFY_LABEL = "_rdf-verify"
@@ -801,6 +916,7 @@ COMMANDS = {
     "write-vhost": (write_vhost, (1, 1)),
     "remove-vhost": (remove_vhost, (1, 1)),
     "revoke-cert": (revoke_cert, (1, 1)),
+    "release-domain": (release_domain, (1, 1)),
     "reload-nginx": (reload_nginx, (0, 0)),
     "purge-relay-data": (purge_relay_data, (1, 1)),
     "relay-write-compose": (relay_write_compose, (2, 2)),
