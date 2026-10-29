@@ -181,3 +181,45 @@ def test_tenant_creation_has_exactly_two_callers():
             if isinstance(node, ast.Call) and getattr(node.func, "attr", getattr(node.func, "id", "")) == "create_tenant":
                 callers.append(f.relative_to(app_dir).as_posix() + " (direct)")
     assert sorted(callers) == ["billing.py", "console/tenant_pages.py"], callers
+
+
+def test_events_out_of_order_end_in_the_right_state(billing):
+    tid, sub = sign_up(billing)
+    fake = billing["fake"]
+    fake.sub(sub).update(status="active", trial_end=None)
+    newer = fake_stripe.event("customer.subscription.updated", {"id": sub, "status": "active"})
+    older = fake_stripe.event("customer.subscription.created", {"id": sub, "status": "trialing"})
+    for ev in (newer, older):                       # the older one arrives last
+        body, sig = fake_stripe.signed(ev)
+        _post(body, sig)
+    jobs.run_pending()
+    assert sql("SELECT status FROM tenants WHERE id = ?", tid)[0][0] == "active"
+    assert sql("SELECT status FROM billing_subscriptions WHERE tenant_id = ?", tid)[0][0] == "active"
+
+
+def test_every_checkout_session_goes_through_checkout_params():
+    """No card, no tenant: every Checkout Session is built by
+    signup.checkout_params (card always collected, a trial without a card
+    cancels); the two values are constants, not settings."""
+    import ast
+    from pathlib import Path
+    from app import signup
+    assert signup.PAYMENT_METHOD_COLLECTION == "always" and signup.MISSING_PAYMENT_METHOD == "cancel"
+    app_dir = Path(__file__).resolve().parents[1] / "app"
+    creates = []
+    for f in app_dir.rglob("*.py"):
+        tree = ast.parse(f.read_text())
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                     and n.func.attr == "create" and "checkout" in ast.unparse(n.func)]
+            for call in calls:
+                creates.append(f"{f.relative_to(app_dir)}:{fn.name}")
+                built = any(isinstance(n, ast.Call) and getattr(n.func, "attr", getattr(n.func, "id", "")) == "checkout_params"
+                            for n in ast.walk(fn))
+                assert built, f"{f.name}:{fn.name} creates a Checkout Session without checkout_params"
+    assert sorted(creates) == ["billing.py:resubscribe_url", "signup.py:create_checkout"], creates
+    literals = [n.value for f in app_dir.rglob("*.py") for n in ast.walk(ast.parse(f.read_text()))
+                if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value == "if_required"]
+    assert literals == []
