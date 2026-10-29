@@ -277,8 +277,11 @@ def create_checkout(conn, signup) -> str:
     client = stripe_api.client()
     customer = signup["stripe_customer_id"]
     if not customer:
-        cus = client.v1.customers.create({"email": signup["email"], "name": signup["company"],
-                                          "metadata": {"signup_id": str(signup["id"]), "slug": signup["slug"]}})
+        params = {"email": signup["email"], "name": signup["company"],
+                  "metadata": {"signup_id": str(signup["id"]), "slug": signup["slug"]}}
+        if settings.stripe_test_clock():
+            params["test_clock"] = settings.stripe_test_clock()      # test mode: fast-forwardable
+        cus = client.v1.customers.create(params)
         customer = cus.id
         _set(conn, signup["id"], stripe_customer_id=customer)
     base = f"https://{settings.public_site_host()}"

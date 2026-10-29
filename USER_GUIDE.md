@@ -599,6 +599,48 @@ signed in. Passwords work on your own domain as usual. To add a passkey in
 an older browser, add it on your original address (My Account there); it then
 works on both.
 
+## 16. Billing
+
+If you signed up on our website, your subscription is billed through Stripe
+and admins manage it under **Admin → Billing**. (Accounts your provider set up
+by hand show a simple page instead: your provider bills you directly.)
+
+- **What you see:** your plan and its prices, the status (free trial, active,
+  payment failed…), when the trial ends or the next invoice's date and
+  amount, how many technicians and devices you have against your plan's
+  limits, and your past invoices (each opens Stripe's invoice page).
+- **Manage billing** opens Stripe's secure billing portal: change your card,
+  download invoices, update your billing address or tax ID, or cancel. We
+  never see your card details.
+- **Change plan** switches to another plan at once; any difference is
+  prorated on your next invoice.
+- **What counts:** technicians are your users (invitations not yet accepted,
+  and your provider's support staff, don't count); devices are the devices
+  on your Devices page. Going over a plan's limits shows a notice; nothing is
+  blocked.
+
+**The trial.** 14 days, with a card on file; it converts to a paid
+subscription on its own when it ends, and we email you 3 days before. One
+trial per card: a card that has had a trial starts the next subscription
+right away.
+
+**If a payment fails** you'll see a notice and get an email; update your
+card under Manage billing. After 7 days unpaid the account is suspended:
+remote support and installer downloads stop, but admins can still sign in
+and pay under Admin → Billing, and the account reopens as soon as the
+payment goes through. Nothing is deleted.
+
+**If there's no card on file** (for example you removed it), you'll see a
+notice: without a card the subscription ends when the trial does, or fails
+at the next renewal.
+
+**Cancelling** (in the billing portal) takes effect at the end of the period
+you've paid for; until then everything works and a notice shows the date.
+After that the account is cancelled: remote support stops, and for 30 days
+admins can sign in to download their data from the export page, and
+**Resubscribe** there to bring everything back as it was (same relay, keys
+and devices; a card is required). After 30 days the data is deleted for good.
+
 ## Quick task index
 
 | I want to… | Go to |
@@ -610,6 +652,7 @@ works on both.
 | Push auto-update / lock settings | Client Groups → group → Client Settings |
 | Give a colleague access | Admin → Users → add user + role |
 | Use my own domain for the dashboard and links | Admin → Domains → Add a domain |
+| Change card, see invoices, cancel | Admin → Billing → Manage billing |
 | Limit what a role can do | Admin → Roles & permissions |
 | Set up off-site backups | Admin → Backup & Restore |
 | Restore the server | Admin → Backup & Restore → Restore |

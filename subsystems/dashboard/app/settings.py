@@ -197,6 +197,14 @@ def stripe_proration() -> str:
     return v
 
 
+def stripe_test_clock() -> str:
+    """STRIPE_TEST_CLOCK (test mode only): new sign-ups' Stripe customers are
+    created on this test clock, so their trials can be fast-forwarded. Ignored
+    with a live key."""
+    clock = _env("STRIPE_TEST_CLOCK")
+    return clock if clock.startswith("clock_") and "_test_" in stripe_secret_key() else ""
+
+
 def public_site_host() -> str:
     """The product page, pricing and sign-up: a provider host like the
     console (default www.<PROVIDER_DOMAIN>)."""

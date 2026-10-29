@@ -236,6 +236,54 @@ writing a vhost for a custom domain, and refuses domains that aren't a
 `api-server` from the `provider_subdomain` row (tenant #1: its host), never
 from the primary domain.
 
+## Billing
+
+Phase 2 (`app/billing.py`, `app/signup.py`, `app/billing_usage.py`,
+`app/plans.py`; Stripe setup in DEPLOYMENT.md). `tenants.billing_mode`:
+
+| Mode | Who | Lifecycle |
+|---|---|---|
+| `internal` | tenant #1 | never billed, never suspended for billing; billing code never touches it |
+| `manual` | made in the console (comped, or invoiced outside Stripe) | as before phase 2: the local trial timer and console actions |
+| `stripe` | signed up on the public site | Stripe drives it (below) |
+
+**Sign-up** (public host): the form stores a `signups` row (password hashed)
+and emails a single-use link (24 hours); only then is the Stripe customer and
+a Checkout Session created (card always collected, 14-day trial, a trial
+without a card cancels: `signup.checkout_params`, the one place sessions are
+built). `checkout.session.completed` (webhook) fetches the subscription and
+customer and requires an attached card as the default payment method, then
+the existing creation job makes the tenant; that job has exactly two
+callers, this flow and the console. One trial per card (`trial_cards`, never
+deleted). A failed creation keeps the subscription and can be retried from
+the console with the same slug.
+
+**Status mapping** (every webhook fetches the subscription from Stripe; a
+daily reconciliation catches anything missed):
+
+| Stripe subscription | Tenant |
+|---|---|
+| `trialing` | `trial`, ending at Stripe's `trial_end` |
+| `active` | `active` |
+| `past_due` | stays open with a banner; suspended after `PAST_DUE_SUSPEND_DAYS` |
+| `unpaid`, `paused` | `suspended` |
+| `incomplete` | nothing (sign-up not finished) |
+| `incomplete_expired` | the creation is undone |
+| `canceled` | `cancelled`: relay stopped, 30-day grace, export page, purge |
+| `cancel_at_period_end` | unchanged, with a banner |
+
+`tenants.billing_suspended` marks a suspension billing made: paying lifts it
+on the next sync, and the tenant's admins can still sign in and reach
+Billing while it lasts. A provider's suspension is never lifted by a
+payment. Resubscribing during the grace period (export page) reopens the
+tenant with the same relay, keys and devices. Console Cancel cancels the
+subscription (now or at period end); a purge needs it cancelled first.
+
+**Quantities**: billable technicians are the tenant's users; billable devices
+its non-hidden devices. Licensed quantities are pushed when they change (at
+most hourly) and daily; metered devices report each day's peak once, with
+an idempotency identifier per tenant per day.
+
 ## Passkeys on custom domains
 
 A passkey is bound to an RP ID (a domain). **A tenant's RP ID is always its

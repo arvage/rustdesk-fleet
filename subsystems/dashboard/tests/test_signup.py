@@ -252,3 +252,13 @@ def test_helper_accepts_the_public_host(tmp_path):
     assert H.check_web_host(c2, "example.org") == "example.org"
     with pytest.raises(H.HelperError):
         H.check_host(c2, PUBLIC)       # www.<domain> only by default
+
+
+def test_test_clock_only_in_test_mode(plan, emails, fake, monkeypatch):
+    monkeypatch.setenv("STRIPE_TEST_CLOCK", "clock_123")
+    _submit(plan)
+    new_client(PUBLIC).post("/signup/verify", data={"token": _link(emails)})
+    assert fake.requests("POST", "/v1/customers")[0]["test_clock"] == "clock_123"
+    from app import settings
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "rk_live_x")
+    assert settings.stripe_test_clock() == ""

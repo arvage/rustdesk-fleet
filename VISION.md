@@ -118,6 +118,24 @@ Provider console (phase 1b, built: see [`DEPLOYMENT.md`](DEPLOYMENT.md) §11):
   domains through WebAuthn related origins, with a sign-in handoff for older
   browsers.
 
+Provider billing (phase 2, built: see
+[`subsystems/dashboard/TENANCY.md`](subsystems/dashboard/TENANCY.md), "Billing",
+and [`DEPLOYMENT.md`](DEPLOYMENT.md)):
+
+- **Stripe** bills MSPs (provider billing only; MSPs billing their own clients
+  is phase 3). Card details only go to Stripe: **Checkout** for sign-up and
+  the **Customer Portal** for card, invoices and cancelling (PCI SAQ A).
+- **Plans are configuration**, not code: the console maps each plan to Stripe
+  Price IDs (flat, per technician, per device; included quantities as free
+  graduated tiers; metered devices through a Billing Meter), with soft limits.
+- **Open self-service sign-up** on the public site, email verified first,
+  **card required**, a **14-day trial** run by Stripe, one trial per card. No
+  card, no tenant, by any path.
+- **Stripe drives the lifecycle** of signed-up tenants through webhooks and a
+  daily reconciliation: trial, active, past due (suspended after 7 days),
+  unpaid, cancelled with the 30-day grace period and resubscribe. Tenant #1
+  is never billed; console-made tenants are billed outside Stripe (`manual`).
+
 - **Client PDF guides** ([`client-docs/`](client-docs/README.md)) are
   generated per tenant when the tenant is created (provider console), with
   the tenant's name. They do not include IT support contact details.

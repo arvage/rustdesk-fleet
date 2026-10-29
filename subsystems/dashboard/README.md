@@ -69,6 +69,11 @@ admins; every action lands in the provider audit log.
 | `GET /tenants/{id}` | Relay ports and key, domains, admins and pending invites, usage (devices, technicians, session hours this and last month, daily history), plan, lifecycle |
 | `POST /tenants/{id}/plan` · `/activate` · `/extend-trial` · `/suspend` · `/reactivate` · `/cancel` · `/extend-grace` · `/purge`, `POST /tenants/{id}/invites/{invite}/resend` | Plan and lifecycle actions (cancel and purge need the slug typed; not for tenant #1) |
 | `POST /tenants/{id}/support/open` | Open the tenant's dashboard as provider support (needs an active grant and a reason) |
+| `GET /billing` | Billing overview: MRR by plan and currency, trials ending this week, past due and unpaid, no card, over soft limits, failed sign-ups, webhook errors |
+| `GET /plans`, `/plans/new`, `/plans/{id}`, `POST /plans` · `/plans/{id}` · `/archive` · `/unarchive` | Billing plans mapped to Stripe Price IDs (checked with Stripe on save) |
+| `GET /signups`, `POST /signups/{id}/retry` | Self-service sign-ups; retry a failed creation (same slug and subscription) |
+| `GET /emails`, `/emails/{key}`, `/emails/{key}/preview`, `POST /emails/{key}` | Provider-level sign-up and billing emails |
+| `POST /tenants/{id}/billing-mode` · `/billing-sync` · `/coupon` | Billing mode, resync from Stripe, apply a coupon (extend-trial moves Stripe's trial_end for Stripe tenants) |
 | `GET /domains`, `POST /tenants/{id}/domains/{domain}/remove` | Custom domains needing attention (DNS broken, failed, certificate expiring within 14 days); remove a tenant's custom domain with a reason (logged, tenant emailed). The console never adds domains |
 | `GET /relays`, `POST /relays/{tenant}/start\|stop\|restart\|upgrade`, `POST /relays/upgrade-all` | Relay health, versions and operations (upgrade-all goes one relay at a time, stopping at the first failure) |
 | `GET /jobs`, `GET /jobs/{id}` (+ `.json`) | Background jobs and their live progress |
@@ -240,6 +245,13 @@ tenant's consent and only until the time the tenant chose (`app/support.py`,
 
 ## Routes
 
+**Public host** (`PUBLIC_SITE_HOST`, `app/public_site.py`; nothing else answers there): `GET /` product page with
+pricing · `GET /signin` (finds an account's address) · `GET /signup`, `GET /signup/slug-check`, `POST /signup` ·
+`GET /signup/verify` (a button; mail scanners can't spend the link), `POST /signup/verify` (→ Stripe Checkout) ·
+`GET /signup/{ref}/progress`, `/signup/{ref}/status`, `POST /signup/{ref}/checkout` · `POST /stripe/webhook`
+(signature-checked; the one Origin-check exemption phase 2 adds).
+
+
 Staff pages (all require login):
 
 | Route | Description |
@@ -262,6 +274,8 @@ Staff pages (all require login):
 | `GET /admin` | Admin landing: tool cards + fleet stats (any admin-area capability) |
 | `GET /admin/support`, `POST /admin/support/grant` · `/revoke` | Support access: status, history, grant, change, revoke (`manage_support_access`) |
 | `GET /support/enter?token=…`, `POST /support/end` | Provider support's way in (single-use token from the console) and End session |
+| `GET /admin/billing`, `POST /admin/billing/portal` · `/plan` | Billing (`manage_billing`; 404 for provider support): plan, status, next invoice, counts, invoices; the Stripe Customer Portal; change plan |
+| `POST /export/resubscribe` | A cancelled Stripe tenant subscribes again during the grace period (Checkout) |
 | `GET /admin/domains`, `POST /admin/domains` · `/{id}/check` · `/{id}/primary` · `/{id}/remove` | Custom domains: list with the DNS records to create, add, check now, make primary, remove (`manage_domains`; provider support may view). Checks and certificates run in a background worker (`app/domains.py`) |
 | `GET /.well-known/webauthn` | On the tenant's own host: its served custom domains as WebAuthn related origins |
 | `GET /login/handoff/start?to=…` · `/login/handoff/go` · `/login/handoff?token=…` | Passkey sign-in handoff for custom domains in browsers without related origins (single-use 60-second token; TENANCY.md) |

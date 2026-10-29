@@ -1131,6 +1131,189 @@ Verified on the live box on 2026-10-29 with a real domain: steps 1 to 4
 related origins, download link and guides on the custom domain, installer
 on the provider subdomain).
 
+### Provider billing and self-service sign-up (phase 2)
+
+MSPs sign up on the public site (`PUBLIC_SITE_HOST`, default
+`www.<PROVIDER_DOMAIN>`), start a 14-day trial with a card on file in Stripe
+Checkout, and are billed by Stripe, which drives their tenant's lifecycle
+(TENANCY.md, "Billing"). Card details only ever go to Stripe (Checkout and
+the Customer Portal), which keeps us in PCI SAQ A. Tenant #1 is `internal`:
+never billed. Tenants made in the console are `manual`, as before.
+
+**Stripe dashboard setup** (do it in test mode first; repeat in live mode
+later):
+
+1. **Products and prices.** Create a product per plan or one product with
+   several prices, as you like. For each plan create up to three recurring
+   prices, all in one currency and on one interval:
+   - a flat price (per unit, quantity 1);
+   - a per-technician price (licensed, per unit);
+   - a per-device price: licensed per unit, or usage-based backed by a
+     **Billing Meter** (Billing → Meters: event name e.g. `rdf_devices`,
+     customer mapping by id on `stripe_customer_id`, value key `value`,
+     aggregation `sum` to bill device-days, or `last` for the period's last
+     daily peak; we send one event per tenant per day with that day's peak).
+   - To include some technicians or devices, make the price **graduated
+     tiered** with a free first tier (e.g. up to 2 at $0, then $5 each).
+   Then in the console: Billing → Plans → New plan, paste the Price IDs,
+   tick Public. The console checks each price with Stripe.
+2. **Payment methods.** Settings → Payments → Payment methods: turn on
+   **Cards** only for the configuration Checkout uses. A sign-up whose
+   default payment method isn't a card is refused (no card, no tenant), so
+   leaving wallets like Link on only produces failed sign-ups.
+3. **Customer Portal.** Nothing to click: the dashboard creates and updates
+   its portal configuration through the API (card updates, invoices,
+   billing details, cancel at period end; plan switching only when every
+   public plan is a single price, otherwise plans are changed on the
+   tenant's Billing page). Set your public business name and branding under
+   Settings → Business, which the portal shows.
+4. **Webhook endpoint.** Developers → Webhooks → Add endpoint:
+   `https://www.rds.example.com/stripe/webhook`, API version
+   `2026-09-30.endive`, events:
+   `checkout.session.completed`, `customer.subscription.created`,
+   `customer.subscription.updated`, `customer.subscription.deleted`,
+   `customer.subscription.trial_will_end`, `customer.subscription.paused`,
+   `customer.subscription.resumed`, `invoice.paid`,
+   `invoice.payment_failed`, `invoice.payment_action_required`,
+   `customer.updated`, `payment_method.attached`,
+   `payment_method.detached`. Copy its signing secret into
+   `STRIPE_WEBHOOK_SECRET`.
+5. **Restricted key.** Developers → API keys → Create restricted key
+   (`rk_test_…`), with only:
+
+   | Resource | Permission |
+   |---|---|
+   | Customers | Write |
+   | Checkout Sessions | Write |
+   | Subscriptions | Write |
+   | Invoices | Write (the invoice preview is a POST) |
+   | Payment Methods | Read |
+   | Prices | Read |
+   | Billing Meters | Read |
+   | Meter Events | Write |
+   | Customer portal (billing portal configurations and sessions) | Write |
+
+   Everything else stays None. Put it in `STRIPE_SECRET_KEY`. If a call is
+   refused, the key's request log in Stripe names the missing permission.
+6. **Emails.** Settings → Billing → Subscriptions and emails / Customer
+   emails: turn **off** Stripe's trial-ending reminders and its emails about
+   failed payments and expiring cards (we send our own: the console's
+   Emails page). Leave **on** successful payment receipts and finalized
+   invoices: Stripe still sends those.
+7. **Tax.** `STRIPE_TAX=on` turns on Stripe Tax for sign-up and invoices
+   once it's set up in Stripe (Settings → Tax). Off by default.
+
+**Settings** (`/etc/rustdesk-fleet/dashboard.env`):
+
+| Setting | Default | What |
+|---|---|---|
+| `STRIPE_SECRET_KEY` | none | The restricted key. Without it (or the webhook secret) billing is off, sign-up is closed and the console says so; everything else works. `rk_test_…` is test mode, `rk_live_…` live. |
+| `STRIPE_WEBHOOK_SECRET` | none | The webhook endpoint's signing secret (`whsec_…`). |
+| `STRIPE_API_VERSION` | `2026-09-30.endive` | The pinned API version (`stripe==16.0.1` in install.sh). Change only together with the library. |
+| `STRIPE_TAX` | off | `on`: Stripe Tax. |
+| `STRIPE_PRORATION` | `create_prorations` | How quantity and plan changes are prorated (`none`, `always_invoice`). |
+| `PUBLIC_SITE_HOST` | `www.<PROVIDER_DOMAIN>` | The public site. |
+| `TERMS_URL`, `PRIVACY_URL` | none | Linked from sign-up (acceptance is stored with the URLs, time and IP) and the portal. |
+| `SIGNUP_IP_LIMIT` | 5 | Sign-up form submissions per IP per hour. |
+| `SIGNUP_EMAIL_LIMIT` | 3 | Per email address per day. |
+| `SIGNUPS_PER_DAY` | 20 | Self-service tenants created per day in all. |
+| `SIGNUP_MIN_FREE_BLOCKS` | 5 | Sign-up closes while fewer relay port blocks are free. |
+| `PAST_DUE_SUSPEND_DAYS` | 7 | A past-due Stripe tenant is suspended after this many days. |
+| `STRIPE_TEST_CLOCK` | none | Test mode only: new sign-ups' customers are created on this Stripe test clock, so trials and renewals can be fast-forwarded. Remove after testing. |
+
+**Test mode vs live mode.** The key's prefix decides; the console shows
+"test mode" on its Billing and Plans pages. Test and live have separate
+prices, webhook endpoints, secrets and portal configurations: after
+switching to live, recreate the plans with live Price IDs (the console
+stores Price IDs, which differ between modes) and set the live webhook
+secret.
+
+**Public host.** `www.<PROVIDER_DOMAIN>` is covered by the wildcard DNS
+record; `install.sh --provider-only` issues its certificate and writes its
+vhost like the console's. A different `PUBLIC_SITE_HOST` needs its own DNS
+record pointing here.
+
+### Upgrading the live box to phase 2 (Stripe test mode)
+
+What changes, and what to expect:
+
+- **Pacific MIT notices only that signed-out `/` on its host goes to
+  `/login`** (the product page moved to the public host). Tenant #1 is
+  `internal`; existing console-made tenants become `manual` and keep the
+  local trial timer.
+- New tables and columns are added on startup (`billing_mode`, plans,
+  billing, sign-ups); nothing is removed.
+- **Test mode only**: put `rk_test_…` and the test webhook secret on the
+  box, never live keys, until the test-mode checklist below passes and the
+  legal pages exist.
+
+Steps:
+
+1. Back up: `sudo python3 ~/rustdesk-fleet/subsystems/single-tenant/backup.py run`,
+   and a plain database copy to `~/fleet-pre-2.sqlite3`.
+2. Note tenant #1's container start times (`sudo docker inspect hbbs hbbr
+   --format '{{.Name}} {{.State.StartedAt}}'`).
+3. Stripe (test mode): steps 1 to 6 above; the webhook endpoint is
+   `https://www.<PROVIDER_DOMAIN>/stripe/webhook`.
+4. Add to `/etc/rustdesk-fleet/dashboard.env`: `STRIPE_SECRET_KEY=rk_test_…`,
+   `STRIPE_WEBHOOK_SECRET=whsec_…`, and, when you have them, `TERMS_URL`,
+   `PRIVACY_URL`.
+5. Merge the branch in `~/rustdesk-fleet`, then
+   `./install.sh --provider-only --provider-domain rds.example.com --yes`. It
+   installs `stripe==16.0.1`, issues the public host's certificate, writes
+   its vhost, reloads nginx (`nginx -t`, no new `[emerg]`) and restarts the
+   dashboard.
+6. Check: tenant #1's site and the console load (passkey sign-in on both);
+   signed-out `/` on tenant #1 goes to `/login`; container start times
+   unchanged; `https://www.<PROVIDER_DOMAIN>/` shows the product page;
+   console → Billing says test mode and no errors; create a plan.
+7. Run the test-mode checklist below.
+
+### Stripe test-mode checklist
+
+With the box in test mode and at least one public plan:
+
+1. **Sign up.** On `https://www.<PROVIDER_DOMAIN>/signup`, sign up with an
+   address you can read. The email arrives; its link shows a button;
+   Checkout opens with a 14-day trial. Pay with `4242 4242 4242 4242`, any
+   future date, any CVC. The progress page turns into "Your account is
+   ready" within a minute or two; sign in with the password you chose. The
+   console shows the tenant as `stripe`, `trialing`, with its customer and
+   subscription.
+2. **Trial converts.** Stripe only puts a customer on a **test clock** when
+   the customer is created, so: Billing → Test clocks → create a clock, put
+   its id in `STRIPE_TEST_CLOCK=clock_…` (honoured with a test key only),
+   restart the dashboard and sign up a new account (steps 3 to 7 use it).
+   Advance the clock 11 days: the "trial ends in 3 days" email arrives
+   (`trial_will_end`). Advance past 14 days: the subscription turns
+   `active`, an invoice is paid, and the tenant becomes `active`.
+3. **Payment fails.** Change the card in the portal (Admin → Billing →
+   Manage billing) to `4000 0000 0000 0341` (attaches, then declines),
+   advance the clock past the renewal. The subscription goes `past_due`, the
+   tenant stays open with a banner and the admins get "Payment failed".
+   Advance the clock `PAST_DUE_SUSPEND_DAYS` (7) more days; the daily
+   reconciliation (or console → tenant → Resync now) suspends the tenant.
+   Its admins can still sign in and reach Billing.
+4. **Pay to reactivate.** Put `4242…` back in the portal and pay the open
+   invoice (from the invoice link). The tenant reopens by itself and the
+   admins get "active again".
+5. **Cancel and the grace period.** Cancel in the portal (at period end):
+   the banner shows when it ends; advance the clock past it. The tenant is
+   cancelled: relay stopped, export page only, "cancelled" email with the
+   deletion date.
+6. **Resubscribe during grace.** On the export page, Resubscribe → Checkout
+   (no trial, card required) → pay. The tenant reopens with the same relay
+   address, ports, key and devices.
+7. **One trial per card.** Sign up a second account with the same card
+   number: Checkout still shows a trial, but right after payment the trial
+   is ended (the welcome page says so) and the first invoice is charged.
+8. **Webhooks locally.** `stripe listen --forward-to
+   https://www.<PROVIDER_DOMAIN>/stripe/webhook` (use the `whsec_…` it
+   prints as `STRIPE_WEBHOOK_SECRET` while it runs) shows each event and our
+   2xx; `stripe trigger customer.subscription.updated` etc. Replays are
+   acknowledged and ignored. Console → Billing lists webhook errors, if any.
+
+
 ## Verify everything
 
 ```bash
