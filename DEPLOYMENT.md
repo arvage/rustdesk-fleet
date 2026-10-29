@@ -1085,6 +1085,52 @@ Steps:
    certificate, and `curl -sI -H 'Host: nothing.example' http://127.0.0.1/`
    gets an empty reply.
 
+### End-to-end checklist: custom domains (after deploy)
+
+With a test tenant from the console (admin: an address you can read) and a
+domain you control, `rds.abc.example` below:
+
+1. **CNAME path.** In the test tenant: Admin → Domains → add
+   `rds.abc.example`. At the DNS host, create the CNAME the page shows
+   (`rds.abc.example CNAME <slug>.rds.example.com`; DNS only at Cloudflare).
+   Press **Check now**: within a minute the status goes Getting a
+   certificate… → **Active**, the admins get "is live", and
+   `https://rds.abc.example/login` loads with its own certificate
+   (`openssl s_client -servername rds.abc.example -connect <box>:443`).
+   `http://rds.abc.example/` redirects to HTTPS.
+2. **Related origins.** `https://<slug>.rds.example.com/.well-known/webauthn`
+   lists `https://rds.abc.example`; the same path on the custom domain is
+   404.
+3. **Passkeys.** Add a passkey on the provider subdomain (My Account), then
+   sign in with it on the custom domain in a current browser: it works
+   directly (the audit log shows `passkey_login`; `login_handoffs` stays
+   empty). In a browser without Related Origin Requests, the passkey step
+   sends you to the provider subdomain and back, signed in.
+4. **Primary.** Make the custom domain primary. New download links and
+   invitations use it, the client guides are rebuilt with it, and the
+   group's installer still says `api-server = https://<slug>.rds.example.com`
+   (never the custom domain).
+5. **A + TXT path.** Add a second domain (a bare `abc.example` is the usual
+   case) with the A record (`PUBLIC_IPV4`) and the `_rdf-verify` TXT record
+   from the page. With only the A record, the page says the TXT record is
+   missing; with both, it becomes Active, and the console's tenant page shows
+   the method as "A + TXT".
+6. **Broken DNS.** Point a domain's record elsewhere. At the next daily
+   check it shows **DNS broken** (the admins are emailed) and keeps working;
+   after 7 days it is released and the provider subdomain becomes primary
+   again. Put the record back before then and it returns to Active.
+7. **Removal.** Remove a domain (tenant: Admin → Domains; or console: tenant
+   page, with a reason). It stops answering at once, its vhost and
+   certificate go (`/etc/nginx/rdf-tenants/`, `/etc/letsencrypt/live/`),
+   and the provider subdomain becomes primary again if it was.
+8. **Clean up.** Cancel and purge the test tenant: purge releases its custom
+   domains with everything else. Then delete the DNS records.
+
+Verified on the live box on 2026-10-29 with a real domain: steps 1 to 4
+(CNAME path active about a minute after Check now, passkey direct through
+related origins, download link and guides on the custom domain, installer
+on the provider subdomain).
+
 ## Verify everything
 
 ```bash
