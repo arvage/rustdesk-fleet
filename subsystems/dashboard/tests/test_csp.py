@@ -31,7 +31,7 @@ def test_html_gets_a_report_only_policy_with_a_fresh_nonce():
         assert set(re.findall(r'<script[^>]*nonce="([^"]+)"', r.text)) == {nonce}
         nonces.append(nonce)
         for part in ("default-src 'self'", "object-src 'none'", "base-uri 'none'", "frame-ancestors 'none'",
-                     "form-action 'self'", "img-src 'self' data:", "report-uri /csp-report"):
+                     "form-action 'self' https://checkout.stripe.com https://billing.stripe.com", "img-src 'self' data:", "report-uri /csp-report"):
             assert part in policy, part
     assert nonces[0] != nonces[1]
 

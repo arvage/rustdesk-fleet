@@ -50,9 +50,12 @@ CSP_REPORTS_PER_MINUTE = 30     # per client IP
 # nonce="{{ request.state.csp_nonce }}" and there are no inline handlers
 # (static/app.js wires data- attributes instead). style-src keeps
 # 'unsafe-inline' for now because templates use style= attributes heavily.
+# form-action also covers where a form post redirects to: sign-up, Manage
+# billing and Resubscribe post to us and we redirect to Stripe.
+STRIPE_FORM_TARGETS = "https://checkout.stripe.com https://billing.stripe.com"
 _CSP = ("default-src 'self'; script-src 'self' 'nonce-{nonce}'; style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; "
-        "form-action 'self'; frame-ancestors 'none'; report-uri " + CSP_REPORT_PATH)
+        "form-action 'self' " + STRIPE_FORM_TARGETS + "; frame-ancestors 'none'; report-uri " + CSP_REPORT_PATH)
 
 
 def csp_header(nonce: str) -> tuple[bytes, bytes]:
