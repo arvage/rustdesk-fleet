@@ -130,7 +130,9 @@ def slug_error(conn, slug: str, ignore_signup: int | None = None) -> str | None:
         return f"“{slug}” is taken (slugs of removed tenants stay reserved)."
     if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'signups'").fetchone() and conn.execute(
             "SELECT 1 FROM signups WHERE slug = ? AND id IS NOT ?"
-            " AND status IN ('pending_verification', 'checkout', 'creating', 'failed')", (slug, ignore_signup)).fetchone():
+            " AND status IN ('pending_verification', 'checkout', 'creating', 'failed')"
+            " AND NOT (status = 'failed' AND failure_reason IS 'no payment method')",   # refused: no tenant coming
+            (slug, ignore_signup)).fetchone():
         return f"“{slug}” is held by a sign-up in progress."
     return None
 

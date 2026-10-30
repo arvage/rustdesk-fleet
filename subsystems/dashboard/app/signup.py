@@ -43,7 +43,9 @@ UNVERIFIED_TTL = timedelta(hours=48)
 
 # pending_verification -> checkout -> creating -> created; failed; cancelled
 STATUSES = ("pending_verification", "checkout", "creating", "created", "failed", "cancelled")
-OPEN_STATUSES = ("pending_verification", "checkout", "creating", "failed")   # hold their slug
+OPEN_STATUSES = ("pending_verification", "checkout", "creating", "failed")   # hold their slug...
+NO_CARD = "no payment method"     # ...except a sign-up refused for paying without a card
+
 
 SCHEMA = """
     CREATE TABLE IF NOT EXISTS signups (
@@ -272,6 +274,14 @@ def checkout_params(customer_id: str, plan_id: int, *, success_url: str, cancel_
 def create_checkout(conn, signup) -> str:
     """Stripe customer (once) and a Checkout Session for a verified sign-up.
     Returns the URL to send the browser to."""
+    if signup["status"] == "failed" and signup["failure_reason"] == NO_CARD:
+        # Refused for paying without a card (e.g. with Link): try again with a
+        # card, for the same customer, if the address is still free.
+        problem = slug_problem(conn, signup["slug"], ignore_signup=signup["id"])
+        if problem:
+            raise SignupError(problem + " Please sign up again with another address.")
+        _set(conn, signup["id"], status="checkout", failure_reason=None, stripe_subscription_id=None)
+        signup = get(conn, signup["id"])
     if signup["status"] != "checkout":
         raise SignupError("This sign-up isn't waiting for payment details.")
     client = stripe_api.client()

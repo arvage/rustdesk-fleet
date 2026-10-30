@@ -7,6 +7,13 @@
 <form method="post" action="/signup/{{ ref }}/checkout" data-busy="Opening the payment page…">
   <button type="submit" class="btn btn-primary">Enter payment details</button>
 </form>
+{% elif state.no_card %}
+<h2>We need a card</h2>
+<p>Your payment details couldn't be used: the trial needs a debit or credit card entered directly, not a wallet such
+  as Link. Nothing was charged.</p>
+<form method="post" action="/signup/{{ ref }}/checkout" data-busy="Opening the payment page…">
+  <button type="submit" class="btn btn-primary">Enter a card</button>
+</form>
 {% else %}
 <h2 id="title">{% if state.status == 'created' %}Your account is ready{% elif state.status == 'failed' %}We're on it{% else %}Setting up your account…{% endif %}</h2>
 <p id="text">

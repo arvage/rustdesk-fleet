@@ -223,3 +223,43 @@ def test_every_checkout_session_goes_through_checkout_params():
     literals = [n.value for f in app_dir.rglob("*.py") for n in ast.walk(ast.parse(f.read_text()))
                 if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value == "if_required"]
     assert literals == []
+
+
+def test_paying_with_link_tells_the_customer_and_lets_them_retry_with_a_card(billing):
+    """What happened on the live box: Checkout paid with Link (type 'link'),
+    which has no card fingerprint, so no tenant. The page must say what to do,
+    the slug must not stay held, and the same sign-up can try again."""
+    row = start_signup(billing)
+    fake = billing["fake"]
+    sub = fake.complete_checkout(row["stripe_checkout_id"], card=False)
+    fake.sub(sub)["default_payment_method"] = fake.add_card(row["stripe_customer_id"], kind="link", default=False)
+    deliver("checkout.session.completed", {"id": row["stripe_checkout_id"]})
+    su = sql("SELECT * FROM signups WHERE id = ?", row["id"])[0]
+    assert su["status"] == "failed" and su["failure_reason"] == "no payment method"
+    page = new_client(PUBLIC).get(f"/signup/{row['ref']}/progress").text
+    assert "We need a card" in page and "We're on it" not in page and "Link" in page
+    assert new_client(PUBLIC).get(f"/signup/{row['ref']}/status").json()["no_card"] is True
+    # The slug is free again (the sign-up isn't going anywhere by itself)...
+    from app import signup
+    from app.deps import get_db
+    conn = get_db()
+    assert signup.slug_problem(conn, "abc") is None
+    conn.close()
+    # ...and "Enter a card" reopens the same sign-up with a new Checkout for the same customer.
+    r = new_client(PUBLIC).post(f"/signup/{row['ref']}/checkout", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("https://checkout.stripe.example/")
+    sessions = fake.requests("POST", "/v1/checkout/sessions")
+    assert len(sessions) == 2 and sessions[1]["customer"] == sessions[0]["customer"]
+    assert sessions[1]["payment_method_collection"] == "always"
+    su = sql("SELECT * FROM signups WHERE id = ?", row["id"])[0]
+    assert su["status"] == "checkout" and su["stripe_subscription_id"] is None
+    finish_checkout(billing, sql("SELECT * FROM signups WHERE id = ?", row["id"])[0])
+    assert sql("SELECT status FROM signups WHERE id = ?", row["id"])[0][0] == "created"
+
+
+def test_retry_with_a_card_refuses_a_slug_taken_meanwhile(billing):
+    row = start_signup(billing)
+    finish_checkout(billing, row, card=False)
+    other = start_signup(billing, slug="abc", email="b@other.example", ip="198.51.100.40")
+    r = new_client(PUBLIC).post(f"/signup/{row['ref']}/checkout")
+    assert r.status_code == 400 and "taken" in r.text

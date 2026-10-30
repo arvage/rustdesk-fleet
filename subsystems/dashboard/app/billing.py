@@ -183,11 +183,11 @@ def checkout_completed(session_id: str) -> None:
     sub_id = session.get("subscription")
     sub_id = sub_id if isinstance(sub_id, str) else (sub_id or {}).get("id")
     if not sub_id:
-        return _no_card(row, None, "the checkout finished without a subscription")
+        return _no_card(row, None, signup.NO_CARD)
     sub = stripe_api.plain(client.v1.subscriptions.retrieve(sub_id, {"expand": ["default_payment_method"]}))
     card = default_card(client, sub)
     if card is None:
-        return _no_card(row, sub_id, "no payment method")
+        return _no_card(row, sub_id, signup.NO_CARD)
     # One trial per card: a fingerprint seen before ends this trial at once.
     fingerprint = (card.get("card") or {}).get("fingerprint") or ""
     conn = get_db()
@@ -228,8 +228,10 @@ def _no_card(row, sub_id: str | None, reason: str) -> None:
         except Exception as e:
             log.warning("cancelling %s failed: %s", sub_id, e)
     _alert(f"Sign-up {row['slug']} stopped: {reason}",
-           [f"The checkout for {row['company']} ({row['email']}) completed without a card on file, so no tenant "
-            f"was created and the subscription {sub_id or '(none)'} was cancelled."])
+           [f"The checkout for {row['company']} ({row['email']}) completed without a card on file (for example "
+            f"paid with Link or another wallet), so no tenant was created and the subscription {sub_id or '(none)'} "
+            "was cancelled. Nothing was charged. They can try again with a card from the progress page; no action "
+            "is needed unless they ask for help."])
 
 
 def _alert(subject: str, lines: list[str]) -> None:

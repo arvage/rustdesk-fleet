@@ -179,6 +179,7 @@ def _state(row) -> dict:
         host = r[0] if r else ""
     conn.close()
     return {"status": row["status"], "host": host, "trial_denied": bool(row["trial_denied"]),
+            "no_card": row["status"] == "failed" and row["failure_reason"] == signup.NO_CARD,
             "login": f"https://{host}/login" if host else ""}
 
 

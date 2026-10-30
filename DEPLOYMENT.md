@@ -1158,9 +1158,13 @@ later):
    Then in the console: Billing → Plans → New plan, paste the Price IDs,
    tick Public. The console checks each price with Stripe.
 2. **Payment methods.** Settings → Payments → Payment methods: turn on
-   **Cards** only for the configuration Checkout uses. A sign-up whose
-   default payment method isn't a card is refused (no card, no tenant), so
-   leaving wallets like Link on only produces failed sign-ups.
+   **Cards** only for the configuration Checkout uses, and turn **Link**
+   off. Do it in test mode **and** in live mode: each mode has its own
+   settings. A sign-up that pays with anything but a card entered directly
+   (Link has no card fingerprint, so one trial per card couldn't hold) is
+   refused: no tenant, the subscription is cancelled, nothing is charged,
+   and the progress page asks for a card ("Enter a card" reopens the same
+   sign-up). Apple Pay and Google Pay arrive as cards and are fine.
 3. **Customer Portal.** Nothing to click: the dashboard creates and updates
    its portal configuration through the API (card updates, invoices,
    billing details, cancel at period end; plan switching only when every
