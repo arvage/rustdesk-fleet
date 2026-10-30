@@ -35,6 +35,16 @@ def test_trial_will_end_emails_once(billing):
     assert sum(e[1] == et.PROVIDER_TEMPLATES["trial_ending"]["subject"] for e in b["emails"]) == 1
 
 
+def test_trial_will_end_after_the_trial_was_ended_sends_nothing(billing):
+    """One trial per card ends the trial at once; Stripe still sends trial_will_end."""
+    b = billing
+    tid, sub = sign_up(b)
+    from billing_helpers import deliver
+    b["fake"].sub(sub).update(status="active")
+    deliver("customer.subscription.trial_will_end", {"id": sub})
+    assert not any(e[1] == et.PROVIDER_TEMPLATES["trial_ending"]["subject"] for e in b["emails"])
+
+
 def test_editing_in_the_console(billing):
     c = provider_client()
     assert "Sign-up: confirm your email" in c.get("/emails").text

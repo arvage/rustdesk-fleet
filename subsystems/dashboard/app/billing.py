@@ -120,7 +120,10 @@ def process(etype: str, object_id: str, customer: str) -> None:
     if etype == "checkout.session.completed":
         checkout_completed(object_id)
     elif etype in SUBSCRIPTION_EVENTS:
-        if sync_subscription(object_id) is not None and etype == "customer.subscription.trial_will_end":
+        sub = sync_subscription(object_id)
+        # Stripe also sends trial_will_end when a trial is ended at once (one
+        # trial per card): only a trial still running gets the email.
+        if sub is not None and etype == "customer.subscription.trial_will_end" and sub["status"] == "trialing":
             _trial_ending(object_id)
     elif etype in INVOICE_EVENTS:
         invoice = stripe_api.plain(stripe_api.client().v1.invoices.retrieve(object_id))
