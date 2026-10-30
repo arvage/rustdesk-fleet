@@ -367,6 +367,13 @@ def _clock_now(client, clock) -> datetime | None:
     return datetime.fromtimestamp(int(frozen), timezone.utc)
 
 
+def _cancel_scheduled(sub: dict) -> bool:
+    """The portal schedules a cancellation with cancel_at (a date) rather than
+    cancel_at_period_end; either way the subscription is ending. Stored as
+    cancel_at_period_end, which the banners and pages read."""
+    return bool(sub.get("cancel_at_period_end") or (sub.get("cancel_at") and sub.get("status") != "canceled"))
+
+
 class _Synced(dict):
     _changed: str | None = None
 
@@ -392,7 +399,7 @@ def sync_subscription(sub_id: str, at: datetime | None = None, quiet: bool = Fal
     conn.execute("""UPDATE billing_subscriptions SET status = ?, current_period_end = ?, cancel_at_period_end = ?,
                         cancel_at = ?, trial_end = ?, has_card = ?, mrr = ?, currency = ?, discount = ?,
                         last_synced_at = datetime('now'), updated_at = datetime('now') WHERE tenant_id = ?""",
-                 (sub["status"], _period_end(sub), 1 if sub.get("cancel_at_period_end") else 0, _ts(sub.get("cancel_at")),
+                 (sub["status"], _period_end(sub), 1 if _cancel_scheduled(sub) else 0, _ts(sub.get("cancel_at")),
                   _ts(sub.get("trial_end")), 1 if has_card else 0, amount, currency, discount or None, row["tenant_id"]))
     conn.commit()
     conn.close()
@@ -767,13 +774,17 @@ def overview(tenant_id: int) -> dict:
     conn.close()
     if not (bs and cus):
         return out
+    import stripe
     try:
         client = stripe_api.client()
         if bs["status"] in ("trialing", "active", "past_due") and not bs["cancel_at_period_end"]:
-            prev = stripe_api.plain(client.v1.invoices.create_preview(
-                {"customer": cus[0], "subscription": bs["stripe_subscription_id"]}))
-            out["upcoming"] = {"amount": prev.get("amount_due"), "currency": prev.get("currency"),
-                               "date": _ts(prev.get("next_payment_attempt") or prev.get("period_end"))}
+            try:
+                prev = stripe_api.plain(client.v1.invoices.create_preview(
+                    {"customer": cus[0], "subscription": bs["stripe_subscription_id"]}))
+                out["upcoming"] = {"amount": prev.get("amount_due"), "currency": prev.get("currency"),
+                                   "date": _ts(prev.get("next_payment_attempt") or prev.get("period_end"))}
+            except stripe.InvalidRequestError:
+                pass        # no next invoice (e.g. a cancellation not synced yet): nothing to preview
         inv = stripe_api.plain(client.v1.invoices.list({"customer": cus[0], "limit": 12}))
         out["invoices"] = [{"number": i.get("number") or i["id"], "created": _ts(i.get("created")),
                             "amount": i.get("amount_paid") or i.get("amount_due"), "currency": i.get("currency"),

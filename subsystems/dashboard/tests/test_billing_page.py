@@ -134,6 +134,22 @@ def test_banners(tenant):
     assert "no card on file" not in signed_in_at(tech, "abc.rds.example.com").get("/devices").text
 
 
+def test_portal_cancellation_with_a_date(tenant):
+    """The portal cancels with cancel_at, not cancel_at_period_end: the page
+    shows the end date and no next invoice, without a Stripe error."""
+    b, tid, sub = tenant
+    ends = datetime.now(timezone.utc) + timedelta(days=20)
+    b["fake"].sub(sub).update(status="active", trial_end=None, cancel_at=int(ends.timestamp()))
+    deliver("customer.subscription.updated", {"id": sub})
+    c = _login(tid)
+    assert "Your subscription ends on" in c.get("/devices").text
+    page = c.get("/admin/billing").text
+    assert "couldn't be reached" not in page and "ends " in page
+    # Before the webhook lands the page still loads.
+    sql("UPDATE billing_subscriptions SET cancel_at_period_end = 0 WHERE tenant_id = ?", tid)
+    assert "couldn't be reached" not in c.get("/admin/billing").text
+
+
 def test_suspended_for_billing_admins_reach_the_billing_page(tenant):
     b, tid, sub = tenant
     set_status(b, sub, "unpaid")

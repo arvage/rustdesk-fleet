@@ -305,6 +305,8 @@ class FakeStripe(HTTPClient):
         if seg[0] == "invoices":
             if seg[-1] == "create_preview":
                 sub = self.subscriptions.get(p.get("subscription", ""))
+                if sub and (sub.get("cancel_at") or sub.get("cancel_at_period_end")):
+                    raise ValueError(f"No upcoming invoices for customer: {p.get('customer')}")
                 total = sum((i["price"].get("unit_amount") or 0) * i.get("quantity", 0)
                             for i in (sub["items"]["data"] if sub else []))
                 return {"object": "invoice", "amount_due": total, "total": total, "currency": "usd",
