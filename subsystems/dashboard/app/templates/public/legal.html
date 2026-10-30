@@ -4,13 +4,16 @@
 {% block card_width %}760px{% endblock %}
 {% block head %}
 <style>
-  .legal { font-size: 15px; line-height: 1.65; color: var(--text-1); }
-  .legal h2 { font-size: 18px; margin: 28px 0 8px; }
-  .legal h3 { font-size: 15px; margin: 20px 0 6px; }
-  .legal p, .legal ul, .legal ol { margin: 0 0 12px; }
+  .legal { line-height: 1.65; }
+  .legal h2 { font-size: 18px; margin: 28px 0 8px; color: var(--text-1); }
+  .legal h3 { font-size: 15px; margin: 20px 0 6px; color: var(--text-1); }
+  .login-card .legal p, .legal li { font-size: 14px; color: var(--text-2); }
+  .login-card .legal p, .legal ul, .legal ol { margin: 0 0 12px; }
   .legal ul, .legal ol { padding-left: 22px; }
   .legal li { margin: 4px 0; }
-  .legal a { overflow-wrap: anywhere; }
+  .legal li ul { margin: 6px 0 0; }
+  .legal strong { color: var(--text-1); }
+  .legal a, .legal-nav a { color: var(--accent); overflow-wrap: anywhere; }
   .legal-meta { color: var(--text-3); font-size: 13px; margin: 4px 0 20px; }
   .legal-nav { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 28px; padding-top: 16px;
                border-top: 1px solid var(--border); font-size: 14px; }
