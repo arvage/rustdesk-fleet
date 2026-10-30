@@ -41,8 +41,10 @@ def _message(request: Request, title: str, body: str, status: int = 200, **extra
 
 
 def _offer(conn) -> dict:
+    from datetime import date
     return {"plans": plans.public_plans(conn) if stripe_api.enabled() else [],
-            "signup_open": signup.closed_reason(conn) is None, "trial_days": signup.TRIAL_DAYS}
+            "signup_open": signup.closed_reason(conn) is None, "trial_days": signup.TRIAL_DAYS,
+            "terms_url": settings.terms_url(), "privacy_url": settings.privacy_url(), "year": date.today().year}
 
 
 @public_app.get("/", response_class=HTMLResponse)

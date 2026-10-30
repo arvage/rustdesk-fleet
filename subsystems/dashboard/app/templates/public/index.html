@@ -3,31 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="RustDesk Fleet: a self-hosted RustDesk relay and management dashboard for MSPs and IT teams. One install script.">
-<title>RustDesk Fleet</title>
+<meta name="description" content="Hosted remote support for MSPs: your own RustDesk relay and a management dashboard, branded installers per customer, every session audited. {{ trial_days }}-day free trial.">
+<title>RustDesk Fleet — Hosted remote support for MSPs</title>
 <link rel="stylesheet" href="/static/site-fonts.css?v=1">
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <style>
-/* Layout: operator's console. Wide expanded headline left, a live-looking device panel right;
-   below, a relay diagram and plain-spoken spec sheet. One bold move: the expanded display type. */
+/* The public product page (phase 2). Self-contained: tokens, light and dark,
+   inline SVG icons (Lucide-style strokes), no scripts beyond the CSP rules. */
 :root {
-  --bg: #F1F3F7;
+  --bg: #F5F7FB;
+  --bg-2: #EEF1F8;
   --surface: #FFFFFF;
   --ink: #0F1A2B;
   --muted: #586579;
-  --line: #D6DCE6;
+  --line: #DDE3EC;
   --accent: #2742E0;
+  --accent-2: #5468F0;
   --accent-ink: #FFFFFF;
-  --accent-soft: #E3E8FF;
+  --accent-soft: #E6EAFF;
   --ok: #1D8452;
   --ok-soft: #DDF3E7;
   --busy: #A8680F;
   --busy-soft: #FBEBD2;
   --off: #8A95A6;
-  --term-bg: #0F1A2B;
-  --term-fg: #D9E1EE;
-  --term-dim: #7F8DA3;
-  --term-hi: #9DB0FF;
+  --shadow: 0 1px 2px rgba(15, 26, 43, .06), 0 8px 24px rgba(15, 26, 43, .06);
+  --shadow-lg: 0 2px 4px rgba(15, 26, 43, .06), 0 24px 60px rgba(15, 26, 43, .14);
 
   --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
   --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
@@ -36,259 +36,285 @@
   --step--1: 0.875rem;
   --step-0: 1.0625rem;
   --step-1: 1.25rem;
-  --step-2: 1.6rem;
-  --step-3: clamp(1.9rem, 1.3rem + 2.4vw, 2.75rem);
-  --step-4: clamp(2.5rem, 1.4rem + 4.6vw, 4.6rem);
-  --max: 1180px;
+  --step-2: 1.55rem;
+  --step-3: clamp(1.85rem, 1.3rem + 2.2vw, 2.6rem);
+  --step-4: clamp(2.4rem, 1.5rem + 3.8vw, 4.1rem);
+  --max: 1160px;
+  --radius: 14px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0A101B; --surface: #111A29; --ink: #E6EBF3; --muted: #8E9BB0; --line: #233046;
-    --accent: #7D92FF; --accent-ink: #0A101B; --accent-soft: #1B2547;
+    --bg: #0A101B; --bg-2: #0D1522; --surface: #111A29; --ink: #E6EBF3; --muted: #8E9BB0; --line: #233046;
+    --accent: #7D92FF; --accent-2: #9AA9FF; --accent-ink: #0A101B; --accent-soft: #1B2547;
     --ok: #4CC48B; --ok-soft: #12301F; --busy: #E4AA52; --busy-soft: #3A2A10; --off: #66738A;
-    --term-bg: #060A11; --term-fg: #D9E1EE; --term-dim: #6F7D94; --term-hi: #9DB0FF;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+    --shadow-lg: 0 2px 4px rgba(0, 0, 0, .3), 0 24px 60px rgba(0, 0, 0, .45);
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0A101B; --surface: #111A29; --ink: #E6EBF3; --muted: #8E9BB0; --line: #233046;
-  --accent: #7D92FF; --accent-ink: #0A101B; --accent-soft: #1B2547;
+  --bg: #0A101B; --bg-2: #0D1522; --surface: #111A29; --ink: #E6EBF3; --muted: #8E9BB0; --line: #233046;
+  --accent: #7D92FF; --accent-2: #9AA9FF; --accent-ink: #0A101B; --accent-soft: #1B2547;
   --ok: #4CC48B; --ok-soft: #12301F; --busy: #E4AA52; --busy-soft: #3A2A10; --off: #66738A;
-  --term-bg: #060A11; --term-fg: #D9E1EE; --term-dim: #6F7D94; --term-hi: #9DB0FF;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, .3), 0 24px 60px rgba(0, 0, 0, .45);
   color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
 html { color-scheme: light; scroll-behavior: smooth; }
-body { margin: 0; }
-img { max-width: 100%; }
-[hidden] { display: none !important; }
-section[id] { scroll-margin-top: 64px; }
 body {
-  background: var(--bg);
-  color: var(--ink);
-  font-family: var(--body);
-  font-size: var(--step-0);
-  line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: var(--body); font-size: var(--step-0); line-height: 1.6;
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
 }
-body::before {
-  content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px);
-  z-index: 10; background: var(--bg);
-}
+section[id] { scroll-margin-top: 72px; }
 a { color: var(--accent); }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
-
-.wrap {
-  max-width: var(--max);
-  margin: 0 auto;
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
-}
-h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.05; }
-h2 { font-size: var(--step-3); font-weight: 800; font-stretch: 118%; letter-spacing: -0.01em; }
-h3 { font-size: var(--step-1); font-weight: 700; font-stretch: 105%; line-height: 1.2; }
+a:focus-visible, .btn:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+h1, h2, h3 { font-family: var(--display); margin: 0; line-height: 1.08; text-wrap: balance; letter-spacing: -0.015em; }
 p { margin: 0; }
-.eyebrow {
-  font-family: var(--mono); font-size: 0.78rem; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted);
+.wrap { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
+.icon { width: 22px; height: 22px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 1.8;
+        stroke-linecap: round; stroke-linejoin: round; }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap;
+  font-family: var(--body); font-weight: 700; font-size: 1rem; text-decoration: none;
+  padding: 12px 20px; border-radius: 10px; border: 1px solid transparent; cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
 }
-.lede { color: var(--muted); font-size: var(--step-1); max-width: 34em; line-height: 1.5; }
+.btn .icon { width: 18px; height: 18px; }
+.btn-primary { background: var(--accent); color: var(--accent-ink); box-shadow: 0 6px 18px -6px var(--accent); }
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 24px -8px var(--accent); }
+.btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line); }
+.btn-ghost:hover { border-color: var(--muted); }
+.btn-sm { padding: 8px 14px; font-size: .94rem; }
 
 /* Header */
-.top {
-  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--line);
+header.top {
+  position: sticky; top: 0; z-index: 20; backdrop-filter: saturate(160%) blur(10px);
+  background: color-mix(in srgb, var(--bg) 82%, transparent); border-bottom: 1px solid var(--line);
 }
-.top .wrap { display: flex; align-items: center; gap: 24px; padding-block: 14px; }
-.mark { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
-.mark b { font-family: var(--display); font-stretch: 120%; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.01em; }
-.mark svg { flex: none; }
-.nav { display: flex; gap: 22px; margin-left: auto; align-items: center; }
-.nav a:not(.btn) { color: var(--muted); text-decoration: none; font-weight: 600; font-size: 0.95rem; }
+header.top .wrap { display: flex; align-items: center; gap: 24px; height: 64px; }
+.mark { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; }
+.mark b { font-family: var(--display); font-stretch: 115%; font-weight: 800; font-size: 1.08rem; letter-spacing: -0.01em; }
+.nav { display: flex; align-items: center; gap: 22px; margin-left: auto; }
+.nav a:not(.btn) { color: var(--muted); text-decoration: none; font-weight: 600; font-size: .96rem; }
 .nav a:not(.btn):hover { color: var(--ink); }
-.btn {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-family: var(--body); font-weight: 700; font-size: 0.98rem;
-  padding: 10px 18px; border-radius: 8px; border: 1px solid transparent;
-  text-decoration: none; cursor: pointer; transition: transform .15s ease, background .15s ease;
-}
-.btn-primary { background: var(--accent); color: var(--accent-ink); }
-.btn-primary:hover { transform: translateY(-1px); }
-.btn-ghost { background: transparent; color: var(--ink); border-color: var(--line); }
-.btn-ghost:hover { border-color: var(--muted); }
-@media (max-width: 760px) { .nav a:not(.btn) { display: none; } }
+@media (max-width: 820px) { .nav a.navlink { display: none; } .nav { gap: 10px; } }
+@media (max-width: 420px) { .nav .signin { display: none; } }
 
 /* Hero */
-.hero .wrap {
-  display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr);
-  gap: 56px; align-items: center; padding-block: 72px 64px;
+.hero { position: relative; overflow: hidden; }
+.hero::before {
+  content: ""; position: absolute; inset: -40% -10% auto -10%; height: 120%; z-index: -1;
+  background: radial-gradient(60% 50% at 70% 30%, var(--accent-soft), transparent 70%),
+              radial-gradient(40% 40% at 10% 20%, color-mix(in srgb, var(--ok-soft) 70%, transparent), transparent 70%);
 }
-.hero h1 {
-  font-size: var(--step-4); font-weight: 850; font-stretch: 125%;
-  letter-spacing: -0.025em; line-height: 0.98;
+.hero .wrap { display: grid; grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr); gap: 56px; align-items: center; padding-block: 84px 72px; }
+@media (max-width: 940px) { .hero .wrap { grid-template-columns: minmax(0, 1fr); gap: 44px; padding-block: 52px 48px; } }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: .78rem; font-weight: 500;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--accent);
+  background: var(--accent-soft); border-radius: 999px; padding: 6px 12px;
 }
+.eyebrow .icon { width: 15px; height: 15px; }
+.hero h1 { font-size: clamp(2.3rem, 1.5rem + 3.2vw, 3.7rem); font-stretch: 100%; font-weight: 850; margin: 20px 0 18px; }
 .hero h1 em { font-style: normal; color: var(--accent); }
-.hero-copy { display: grid; gap: 24px; min-width: 0; }
-.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; }
-.hero-note { font-family: var(--mono); font-size: var(--step--1); color: var(--muted); }
-@media (max-width: 900px) { .hero .wrap { grid-template-columns: minmax(0, 1fr); gap: 40px; padding-block: 48px; } }
+.lede { font-size: var(--step-1); color: var(--muted); max-width: 36rem; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+.reassure { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 20px; color: var(--muted); font-size: .94rem; }
+.reassure span { display: inline-flex; align-items: center; gap: 6px; }
+.reassure .icon { width: 17px; height: 17px; color: var(--ok); }
 
-/* Device panel mock */
-.panel {
-  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
-  box-shadow: 0 1px 0 var(--line), 0 24px 48px -28px color-mix(in srgb, var(--ink) 35%, transparent);
-  overflow: hidden; min-width: 0;
+/* Product mock-up */
+.app {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-lg);
+  overflow: hidden; position: relative;
 }
-.panel-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 14px 18px; border-bottom: 1px solid var(--line);
-}
-.panel-head strong { font-family: var(--display); font-stretch: 110%; font-size: 1rem; }
-.panel-head span { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); }
-.panel-scroll { overflow-x: auto; }
-table.devices { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 440px; }
-.devices th {
-  text-align: left; font-family: var(--mono); font-weight: 500; font-size: 0.72rem;
-  text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
-  padding: 10px 18px; border-bottom: 1px solid var(--line);
-}
-.devices td { padding: 11px 18px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-.devices tr:last-child td { border-bottom: 0; }
-.devices .id { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.85rem; }
-.devices .name { font-weight: 600; }
-.devices .grp { color: var(--muted); }
-.pill {
-  display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 700;
-  padding: 2px 9px; border-radius: 999px;
-}
-.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.pill.on { color: var(--ok); background: var(--ok-soft); }
+.app-bar { display: flex; align-items: center; gap: 7px; padding: 11px 14px; border-bottom: 1px solid var(--line); background: var(--bg-2); }
+.app-bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--line); display: block; }
+.app-bar span { margin-left: 10px; font-family: var(--mono); font-size: .74rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-body { display: grid; grid-template-columns: 150px minmax(0, 1fr); min-height: 300px; }
+.app-side { border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; gap: 4px; }
+.app-side div { display: flex; align-items: center; gap: 8px; font-size: .84rem; color: var(--muted); padding: 7px 9px; border-radius: 8px; }
+.app-side div.on { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.app-side .icon { width: 16px; height: 16px; }
+.app-main { padding: 16px; min-width: 0; }
+.app-main h3 { font-size: 1rem; font-stretch: 105%; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.app-main h3 small { font-family: var(--mono); font-size: .72rem; color: var(--muted); font-weight: 500; }
+.dev { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: .86rem; }
+.dev th { text-align: left; font-family: var(--mono); font-weight: 500; font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 0 8px 8px; }
+.dev td { padding: 9px 8px; border-top: 1px solid var(--line); white-space: nowrap; }
+.dev td.grp { color: var(--muted); }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: .74rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill.ok { color: var(--ok); background: var(--ok-soft); }
 .pill.busy { color: var(--busy); background: var(--busy-soft); }
-.pill.off { color: var(--off); background: color-mix(in srgb, var(--off) 14%, transparent); }
-.panel-foot {
-  padding: 10px 18px; font-family: var(--mono); font-size: 0.74rem; color: var(--muted);
-  border-top: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 55%, var(--surface));
+.pill.off { color: var(--off); background: var(--bg-2); }
+.app-note { font-family: var(--mono); font-size: .7rem; color: var(--muted); padding: 0 16px 12px; text-align: left; }
+.toast {
+  position: absolute; right: -14px; bottom: -48px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: var(--shadow-lg); padding: 11px 14px; display: flex; gap: 10px; align-items: center;
+  font-size: .86rem; max-width: 250px;
+}
+.toast .ic { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--ok-soft); color: var(--ok); flex-shrink: 0; }
+.toast .ic .icon { width: 17px; height: 17px; }
+.toast b { display: block; font-size: .86rem; }
+.toast span { color: var(--muted); font-size: .78rem; }
+.mock { position: relative; padding-right: 10px; margin-bottom: 48px; }
+@media (max-width: 640px) {
+  .app-body { grid-template-columns: minmax(0, 1fr); }
+  .app-side { display: none; }
+  .dev .grp { display: none; }
+  .toast { position: static; margin: 12px 0 0 auto; max-width: none; }
+  .mock { padding-right: 0; margin-bottom: 0; }
 }
 
-/* Fact strip */
-.facts { border-block: 1px solid var(--line); background: var(--surface); }
-.facts .wrap {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; padding-block: 28px;
+/* Proof strip */
+.strip { border-block: 1px solid var(--line); background: var(--surface); }
+.strip .wrap { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+.strip div { display: flex; gap: 12px; align-items: flex-start; padding: 24px 20px; }
+.strip div + div { border-left: 1px solid var(--line); }
+.strip .icon { color: var(--accent); margin-top: 2px; }
+.strip b { display: block; font-family: var(--display); font-stretch: 105%; font-size: 1.02rem; }
+.strip span { color: var(--muted); font-size: .92rem; line-height: 1.45; }
+@media (max-width: 900px) {
+  .strip .wrap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .strip div:nth-child(3) { border-left: 0; }
+  .strip div:nth-child(n+3) { border-top: 1px solid var(--line); }
 }
-.fact { display: grid; gap: 4px; min-width: 0; }
-.fact b { font-family: var(--display); font-stretch: 115%; font-weight: 800; font-size: var(--step-1); }
-.fact span { color: var(--muted); font-size: 0.95rem; }
-@media (max-width: 820px) { .facts .wrap { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) {
+  .strip .wrap { grid-template-columns: minmax(0, 1fr); }
+  .strip div + div { border-left: 0; border-top: 1px solid var(--line); }
+}
 
-section.block .wrap { padding-block: 88px; display: grid; gap: 44px; }
-.section-head { display: grid; gap: 14px; max-width: 46rem; }
+/* Sections */
+.block { padding-block: 92px; }
+.block.alt { background: var(--surface); border-block: 1px solid var(--line); }
+.head { max-width: 44rem; margin-bottom: 48px; }
+.head.center { margin-inline: auto; text-align: center; }
+.head h2 { font-size: var(--step-3); font-stretch: 110%; font-weight: 800; margin: 14px 0 14px; }
+.head p { color: var(--muted); font-size: var(--step-1); }
+@media (max-width: 640px) { .block { padding-block: 64px; } .head { margin-bottom: 34px; } }
 
-/* Features */
-.features {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-top: 1px solid var(--line); border-left: 1px solid var(--line);
+/* Feature cards */
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+@media (max-width: 940px) { .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .grid3 { grid-template-columns: minmax(0, 1fr); } }
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px;
+  box-shadow: var(--shadow); transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
 }
-.feature {
-  padding: 26px 24px 30px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
-  display: grid; gap: 10px; align-content: start; min-width: 0;
-}
-.feature .tag { font-family: var(--mono); font-size: 0.74rem; color: var(--accent); letter-spacing: 0.06em; }
-.feature p { color: var(--muted); }
-@media (max-width: 900px) { .features { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 560px) { .features { grid-template-columns: minmax(0, 1fr); } }
+.card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.tile { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); margin-bottom: 18px; }
+.card h3 { font-size: 1.16rem; font-stretch: 105%; font-weight: 750; margin-bottom: 8px; }
+.card p { color: var(--muted); font-size: .98rem; }
 
 /* Steps */
-.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; counter-reset: step; }
-.step { display: grid; gap: 10px; align-content: start; padding-top: 18px; border-top: 2px solid var(--ink); min-width: 0; }
-.step .n { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
-.step p { color: var(--muted); }
-.step code { font-family: var(--mono); font-size: 0.86em; background: var(--accent-soft); color: var(--ink); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
-@media (max-width: 900px) { .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 520px) { .steps { grid-template-columns: minmax(0, 1fr); } }
+.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; counter-reset: step; }
+@media (max-width: 860px) { .steps { grid-template-columns: minmax(0, 1fr); } }
+.step { position: relative; padding: 28px 26px 26px; border-radius: var(--radius); background: var(--bg); border: 1px solid var(--line); }
+.step .num { font-family: var(--mono); font-size: .78rem; color: var(--accent); font-weight: 600; letter-spacing: .08em; }
+.step .tile { margin: 14px 0 16px; }
+.step h3 { font-size: 1.16rem; font-stretch: 105%; margin-bottom: 8px; }
+.step p { color: var(--muted); font-size: .98rem; }
 
-/* Architecture */
-.arch { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 48px; align-items: start; }
-.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; overflow-x: auto; }
-.diagram svg { display: block; width: 100%; min-width: 520px; height: auto; }
-.diagram .box { fill: var(--bg); stroke: var(--line); stroke-width: 1.5; }
-.diagram .box.core { fill: var(--accent-soft); stroke: var(--accent); }
-.diagram .t { fill: var(--ink); font-family: var(--display); font-weight: 700; font-size: 15px; }
-.diagram .s { fill: var(--muted); font-family: var(--mono); font-size: 11.5px; }
-.diagram .wire { stroke: var(--muted); stroke-width: 1.5; fill: none; }
-.diagram .flow { stroke: var(--accent); stroke-width: 2.5; fill: none; stroke-dasharray: 6 10; animation: flow 1.4s linear infinite; }
-@keyframes flow { to { stroke-dashoffset: -32; } }
-@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .diagram .flow { animation: none; } .btn { transition: none; } }
-.arch-notes { display: grid; gap: 22px; }
-.arch-notes > div { display: grid; gap: 6px; }
-.arch-notes p { color: var(--muted); }
-@media (max-width: 900px) { .arch { grid-template-columns: minmax(0, 1fr); } }
+/* Security */
+.split { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 56px; align-items: start; }
+@media (max-width: 900px) { .split { grid-template-columns: minmax(0, 1fr); gap: 32px; } }
+.split .head { margin-bottom: 0; }
+.checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 600px) { .checks { grid-template-columns: minmax(0, 1fr); } }
+.check { display: flex; gap: 14px; padding: 20px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); }
+.check .tile { width: 40px; height: 40px; flex: 0 0 40px; margin: 0; border-radius: 10px; background: var(--ok-soft); color: var(--ok); }
+.check .tile .icon { width: 20px; height: 20px; }
+.check b { display: block; font-family: var(--display); font-stretch: 105%; margin-bottom: 4px; }
+.check span { color: var(--muted); font-size: .95rem; line-height: 1.5; }
 
-/* Compare */
-.compare-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
-table.compare { width: 100%; border-collapse: collapse; min-width: 620px; }
-.compare th, .compare td { text-align: left; padding: 16px 20px; border-bottom: 1px solid var(--line); vertical-align: top; }
-.compare tr:last-child td { border-bottom: 0; }
-.compare thead th { font-family: var(--mono); font-weight: 500; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
-.compare thead th.us { color: var(--accent); }
-.compare td:first-child { font-weight: 700; width: 24%; }
-.compare td.us { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
-.compare td:last-child { color: var(--muted); }
+/* Pricing */
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 22px; max-width: 900px; margin: 0 auto; }
+.plan { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 30px; display: flex; flex-direction: column; box-shadow: var(--shadow); }
+.plan h3 { font-size: 1.35rem; font-stretch: 110%; }
+.plan-desc { color: var(--muted); margin-top: 6px; font-size: .98rem; }
+.plan ul { list-style: none; margin: 22px 0 26px; padding: 0; display: grid; gap: 10px; }
+.plan li { display: flex; gap: 10px; align-items: flex-start; font-size: .98rem; }
+.plan li .icon { width: 18px; height: 18px; color: var(--ok); margin-top: 3px; }
+.plan .btn { margin-top: auto; }
+.includes { max-width: 900px; margin: 26px auto 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 22px; color: var(--muted); font-size: .94rem; }
+.includes span { display: inline-flex; align-items: center; gap: 6px; }
+.includes .icon { width: 16px; height: 16px; color: var(--ok); }
+.closed { text-align: center; color: var(--muted); margin-top: 18px; }
 
-/* Install CTA */
-.install { background: var(--term-bg); color: var(--term-fg); }
-.install .wrap { padding-block: 88px; display: grid; gap: 28px; }
-.install h2 { color: var(--term-fg); }
-.install .eyebrow { color: var(--term-dim); }
-.install .lede { color: var(--term-dim); }
-.term {
-  border: 1px solid color-mix(in srgb, var(--term-fg) 16%, transparent); border-radius: 12px;
-  overflow: hidden; max-width: 860px; width: 100%;
-}
-.term-bar {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 10px 14px; border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 12%, transparent);
-  font-family: var(--mono); font-size: 0.78rem; color: var(--term-dim);
-}
-.copy {
-  font-family: var(--mono); font-size: 0.78rem; color: var(--term-fg);
-  background: transparent; border: 1px solid color-mix(in srgb, var(--term-fg) 28%, transparent);
-  border-radius: 6px; padding: 4px 10px; cursor: pointer;
-}
-.copy:hover { border-color: var(--term-hi); color: var(--term-hi); }
-pre.cmd {
-  margin: 0; padding: 20px; overflow-x: auto; font-family: var(--mono); font-size: 0.92rem; line-height: 1.75;
-}
-pre.cmd .p { color: var(--term-dim); user-select: none; }
-pre.cmd .f { color: var(--term-hi); }
-pre.cmd .o { color: var(--term-dim); }
-pre.cmd .k { color: #7EE2A8; }
-.install-links { display: flex; flex-wrap: wrap; gap: 10px 28px; font-family: var(--mono); font-size: 0.86rem; color: var(--term-dim); }
-.install-links a { color: inherit; text-decoration: none; }
-.install-links a:hover b { text-decoration: underline; }
-.install-links b { color: var(--term-fg); font-weight: 500; }
+/* FAQ */
+.faq { max-width: 820px; margin: 0 auto; display: grid; gap: 12px; }
+.faq details { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 0 22px; }
+.faq summary { list-style: none; cursor: pointer; padding: 18px 0; font-weight: 700; font-size: 1.04rem; display: flex; justify-content: space-between; gap: 16px; align-items: center; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary .icon { width: 18px; height: 18px; color: var(--muted); transition: transform .15s ease; }
+.faq details[open] summary .icon { transform: rotate(45deg); }
+.faq details p { color: var(--muted); padding: 0 0 20px; }
 
-footer .wrap {
-  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px;
-  padding-block: 28px; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--line);
+/* Final call to action */
+.final { padding-block: 0 92px; }
+.final-card {
+  border-radius: 22px; padding: 56px 40px; text-align: center; color: #fff;
+  background: radial-gradient(120% 140% at 0% 0%, #4a5ff0 0%, #2742E0 45%, #1c2fb0 100%);
+  box-shadow: var(--shadow-lg);
 }
-footer .mono { font-family: var(--mono); font-size: 0.8rem; }
-.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; margin-top: 28px; }
-.plan { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 10px; }
-.plan h3 { font-size: 1.3rem; font-stretch: 115%; }
-.plan ul { margin: 0; padding-left: 18px; }
-.plan-desc, .plan-limits { margin: 0; color: var(--muted); }
-.plan .btn { margin-top: auto; align-self: flex-start; }
+.final-card h2 { font-size: var(--step-3); font-stretch: 110%; font-weight: 800; }
+.final-card p { margin: 14px auto 0; max-width: 34rem; color: rgba(255, 255, 255, .86); font-size: var(--step-1); }
+.final-card .cta { justify-content: center; }
+.final-card .btn-primary { background: #fff; color: #1c2fb0; box-shadow: none; }
+.final-card .btn-ghost { background: transparent; color: #fff; border-color: rgba(255, 255, 255, .45); }
+@media (max-width: 640px) { .final-card { padding: 40px 22px; } }
+
+/* Footer */
+footer { border-top: 1px solid var(--line); padding-block: 40px; background: var(--surface); }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 18px 40px; justify-content: space-between; align-items: center; }
+footer nav { display: flex; flex-wrap: wrap; gap: 8px 22px; }
+footer a { color: var(--muted); text-decoration: none; font-size: .94rem; }
+footer a:hover { color: var(--ink); }
+footer small { color: var(--muted); font-size: .86rem; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .btn, .card, .faq summary .icon { transition: none; } }
 </style>
 </head>
 <body>
+{% macro ic(name) -%}
+<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+{%- if name == "monitor" %}<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+{%- elif name == "package" %}<path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>
+{%- elif name == "link" %}<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+{%- elif name == "audit" %}<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4M12 16h4M8 11h.01M8 16h.01"/>
+{%- elif name == "filter" %}<path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>
+{%- elif name == "chart" %}<path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/>
+{%- elif name == "shield" %}<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>
+{%- elif name == "key" %}<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>
+{%- elif name == "bell" %}<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+{%- elif name == "globe" %}<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+{%- elif name == "lifebuoy" %}<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><path d="m4.93 4.93 4.24 4.24M14.83 9.17l4.24-4.24M14.83 14.83l4.24 4.24M9.17 14.83l-4.24 4.24"/>
+{%- elif name == "server" %}<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/>
+{%- elif name == "lock" %}<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+{%- elif name == "users" %}<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+{%- elif name == "check" %}<path d="M20 6 9 17l-5-5"/>
+{%- elif name == "arrow" %}<path d="M5 12h14M12 5l7 7-7 7"/>
+{%- elif name == "rocket" %}<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>
+{%- elif name == "pointer" %}<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>
+{%- elif name == "export" %}<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 18v-6M9 15l3 3 3-3"/>
+{%- elif name == "phone" %}<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/>
+{%- elif name == "plus" %}<path d="M12 5v14M5 12h14"/>
+{%- elif name == "card" %}<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>
+{%- elif name == "clock" %}<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+{%- elif name == "spark" %}<path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z"/>
+{%- endif %}</svg>
+{%- endmacro %}
+
 <header class="top">
   <div class="wrap">
     <a class="mark" href="#top" aria-label="RustDesk Fleet home">
-      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
-        <rect x="1" y="1" width="24" height="24" rx="6" fill="var(--accent)"></rect>
+      <svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
+        <rect x="1" y="1" width="24" height="24" rx="7" fill="var(--accent)"></rect>
         <circle cx="8" cy="13" r="2.6" fill="var(--accent-ink)"></circle>
         <circle cx="18" cy="8" r="2.2" fill="var(--accent-ink)"></circle>
         <circle cx="18" cy="18" r="2.2" fill="var(--accent-ink)"></circle>
@@ -297,14 +323,12 @@ footer .mono { font-family: var(--mono); font-size: 0.8rem; }
       <b>RustDesk Fleet</b>
     </a>
     <nav class="nav" aria-label="Primary">
-      <a href="#features">Features</a>
-      <a href="#how">How it works</a>
-      <a href="#architecture">Architecture</a>
-      {% if plans %}<a href="#pricing">Pricing</a>{% endif %}
-      <a href="https://github.com/arvage/rustdesk-fleet">GitHub</a>
-      <a class="btn btn-ghost" href="/signin">Sign in</a>
-      {% if signup_open %}<a class="btn btn-primary" href="/signup">Start free trial</a>
-      {% else %}<a class="btn btn-primary" href="#install">Install</a>{% endif %}
+      <a class="navlink" href="#features">Features</a>
+      <a class="navlink" href="#security">Security</a>
+      {% if plans %}<a class="navlink" href="#pricing">Pricing</a>{% endif %}
+      <a class="navlink" href="#faq">FAQ</a>
+      <a class="btn btn-ghost btn-sm signin" href="/signin">Sign in</a>
+      {% if signup_open %}<a class="btn btn-primary btn-sm" href="/signup">Start free trial</a>{% endif %}
     </nav>
   </div>
 </header>
@@ -312,265 +336,203 @@ footer .mono { font-family: var(--mono); font-size: 0.8rem; }
 <main id="top">
   <section class="hero">
     <div class="wrap">
-      <div class="hero-copy">
-        <span class="eyebrow">Self-hosted remote support for MSPs &amp; IT teams</span>
-        <h1>Your own remote support server. <em>One install script.</em></h1>
-        <p class="lede">RustDesk Fleet runs the RustDesk relay and a full management dashboard on a single Ubuntu box you control. Brand the client per customer, sign the installers, and audit every session, without per-technician licences.</p>
-        <div class="hero-actions">
-          <a class="btn btn-primary" href="#install">Get the install script</a>
-          <a class="btn btn-ghost" href="#features">See what's in the dashboard</a>
+      <div>
+        <span class="eyebrow">{{ ic("spark") }} Remote support for MSPs</span>
+        <h1>Remote support your customers trust, <em>branded as yours</em>.</h1>
+        <p class="lede">Your own RustDesk relay and a management dashboard, hosted for you. Give every customer a branded
+          installer, see every device in one place, and keep a record of every session.</p>
+        <div class="cta">
+          {% if signup_open %}<a class="btn btn-primary" href="/signup">Start your {{ trial_days }}-day free trial {{ ic("arrow") }}</a>{% endif %}
+          <a class="btn btn-ghost" href="#{{ 'pricing' if plans else 'features' }}">{{ "See pricing" if plans else "See features" }}</a>
         </div>
-        <p class="hero-note">hbbs + hbbr · FastAPI dashboard · Let's Encrypt TLS · nightly backups</p>
+        <div class="reassure">
+          <span>{{ ic("check") }} Ready in minutes</span>
+          <span>{{ ic("check") }} Cancel anytime during the trial</span>
+          <span>{{ ic("check") }} Your data exportable anytime</span>
+        </div>
       </div>
 
-      <div class="panel" aria-label="Example of the Devices page">
-        <div class="panel-head">
-          <strong>Devices</strong>
-          <span>Example data · all groups</span>
+      <div class="mock" aria-label="The dashboard (example data)">
+        <div class="app">
+          <div class="app-bar"><i></i><i></i><i></i><span>yourcompany.{{ request.url.hostname.split(".", 1)[1] if "." in request.url.hostname else "example.com" }}/devices</span></div>
+          <div class="app-body">
+            <div class="app-side">
+              <div class="on">{{ ic("monitor") }} Devices</div>
+              <div>{{ ic("users") }} Client groups</div>
+              <div>{{ ic("audit") }} Logs</div>
+              <div>{{ ic("chart") }} Reports</div>
+              <div>{{ ic("shield") }} Admin</div>
+            </div>
+            <div class="app-main">
+              <h3>Devices <small>5 of 128 · all groups</small></h3>
+              <table class="dev">
+                <thead><tr><th>Computer</th><th class="grp">Client</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>FRONTDESK-01</td><td class="grp">Harbor Dental</td><td><span class="pill busy">In session</span></td></tr>
+                  <tr><td>ACCT-LAPTOP-3</td><td class="grp">Lindqvist CPA</td><td><span class="pill ok">Online</span></td></tr>
+                  <tr><td>SHOP-POS</td><td class="grp">Corner Hardware</td><td><span class="pill ok">Online</span></td></tr>
+                  <tr><td>RECEPTION-PC</td><td class="grp">Harbor Dental</td><td><span class="pill off">Offline</span></td></tr>
+                  <tr><td>MAC-STUDIO</td><td class="grp">Lindqvist CPA</td><td><span class="pill ok">Online</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="app-note">Example data</div>
         </div>
-        <div class="panel-scroll">
-          <table class="devices">
-            <thead>
-              <tr><th>ID</th><th>Computer</th><th>Group</th><th>Status</th></tr>
-            </thead>
-            <tbody>
-              <tr><td class="id">418 220 907</td><td class="name">FRONTDESK-01</td><td class="grp">Harbor Dental</td><td><span class="pill busy">In session</span></td></tr>
-              <tr><td class="id">502 117 364</td><td class="name">ACCT-LAPTOP-3</td><td class="grp">Lindqvist CPA</td><td><span class="pill on">Online</span></td></tr>
-              <tr><td class="id">377 940 015</td><td class="name">SHOP-POS</td><td class="grp">Corner Hardware</td><td><span class="pill on">Online</span></td></tr>
-              <tr><td class="id">611 083 552</td><td class="name">RECEPTION-PC</td><td class="grp">Harbor Dental</td><td><span class="pill off">Offline</span></td></tr>
-              <tr><td class="id">294 561 830</td><td class="name">IT-BENCH-02</td><td class="grp">Internal</td><td><span class="pill on">Online</span></td></tr>
-            </tbody>
-          </table>
+        <div class="toast" role="presentation">
+          <span class="ic">{{ ic("check") }}</span>
+          <div><b>Session ended · 14 min</b><span>FRONTDESK-01 · logged to Harbor Dental</span></div>
         </div>
-        <div class="panel-foot">Windows 11 · macOS 15 · Ubuntu 24.04 — reported by each client</div>
       </div>
     </div>
   </section>
 
-  <div class="facts">
+  <section class="strip" aria-label="Highlights">
     <div class="wrap">
-      <div class="fact"><b>1 script</b><span>Relay, dashboard, TLS and backup timer, idempotent on re-run</span></div>
-      <div class="fact"><b>Signed .exe</b><span>Authenticode via Azure Trusted Signing, built on Linux</span></div>
-      <div class="fact"><b>12 reports</b><span>Charts per group and date range, every table as CSV</span></div>
-      <div class="fact"><b>Your keypair</b><span>Server key and fleet DB never leave your box</span></div>
+      <div>{{ ic("server") }}<p><b>Your own relay</b><span>A dedicated RustDesk server and encryption key for your account only.</span></p></div>
+      <div>{{ ic("package") }}<p><b>Branded installers</b><span>Each customer gets an installer with their name and icon.</span></p></div>
+      <div>{{ ic("audit") }}<p><b>Every session logged</b><span>Who connected, to what, for how long, and which files moved.</span></p></div>
+      <div>{{ ic("monitor") }}<p><b>Windows, macOS, Linux</b><span>Installers for the machines your customers actually run.</span></p></div>
     </div>
-  </div>
+  </section>
 
   <section class="block" id="features">
     <div class="wrap">
-      <div class="section-head">
-        <span class="eyebrow">The dashboard</span>
-        <h2>Everything a helpdesk needs around the relay</h2>
-        <p class="lede">Stock RustDesk server gives you a relay. Fleet adds the part your team works in all day.</p>
+      <div class="head center">
+        <span class="eyebrow">{{ ic("spark") }} Features</span>
+        <h2>Everything around the remote session, in one place</h2>
+        <p>RustDesk gets you connected. RustDesk Fleet is the part your team works in all day.</p>
       </div>
-      <div class="features">
-        <div class="feature">
-          <span class="tag">/devices</span>
-          <h3>Live device inventory</h3>
-          <p>Computer name, OS and client version reported by each machine, with online, in-session and offline status. New registrations land in a panel until you assign them.</p>
-        </div>
-        <div class="feature">
-          <span class="tag">/groups</span>
-          <h3>Client groups with their own branding</h3>
-          <p>Give each customer an installer with its own app name and icon, managed client settings, and an unattended password.</p>
-        </div>
-        <div class="feature">
-          <span class="tag">/groups/…/links</span>
-          <h3>Download links you can revoke</h3>
-          <p>Email a customer a link to their branded installer. Revoke it when the rollout is done.</p>
-        </div>
-        <div class="feature">
-          <span class="tag">audit</span>
-          <h3>Session and file-transfer audit</h3>
-          <p>Who connected, from where, and how. A connection timeline per device, plus a fleet-wide view by device or by technician.</p>
-        </div>
-        <div class="feature">
-          <span class="tag">/dynamic-groups</span>
-          <h3>Rule-based dynamic groups</h3>
-          <p>Build groups from rules such as OS, client version or status, with a live match preview and CSV export.</p>
-        </div>
-        <div class="feature">
-          <span class="tag">/admin/roles</span>
-          <h3>Roles from a capability matrix</h3>
-          <p>Define permission levels per capability and limit technicians to the client groups they support. Passkeys and MFA reminders included.</p>
-        </div>
-        <div class="feature">
-          <span class="tag">server health</span>
-          <h3>Health checks and alerts</h3>
-          <p>CPU, memory, disk, uptime and container state, with threshold alerts by email using templates you can edit and brand.</p>
-        </div>
-        <div class="feature">
-          <span class="tag">updates</span>
-          <h3>Updates from the dashboard</h3>
-          <p>Move hbbs/hbbr to the latest release and rebuild every group's installers on a new client version in one step.</p>
-        </div>
-        <div class="feature">
-          <span class="tag">/admin/backup</span>
-          <h3>Off-site backups with restore</h3>
-          <p>Keypair and databases to S3, Wasabi, Backblaze B2, DigitalOcean Spaces or MinIO. Test, run and restore from the UI.</p>
-        </div>
+      <div class="grid3">
+        <div class="card"><div class="tile">{{ ic("monitor") }}</div><h3>Live device inventory</h3>
+          <p>Every machine with its computer name, OS, client version and status: online, in a session or offline. New devices wait in a panel until you assign them.</p></div>
+        <div class="card"><div class="tile">{{ ic("package") }}</div><h3>Branded installers per customer</h3>
+          <p>Give each client group its own app name, icon, managed settings and unattended password. Installers are built for you.</p></div>
+        <div class="card"><div class="tile">{{ ic("link") }}</div><h3>Download links you control</h3>
+          <p>Email a customer a link to their installer, with guides on how to install and get help. Revoke it when the rollout is done.</p></div>
+        <div class="card"><div class="tile">{{ ic("audit") }}</div><h3>Session and file-transfer audit</h3>
+          <p>Who connected, from where, for how long, and what was transferred. A timeline per device, and across the fleet by technician.</p></div>
+        <div class="card"><div class="tile">{{ ic("filter") }}</div><h3>Dynamic groups and reports</h3>
+          <p>Find old OS versions, stale machines or low-spec hardware with rules. Reports for every client and date range, all exportable as CSV.</p></div>
+        <div class="card"><div class="tile">{{ ic("users") }}</div><h3>Roles for your team</h3>
+          <p>Decide exactly what each role can do and which client groups each technician sees. Sign in with passkeys.</p></div>
+        <div class="card"><div class="tile">{{ ic("bell") }}</div><h3>Alerts in your brand</h3>
+          <p>Emails when devices register, come online or go offline, with templates you can reword and brand with your logo and colors.</p></div>
+        <div class="card"><div class="tile">{{ ic("globe") }}</div><h3>Your own domain</h3>
+          <p>Run the dashboard and download links on your domain, like rds.yourcompany.com, with its own certificate.</p></div>
+        <div class="card"><div class="tile">{{ ic("phone") }}</div><h3>Works on your phone</h3>
+          <p>Check a device, send a link or look up a session from anywhere: every page is built for small screens too.</p></div>
       </div>
     </div>
   </section>
 
-  <section class="block" id="how" style="background: var(--surface); border-block: 1px solid var(--line);">
+  <section class="block alt" id="how">
     <div class="wrap">
-      <div class="section-head">
-        <span class="eyebrow">From blank server to first session</span>
-        <h2>Four steps, about an hour</h2>
+      <div class="head center">
+        <span class="eyebrow">{{ ic("rocket") }} How it works</span>
+        <h2>From sign-up to first session in minutes</h2>
+        <p>No servers to set up. We run the relay, the dashboard and the certificates.</p>
       </div>
       <div class="steps">
-        <div class="step">
-          <span class="n">Step 1</span>
-          <h3>Point a hostname at a fresh Ubuntu box</h3>
-          <p>Any small VPS works. Open ports 21115–21119 for the relay and 443 for the dashboard.</p>
-        </div>
-        <div class="step">
-          <span class="n">Step 2</span>
-          <h3>Run the installer</h3>
-          <p><code>./install.sh --host --email</code> sets up the relay, dashboard, certificate and backup timer.</p>
-        </div>
-        <div class="step">
-          <span class="n">Step 3</span>
-          <h3>Create a client group</h3>
-          <p>Add the customer's name and icon, then build their signed Windows installer.</p>
-        </div>
-        <div class="step">
-          <span class="n">Step 4</span>
-          <h3>Send the download link</h3>
-          <p>Devices appear in the inventory as they install. Connect from your own RustDesk client.</p>
-        </div>
+        <div class="step"><span class="num">STEP 1</span><div class="tile">{{ ic("rocket") }}</div><h3>Start your trial</h3>
+          <p>Pick a plan and a web address. Your dashboard and your own relay are ready a minute or two later.</p></div>
+        <div class="step"><span class="num">STEP 2</span><div class="tile">{{ ic("package") }}</div><h3>Add a customer</h3>
+          <p>Create a client group with their name and icon, then send them a download link to their branded installer.</p></div>
+        <div class="step"><span class="num">STEP 3</span><div class="tile">{{ ic("pointer") }}</div><h3>Connect</h3>
+          <p>Devices appear in your inventory as they install. Connect from the free RustDesk client in one click.</p></div>
       </div>
     </div>
   </section>
 
-  <section class="block" id="architecture">
-    <div class="wrap">
-      <div class="section-head">
-        <span class="eyebrow">Architecture</span>
-        <h2>One relay, one key, separation by group</h2>
+  <section class="block" id="security">
+    <div class="wrap split">
+      <div class="head">
+        <span class="eyebrow">{{ ic("shield") }} Security</span>
+        <h2>Built for the trust your customers place in you</h2>
+        <p>Remote access is a privilege. Every account is kept apart, every action is on record, and you decide who gets in.</p>
       </div>
-      <div class="arch">
-        <div class="diagram">
-          <svg viewBox="0 0 640 300" role="img" aria-label="Technicians and customer devices connect through one hbbs and hbbr relay pair; the dashboard sits beside it and shares the fleet database.">
-            <path class="wire" d="M150 80 H245"></path>
-            <path class="wire" d="M395 80 H490"></path>
-            <path class="wire" d="M395 80 H440 V220 H490"></path>
-            <path class="wire" d="M320 125 V185"></path>
-            <path class="flow" d="M150 80 H245"></path>
-            <path class="flow" d="M395 80 H490"></path>
-
-            <rect class="box" x="16" y="45" width="134" height="70" rx="10"></rect>
-            <text class="t" x="32" y="76">Technician</text>
-            <text class="s" x="32" y="97">RustDesk client</text>
-
-            <rect class="box core" x="245" y="35" width="150" height="90" rx="10"></rect>
-            <text class="t" x="262" y="68">Relay</text>
-            <text class="s" x="262" y="89">hbbs · hbbr</text>
-            <text class="s" x="262" y="107">:21115–21119</text>
-
-            <rect class="box" x="490" y="45" width="134" height="70" rx="10"></rect>
-            <text class="t" x="506" y="76">Harbor Dental</text>
-            <text class="s" x="506" y="97">group · 14 PCs</text>
-
-            <rect class="box" x="490" y="185" width="134" height="70" rx="10"></rect>
-            <text class="t" x="506" y="216">Lindqvist CPA</text>
-            <text class="s" x="506" y="237">group · 6 PCs</text>
-
-            <rect class="box" x="245" y="185" width="150" height="90" rx="10"></rect>
-            <text class="t" x="262" y="218">Dashboard</text>
-            <text class="s" x="262" y="239">FastAPI · :443</text>
-            <text class="s" x="262" y="257">fleet.sqlite3</text>
-          </svg>
-        </div>
-        <div class="arch-notes">
-          <div>
-            <h3>Why a single relay</h3>
-            <p>The RustDesk desktop client holds one server and key at a time. With a relay per customer, technicians would re-enter the ID server and key every time they switched clients. One shared relay lets a tech move between customers without touching settings.</p>
-          </div>
-          <div>
-            <h3>How customers stay apart</h3>
-            <p>Each device belongs to a client group in the fleet database. Roles and group access decide which technicians see which devices, and every session is logged against the group.</p>
-          </div>
-          <div>
-            <h3>The trade-off, stated plainly</h3>
-            <p>All devices trust the same server key. A leaked installer is scoped by group in the dashboard, not by cryptography. Keep the keypair on the server, and rotate it if it is ever exposed.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="block" id="compare" style="padding-top:0">
-    <div class="wrap" style="padding-top:0">
-      <div class="section-head">
-        <span class="eyebrow">Compared with hosted remote support</span>
-        <h2>What changes when you run it yourself</h2>
-      </div>
-      <div class="compare-scroll">
-        <table class="compare">
-          <thead>
-            <tr><th></th><th class="us">RustDesk Fleet</th><th>Typical hosted service</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>Where sessions relay</td><td class="us">Your server, your hostname</td><td>The vendor's cloud</td></tr>
-            <tr><td>Pricing</td><td class="us">The cost of one VPS</td><td>Per technician or per concurrent session</td></tr>
-            <tr><td>Customer branding</td><td class="us">App name and icon per client group</td><td>Often one brand per account, or a higher tier</td></tr>
-            <tr><td>Audit data</td><td class="us">In your SQLite database, exportable as CSV</td><td>In the vendor's portal, on their retention terms</td></tr>
-            <tr><td>Who maintains it</td><td class="us">You, with updates from the dashboard</td><td>The vendor</td></tr>
-          </tbody>
-        </table>
+      <div class="checks">
+        <div class="check"><span class="tile">{{ ic("server") }}</span><p><b>Isolated per account</b><span>Your own relay, encryption key and web address. No other account's devices can reach yours.</span></p></div>
+        <div class="check"><span class="tile">{{ ic("key") }}</span><p><b>Passkeys and roles</b><span>Phishing-resistant sign-in and role-based access, down to which client groups each technician sees.</span></p></div>
+        <div class="check"><span class="tile">{{ ic("audit") }}</span><p><b>A complete audit trail</b><span>Sessions, file transfers and changes in your dashboard, all exportable.</span></p></div>
+        <div class="check"><span class="tile">{{ ic("lifebuoy") }}</span><p><b>Support only with your consent</b><span>Our staff can't open your dashboard unless you grant it, for as long as you choose, and you see everything they do.</span></p></div>
+        <div class="check"><span class="tile">{{ ic("lock") }}</span><p><b>Encrypted end to end</b><span>Sessions are end-to-end encrypted by RustDesk; the dashboard is HTTPS only, with strict browser protections.</span></p></div>
+        <div class="check"><span class="tile">{{ ic("export") }}</span><p><b>Your data stays yours</b><span>Export devices, groups, users and session history as CSV anytime, including after you cancel.</span></p></div>
       </div>
     </div>
   </section>
 
   {% if plans %}
-  <section class="block" id="pricing" style="background: var(--surface); border-block: 1px solid var(--line);">
+  <section class="block alt" id="pricing">
     <div class="wrap">
-      <span class="eyebrow">Hosted plans</span>
-      <h2>Or let us run it for you</h2>
-      <p class="lede">Your own relay, dashboard and web address on our servers. {{ trial_days }}-day free trial with a card on file;
-        cancel any time before it ends and you pay nothing.</p>
+      <div class="head center">
+        <span class="eyebrow">{{ ic("card") }} Pricing</span>
+        <h2>Simple plans that grow with you</h2>
+        <p>Start with a {{ trial_days }}-day free trial. A card is required; cancel before the trial ends and you pay nothing.</p>
+      </div>
       <div class="plans">
         {% for plan in plans %}
         <div class="plan">
           <h3>{{ plan.name }}</h3>
           {% if plan.description %}<p class="plan-desc">{{ plan.description }}</p>{% endif %}
-          <ul>{% for pr in plan.prices %}<li>{{ pr.summary }}</li>{% endfor %}</ul>
-          {% if plan.max_technicians is not none or plan.max_devices is not none %}
-          <p class="plan-limits">Fits up to {% if plan.max_technicians is not none %}{{ plan.max_technicians }} technicians{% endif %}{% if plan.max_technicians is not none and plan.max_devices is not none %} and {% endif %}{% if plan.max_devices is not none %}{{ plan.max_devices }} devices{% endif %}</p>
-          {% endif %}
-          {% if signup_open %}<a class="btn btn-primary" href="/signup?plan={{ plan.id }}">Start free trial</a>{% endif %}
+          <ul>
+            {% for pr in plan.prices %}<li>{{ ic("check") }}<span>{{ pr.summary }}</span></li>{% endfor %}
+            {% if plan.max_technicians is not none %}<li>{{ ic("check") }}<span>Up to {{ plan.max_technicians }} technicians</span></li>{% endif %}
+            {% if plan.max_devices is not none %}<li>{{ ic("check") }}<span>Up to {{ plan.max_devices }} devices</span></li>{% endif %}
+          </ul>
+          {% if signup_open %}<a class="btn {{ 'btn-primary' if loop.first else 'btn-ghost' }}" href="/signup?plan={{ plan.id }}">Start free trial</a>{% endif %}
         </div>
         {% endfor %}
       </div>
-      {% if not signup_open %}<p class="hero-note">Sign-up is closed right now. Please check back soon.</p>{% endif %}
+      <div class="includes">
+        <span>{{ ic("check") }} Every feature on every plan</span>
+        <span>{{ ic("check") }} Your own relay and key</span>
+        <span>{{ ic("check") }} Change plan anytime</span>
+        <span>{{ ic("check") }} Invoices and card in a secure portal</span>
+      </div>
+      {% if not signup_open %}<p class="closed">Sign-up is closed right now. Please check back soon.</p>{% endif %}
     </div>
   </section>
   {% endif %}
 
-  <section class="install" id="install">
+  <section class="block" id="faq">
     <div class="wrap">
-      <span class="eyebrow">Install</span>
-      <h2>Run it on a fresh Ubuntu server</h2>
-      <p class="lede">The script is safe to run again: it skips what is already in place and fixes what has drifted.</p>
-      <div class="term">
-        <div class="term-bar">
-          <span>bash · Ubuntu 24.04</span>
-          <button class="copy" id="copy-cmd" type="button">Copy</button>
-        </div>
-<pre class="cmd" id="cmd"><span class="p">$ </span>git clone https://github.com/arvage/rustdesk-fleet.git
-<span class="p">$ </span>cd rustdesk-fleet
-<span class="p">$ </span>./install.sh <span class="f">--host</span> rds.example.com <span class="f">--email</span> you@example.com
-<span class="o">  relay ........ hbbs + hbbr up on 21115–21119</span>
-<span class="o">  dashboard .... rustdesk-dashboard.service active</span>
-<span class="o">  tls .......... certificate issued for rds.example.com</span>
-<span class="o">  backups ...... nightly timer enabled</span>
-<span class="k">  Done.</span> <span class="o">Open https://rds.example.com/setup to create the first admin.</span></pre>
+      <div class="head center">
+        <span class="eyebrow">{{ ic("lifebuoy") }} FAQ</span>
+        <h2>Questions, answered</h2>
       </div>
-      <div class="install-links">
-        <a href="https://github.com/arvage/rustdesk-fleet/blob/main/DEPLOYMENT.md"><b>DEPLOYMENT.md</b> full and manual steps</a>
-        <a href="https://github.com/arvage/rustdesk-fleet/blob/main/USER_GUIDE.md"><b>USER_GUIDE.md</b> day-to-day use</a>
+      <div class="faq">
+        <details><summary>What is RustDesk, and what do my technicians need? {{ ic("plus") }}</summary>
+          <p>RustDesk is a fast, open-source remote desktop client. Your technicians use the free RustDesk app, pointed at
+            your relay (your dashboard shows the settings); your customers run the branded installer you send them.</p></details>
+        <details><summary>How does the free trial work? {{ ic("plus") }}</summary>
+          <p>You get {{ trial_days }} days with everything included. A card is required to start, and we email you three days
+            before the trial ends. Cancel before then and you're not charged; otherwise your plan starts automatically.</p></details>
+        <details><summary>How am I billed? {{ ic("plus") }}</summary>
+          <p>Through Stripe, on your plan's billing period. Your dashboard shows your plan, current usage and next invoice,
+            and you can change your plan, card or billing details anytime.</p></details>
+        <details><summary>Can I use my own domain? {{ ic("plus") }}</summary>
+          <p>Yes. Add a domain like rds.yourcompany.com, create one DNS record, and we issue its certificate. Your original
+            address keeps working too, so nothing breaks if you change domains later.</p></details>
+        <details><summary>What happens to my data if I cancel? {{ ic("plus") }}</summary>
+          <p>Remote support stops, and for 30 days you can still sign in to export your data, or resubscribe and pick up
+            exactly where you left off, with the same devices and settings. After that, it's deleted.</p></details>
+        <details><summary>Can I run it on my own server instead? {{ ic("plus") }}</summary>
+          <p>Yes. RustDesk Fleet is open source, and the same software can be installed on your own Ubuntu server.
+            <a href="https://github.com/arvage/rustdesk-fleet">See the project on GitHub</a>.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="wrap">
+      <div class="final-card">
+        <h2>Give your customers support that looks like you</h2>
+        <p>Your relay, your brand, your record of every session. Set up in minutes.</p>
+        <div class="cta">
+          {% if signup_open %}<a class="btn btn-primary" href="/signup">Start your free trial {{ ic("arrow") }}</a>{% endif %}
+          <a class="btn btn-ghost" href="/signin">Sign in</a>
+        </div>
       </div>
     </div>
   </section>
@@ -578,34 +540,27 @@ footer .mono { font-family: var(--mono); font-size: 0.8rem; }
 
 <footer>
   <div class="wrap">
-    <span>RustDesk Fleet · built on the open-source RustDesk server</span>
-    <span class="mono">Python 3.12 · FastAPI · SQLite · nginx</span>
+    <a class="mark" href="#top" aria-label="RustDesk Fleet home">
+      <svg width="24" height="24" viewBox="0 0 26 26" aria-hidden="true">
+        <rect x="1" y="1" width="24" height="24" rx="7" fill="var(--accent)"></rect>
+        <circle cx="8" cy="13" r="2.6" fill="var(--accent-ink)"></circle>
+        <circle cx="18" cy="8" r="2.2" fill="var(--accent-ink)"></circle>
+        <circle cx="18" cy="18" r="2.2" fill="var(--accent-ink)"></circle>
+        <path d="M10.4 12 L16 8.8 M10.4 14 L16 17.2" stroke="var(--accent-ink)" stroke-width="1.6"></path>
+      </svg>
+      <b>RustDesk Fleet</b>
+    </a>
+    <nav aria-label="Footer">
+      <a href="#features">Features</a>
+      {% if plans %}<a href="#pricing">Pricing</a>{% endif %}
+      <a href="#faq">FAQ</a>
+      <a href="/signin">Sign in</a>
+      {% if terms_url %}<a href="{{ terms_url }}">Terms</a>{% endif %}
+      {% if privacy_url %}<a href="{{ privacy_url }}">Privacy</a>{% endif %}
+      <a href="https://github.com/arvage/rustdesk-fleet">Self-host (open source)</a>
+    </nav>
+    <small>© {{ year }} RustDesk Fleet. Built on the open-source RustDesk.</small>
   </div>
 </footer>
-
-<script nonce="{{ request.state.csp_nonce }}">
-  (function () {
-    var btn = document.getElementById('copy-cmd');
-    var text = [
-      'git clone https://github.com/arvage/rustdesk-fleet.git',
-      'cd rustdesk-fleet',
-      './install.sh --host rds.example.com --email you@example.com'
-    ].join('\n');
-    function selectCmd() {
-      var r = document.createRange();
-      r.selectNodeContents(document.getElementById('cmd'));
-      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
-      btn.textContent = 'Selected, press Ctrl+C';
-    }
-    btn.addEventListener('click', function () {
-      try {
-        navigator.clipboard.writeText(text).then(function () {
-          btn.textContent = 'Copied';
-          setTimeout(function () { btn.textContent = 'Copy'; }, 1800);
-        }, selectCmd);
-      } catch (e) { selectCmd(); }
-    });
-  })();
-</script>
 </body>
 </html>

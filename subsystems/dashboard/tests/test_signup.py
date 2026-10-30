@@ -70,7 +70,8 @@ def test_product_page_with_pricing(plan):
     assert "fonts.googleapis.com" not in r.text and "/static/site-fonts.css" in r.text
     nonce = re.search(r"'nonce-([^']+)'", r.headers.get("content-security-policy-report-only")
                       or r.headers["content-security-policy"]).group(1)
-    assert re.findall(r"<script(?: [^>]*)?>", r.text) == [f'<script nonce="{nonce}">']
+    assert all(tag == f'<script nonce="{nonce}">' for tag in re.findall(r"<script(?: [^>]*)?>", r.text))
+    assert "github.com" not in r.text.split("<footer")[0].split("id=\"faq\"")[0]      # a product page, not a project page
     assert new_client(PUBLIC).get("/static/fonts/archivo-latin-standard-normal.woff2").status_code == 200
 
 
