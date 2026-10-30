@@ -262,10 +262,13 @@ def checkout_params(customer_id: str, plan_id: int, *, success_url: str, cancel_
         "customer_update": {"address": "auto", "name": "auto"},
         "subscription_data": sub_data,
         "metadata": dict(metadata),
-        "client_reference_id": str(metadata.get("signup_id") or metadata.get("tenant_id") or ""),
         "success_url": success_url,
         "cancel_url": cancel_url,
     }
+    # Stripe refuses an empty client_reference_id, so it is left out unless set.
+    ref = metadata.get("signup_id") or metadata.get("resubscribe_tenant_id") or metadata.get("tenant_id")
+    if ref:
+        params["client_reference_id"] = str(ref)
     if settings.stripe_tax():
         params["automatic_tax"] = {"enabled": True}
     return params

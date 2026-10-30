@@ -9,6 +9,7 @@ verification link and then by its random `ref`.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -18,6 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from app import plans, settings, signup, stripe_api
 from app.deps import get_db
 from app.templates_config import templates
+
+log = logging.getLogger("rdf.public")
 
 public_app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 public_app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
@@ -142,8 +145,9 @@ async def verify_submit(request: Request):
     except stripe_api.BillingUnavailable:
         conn.close()
         return _message(request, "Sign-up is closed", "Sign-up isn't available right now.", 503)
-    except Exception:
+    except Exception as e:
         conn.close()
+        log.warning("checkout for sign-up failed: %s", e)
         return _message(request, "Something went wrong", "We couldn't reach our payment provider. "
                         "Please try the link again in a few minutes.", 502)
     conn.close()
@@ -163,8 +167,9 @@ def checkout_again(request: Request, ref: str):
     except (signup.SignupError, stripe_api.BillingUnavailable) as e:
         conn.close()
         return _message(request, "Can't continue", str(e), 400)
-    except Exception:
+    except Exception as e:
         conn.close()
+        log.warning("checkout for sign-up failed: %s", e)
         return _message(request, "Something went wrong", "We couldn't reach our payment provider. "
                         "Please try again in a few minutes.", 502)
     conn.close()

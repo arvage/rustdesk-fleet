@@ -3,6 +3,7 @@ remote-session history and file-transfer history. A cancelled tenant can
 reach only this (and sign-in) until it is purged (TenantMiddleware)."""
 import csv
 import io
+import logging
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -12,6 +13,8 @@ from app.deps import get_db, get_devices
 from app.permissions import require_perm
 from app.tenancy import Tenant, get_tenant
 from app.templates_config import templates
+
+log = logging.getLogger("rdf.export")
 
 router = APIRouter()
 
@@ -99,7 +102,8 @@ def export_resubscribe(request: Request, current_user: dict = Depends(require_au
     except signup.SignupError as e:
         request.session["flash"] = {"type": "error", "msg": str(e)}
         return RedirectResponse("/export", status_code=303)
-    except Exception:
+    except Exception as e:
+        log.warning("resubscribe checkout for tenant %s failed: %s", tenant.id, e)
         request.session["flash"] = {"type": "error", "msg": "We couldn't reach our payment provider; try again shortly."}
         return RedirectResponse("/export", status_code=303)
     return RedirectResponse(url, status_code=303)

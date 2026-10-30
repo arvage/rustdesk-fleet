@@ -235,6 +235,8 @@ class FakeStripe(HTTPClient):
             return self._expand(self.customers[seg[1]], expand)
         if seg[0] == "checkout" and seg[1] == "sessions":
             if method == "POST" and len(seg) == 2:
+                if p.get("client_reference_id") == "":
+                    raise ValueError("You passed an empty string for 'client_reference_id'.")
                 if p["customer"] not in self.customers:
                     raise KeyError(p["customer"])
                 for li in p.get("line_items", []):

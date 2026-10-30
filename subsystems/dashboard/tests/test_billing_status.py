@@ -146,6 +146,7 @@ def test_resubscribing_during_grace_keeps_relay_and_keys(signed_up):
     assert cs["payment_method_collection"] == "always"
     assert cs["subscription_data"]["trial_settings"]["end_behavior"]["missing_payment_method"] == "cancel"
     assert "trial_period_days" not in cs["subscription_data"]
+    assert cs["client_reference_id"] == str(tid)
     assert cs["customer"] == sql("SELECT stripe_customer_id FROM billing_customers WHERE tenant_id = ?", tid)[0][0]
     session_id = list(b["fake"].sessions)[-1]
     new_sub = b["fake"].complete_checkout(session_id, "fp_abc")
