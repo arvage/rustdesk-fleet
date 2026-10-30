@@ -78,6 +78,29 @@ def test_past_due_stays_open_then_suspends_after_the_days(signed_up, monkeypatch
     assert any("active again" in e[1] for e in b["emails"])
 
 
+def test_past_due_on_a_test_clock_follows_the_clock(signed_up):
+    """STRIPE_TEST_CLOCK customers: advancing the clock suspends, real time doesn't."""
+    b, tid, sub = signed_up
+    now = int(datetime.now(timezone.utc).timestamp())
+    b["fake"].test_clocks["clock_1"] = {"id": "clock_1", "object": "test_helpers.test_clock", "frozen_time": now}
+    b["fake"].sub(sub)["test_clock"] = "clock_1"
+    set_status(b, sub, "past_due", event="invoice.payment_failed")
+    assert tenant(tid)["status"] == "trial"
+    b["fake"].test_clocks["clock_1"]["frozen_time"] = now + 6 * 86400
+    billing_mod.reconcile()
+    assert tenant(tid)["status"] == "trial"
+    b["fake"].test_clocks["clock_1"]["frozen_time"] = now + 7 * 86400 + 60
+    billing_mod.reconcile()
+    assert tenant(tid)["status"] == "suspended"
+
+
+def test_unreadable_test_clock_falls_back_to_real_time(signed_up):
+    b, tid, sub = signed_up
+    b["fake"].sub(sub)["test_clock"] = "clock_missing"
+    set_status(b, sub, "past_due", event="invoice.payment_failed")
+    assert tenant(tid)["status"] == "trial" and bsub(tid)["past_due_since"]
+
+
 def test_past_due_days_setting(signed_up, monkeypatch):
     b, tid, sub = signed_up
     monkeypatch.setenv("PAST_DUE_SUSPEND_DAYS", "2")

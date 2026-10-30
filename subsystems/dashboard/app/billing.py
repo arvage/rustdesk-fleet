@@ -354,6 +354,19 @@ def _period_end(sub: dict) -> str | None:
     return _ts(max(ends)) if ends else None
 
 
+def _clock_now(client, clock) -> datetime | None:
+    """A test-clock customer (STRIPE_TEST_CLOCK) lives at the clock's time, so
+    the past-due timer advances with the clock. None (real time) if the clock
+    can't be read."""
+    clock_id = clock.get("id") if isinstance(clock, dict) else clock
+    try:
+        frozen = stripe_api.plain(client.v1.test_helpers.test_clocks.retrieve(clock_id))["frozen_time"]
+    except Exception as e:  # noqa: BLE001
+        log.warning("test clock %s unreadable, using real time: %s", clock_id, type(e).__name__)
+        return None
+    return datetime.fromtimestamp(int(frozen), timezone.utc)
+
+
 class _Synced(dict):
     _changed: str | None = None
 
@@ -371,6 +384,8 @@ def sync_subscription(sub_id: str, at: datetime | None = None, quiet: bool = Fal
     sub = stripe_api.plain(client.v1.subscriptions.retrieve(
         sub_id, {"expand": ["default_payment_method", "items.data.price.tiers"]}))
     has_card = default_card(client, sub) is not None
+    if at is None and sub.get("test_clock"):
+        at = _clock_now(client, sub["test_clock"])
     conn = get_db()
     amount, currency = mrr(sub)
     discount = ", ".join(str((d.get("coupon") if isinstance(d, dict) else d) or "") for d in (sub.get("discounts") or []))

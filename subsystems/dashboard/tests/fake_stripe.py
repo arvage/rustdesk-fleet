@@ -72,6 +72,7 @@ class FakeStripe(HTTPClient):
         self.portal_configurations: dict[str, dict] = {}
         self.meter_events: dict[str, dict] = {}
         self.meters: dict[str, dict] = {}
+        self.test_clocks: dict[str, dict] = {}
         self.coupons: dict[str, dict] = {"FRIENDS": {"id": "FRIENDS", "object": "coupon", "valid": True}}
         self.fail: dict[str, tuple[int, str]] = {}      # path prefix -> (status, message)
         self.versions: set[str] = set()
@@ -320,6 +321,8 @@ class FakeStripe(HTTPClient):
                 raise ValueError("An event with this identifier already exists")
             self.meter_events[ident] = p
             return {"object": "billing.meter_event", **p}
+        if seg[0] == "test_helpers" and seg[1] == "test_clocks":
+            return self.test_clocks[seg[2]]
         if seg[0] == "coupons":
             return self.coupons[seg[1]]
         raise KeyError(path)

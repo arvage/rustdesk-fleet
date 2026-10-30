@@ -1196,6 +1196,7 @@ later):
    | Billing Meters | Read |
    | Meter Events | Write |
    | Customer portal (billing portal configurations and sessions) | Write |
+   | Test clocks (test-mode key only, for the checklist) | Read |
 
    Everything else stays None. Put it in `STRIPE_SECRET_KEY`. If a call is
    refused, the key's request log in Stripe names the missing permission.
@@ -1288,6 +1289,9 @@ With the box in test mode and at least one public plan:
    the customer is created, so: Billing → Test clocks → create a clock, put
    its id in `STRIPE_TEST_CLOCK=clock_…` (honoured with a test key only),
    restart the dashboard and sign up a new account (steps 3 to 7 use it).
+   The past-due timer of a customer on a test clock follows the clock's
+   time, so the key needs Test clocks: Read (otherwise the log says "test
+   clock … unreadable, using real time" and step 3 never suspends).
    Advance the clock 11 days: the "trial ends in 3 days" email arrives
    (`trial_will_end`). Advance past 14 days: the subscription turns
    `active`, an invoice is paid, and the tenant becomes `active`.
