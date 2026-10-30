@@ -365,7 +365,9 @@ def sync_subscription(sub_id: str, at: datetime | None = None, quiet: bool = Fal
     if row is None or row["tenant_id"] == LEGACY_TENANT_ID:
         return None
     client = stripe_api.client()
-    sub = stripe_api.plain(client.v1.subscriptions.retrieve(sub_id, {"expand": ["default_payment_method"]}))
+    # Tiers (for the monthly amount) only come back when asked for.
+    sub = stripe_api.plain(client.v1.subscriptions.retrieve(
+        sub_id, {"expand": ["default_payment_method", "items.data.price.tiers"]}))
     has_card = default_card(client, sub) is not None
     conn = get_db()
     amount, currency = mrr(sub)

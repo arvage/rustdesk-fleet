@@ -116,7 +116,8 @@ def check_prices(entries: dict[str, str]) -> list[PriceInfo]:
     out = []
     for unit, pid in entries.items():
         try:
-            price = stripe_api.plain(client.v1.prices.retrieve(pid))
+            # Stripe leaves a price's tiers out unless asked for them.
+            price = stripe_api.plain(client.v1.prices.retrieve(pid, {"expand": ["tiers"]}))
         except Exception as e:
             raise PlanError(f"Stripe couldn't find {pid}: {getattr(e, 'user_message', None) or e}")
         meter_event = None

@@ -174,6 +174,13 @@ class FakeStripe(HTTPClient):
 
     def _expand(self, obj: dict, expand: list) -> dict:
         obj = json.loads(json.dumps(obj))
+        # Like Stripe: a price's tiers are only included when expanded.
+        if obj.get("object") == "price" and "tiers" not in (expand or []):
+            obj["tiers"] = None
+        if obj.get("object") == "subscription" and "items.data.price.tiers" not in (expand or []):
+            for item in (obj.get("items") or {}).get("data", []):
+                if isinstance(item.get("price"), dict):
+                    item["price"]["tiers"] = None
         for path in expand or []:
             keys = path.split(".")
             self._expand_path(obj, keys)
