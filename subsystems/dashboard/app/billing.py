@@ -296,6 +296,14 @@ def resubscribed(tenant_id: int, session: dict) -> None:
         _alert(f"Tenant {tenant_id}: resubscribe without a card", ["The subscription was cancelled."])
         return
     conn = get_db()
+    prev = conn.execute("SELECT stripe_subscription_id, status FROM billing_subscriptions WHERE tenant_id = ?",
+                        (tenant_id,)).fetchone()
+    if prev and prev["stripe_subscription_id"] != sub_id and prev["status"] in ("trialing", "active", "past_due"):
+        # Two Resubscribe checkouts both paid: keep the first, the provider refunds the second.
+        conn.close()
+        _alert(f"Tenant {tenant_id}: paid a second resubscription",
+               [f"Keeping {prev['stripe_subscription_id']}; cancel and refund {sub_id} in Stripe."])
+        return
     plan = (session.get("metadata") or {}).get("plan_id")
     conn.execute("""INSERT INTO billing_subscriptions (tenant_id, stripe_subscription_id, status, plan_id)
                     VALUES (?, ?, 'incomplete', ?)
@@ -356,8 +364,8 @@ def _period_end(sub: dict) -> str | None:
 
 def _clock_now(client, clock) -> datetime | None:
     """A test-clock customer (STRIPE_TEST_CLOCK) lives at the clock's time, so
-    the past-due timer advances with the clock. None (real time) if the clock
-    can't be read."""
+    the past-due timer advances with the clock (apply_status). None (real
+    time) if the clock can't be read."""
     clock_id = clock.get("id") if isinstance(clock, dict) else clock
     try:
         frozen = stripe_api.plain(client.v1.test_helpers.test_clocks.retrieve(clock_id))["frozen_time"]
@@ -391,8 +399,7 @@ def sync_subscription(sub_id: str, at: datetime | None = None, quiet: bool = Fal
     sub = stripe_api.plain(client.v1.subscriptions.retrieve(
         sub_id, {"expand": ["default_payment_method", "items.data.price.tiers"]}))
     has_card = default_card(client, sub) is not None
-    if at is None and sub.get("test_clock"):
-        at = _clock_now(client, sub["test_clock"])
+    clock = _clock_now(client, sub["test_clock"]) if at is None and sub.get("test_clock") else None
     conn = get_db()
     amount, currency = mrr(sub)
     discount = ", ".join(str((d.get("coupon") if isinstance(d, dict) else d) or "") for d in (sub.get("discounts") or []))
@@ -404,7 +411,7 @@ def sync_subscription(sub_id: str, at: datetime | None = None, quiet: bool = Fal
     conn.commit()
     conn.close()
     out = _Synced(sub)
-    out._changed = apply_status(row["tenant_id"], sub, at)
+    out._changed = apply_status(row["tenant_id"], sub, at, clock=clock)
     return out
 
 
@@ -435,12 +442,16 @@ def _fmt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def apply_status(tenant_id: int, sub: dict, at: datetime | None = None) -> str | None:
+def apply_status(tenant_id: int, sub: dict, at: datetime | None = None,
+                 clock: datetime | None = None) -> str | None:
     """Make a Stripe tenant follow its subscription. Returns what changed
-    (for the reconciliation log), or None."""
+    (for the reconciliation log), or None. 'clock' is a test clock's time: it
+    drives the past-due timer only (Stripe's dates); the grace period is ours
+    and stays on real time."""
     from app.console import lifecycle
     from app.tenancy import invalidate_cache
     now = at or _now()
+    due_now = clock or now
     conn = get_db()
     t = _tenant(conn, tenant_id)
     if t is None or tenant_id == LEGACY_TENANT_ID or t["billing_mode"] != "stripe" or t["status"] == "purged":
@@ -452,7 +463,7 @@ def apply_status(tenant_id: int, sub: dict, at: datetime | None = None) -> str |
     good = status in ("trialing", "active")
     # past_due bookkeeping
     if status == "past_due" and not bs["past_due_since"]:
-        conn.execute("UPDATE billing_subscriptions SET past_due_since = ? WHERE tenant_id = ?", (_fmt(now), tenant_id))
+        conn.execute("UPDATE billing_subscriptions SET past_due_since = ? WHERE tenant_id = ?", (_fmt(due_now), tenant_id))
         conn.commit()
         _email(tenant_id, "payment_failed")
     elif status != "past_due" and bs["past_due_since"]:
@@ -477,8 +488,8 @@ def apply_status(tenant_id: int, sub: dict, at: datetime | None = None) -> str |
             changed = "cancelled → reactivating (resubscribed)"
             _email(tenant_id, "reactivated")
     elif status == "past_due" and current in ("trial", "active"):
-        since = datetime.strptime((bs["past_due_since"] or _fmt(now))[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-        if now - since >= timedelta(days=settings.past_due_suspend_days()):
+        since = datetime.strptime((bs["past_due_since"] or _fmt(due_now))[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        if due_now - since >= timedelta(days=settings.past_due_suspend_days()):
             changed = _billing_suspend(conn, t, "past due for " + str(settings.past_due_suspend_days()) + " days")
     elif status in ("unpaid", "paused") and current in ("trial", "active"):
         changed = _billing_suspend(conn, t, status)
@@ -640,6 +651,10 @@ def resubscribe_url(tenant_id: int, home_host: str) -> str:
     if cus is None or plan_id is None:
         conn.close()
         raise signup.SignupError("Resubscribing isn't available for this account; contact your provider.")
+    live = conn.execute("SELECT status FROM billing_subscriptions WHERE tenant_id = ?", (tenant_id,)).fetchone()
+    if live and live["status"] in ("trialing", "active", "past_due"):
+        conn.close()
+        raise signup.SignupError("You've already resubscribed; your account is being reopened.")
     params = signup.checkout_params(cus[0], plan_id, trial=False, conn=conn,
                                     metadata={"resubscribe_tenant_id": str(tenant_id), "plan_id": str(plan_id)},
                                     success_url=f"https://{home_host}/export?resubscribed=1",

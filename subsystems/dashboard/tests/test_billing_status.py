@@ -94,6 +94,54 @@ def test_past_due_on_a_test_clock_follows_the_clock(signed_up):
     assert tenant(tid)["status"] == "suspended"
 
 
+def _resubscribe(b, tid):
+    c = new_client("abc.rds.example.com")
+    admin = sql("SELECT * FROM users WHERE tenant_id = ?", tid)[0]
+    c.post("/login", data={"email": admin["email"], "password": "a-long-password"})
+    r = c.post("/export/resubscribe", follow_redirects=False)
+    return c, r
+
+
+def test_resubscribing_on_a_test_clock_months_ahead(signed_up):
+    """The grace period is on real time even when the clock is far ahead."""
+    b, tid, sub = signed_up
+    ahead = int((datetime.now(timezone.utc) + timedelta(days=75)).timestamp())
+    b["fake"].test_clocks["clock_1"] = {"id": "clock_1", "object": "test_helpers.test_clock", "frozen_time": ahead}
+    b["fake"].sub(sub)["test_clock"] = "clock_1"
+    set_status(b, sub, "canceled", event="customer.subscription.deleted")
+    assert tenant(tid)["status"] == "cancelled"
+    c, r = _resubscribe(b, tid)
+    assert r.headers["location"].startswith("https://checkout.stripe.example/")
+    session_id = list(b["fake"].sessions)[-1]
+    new_sub = b["fake"].complete_checkout(session_id, "fp_abc")
+    b["fake"].sub(new_sub).update(status="active", trial_end=None, test_clock="clock_1")
+    deliver("checkout.session.completed", {"id": session_id})
+    assert tenant(tid)["status"] == "active" and tid in b["system"].up
+
+
+def test_a_second_resubscription_is_refused_and_flagged(signed_up):
+    b, tid, sub = signed_up
+    set_status(b, sub, "canceled", event="customer.subscription.deleted")
+    c, r = _resubscribe(b, tid)
+    first_session = list(b["fake"].sessions)[-1]
+    c2, r2 = _resubscribe(b, tid)                       # a second tab, before paying the first
+    second_session = list(b["fake"].sessions)[-1]
+    first = b["fake"].complete_checkout(first_session, "fp_abc")
+    b["fake"].sub(first).update(status="active", trial_end=None)
+    deliver("checkout.session.completed", {"id": first_session})
+    assert bsub(tid)["stripe_subscription_id"] == first
+    # Once the first one is paid, Resubscribe is refused.
+    sql("UPDATE tenants SET status = 'cancelled' WHERE id = ?", tid)    # as if the reopen hadn't run yet
+    _, r3 = _resubscribe(b, tid)
+    assert r3.headers["location"] == "/export"
+    # The second tab pays anyway: it isn't linked, the provider is told.
+    second = b["fake"].complete_checkout(second_session, "fp_abc")
+    b["fake"].sub(second).update(status="active", trial_end=None)
+    deliver("checkout.session.completed", {"id": second_session})
+    assert bsub(tid)["stripe_subscription_id"] == first
+    assert any("second resubscription" in a for a in b["alerts"])
+
+
 def test_unreadable_test_clock_falls_back_to_real_time(signed_up):
     b, tid, sub = signed_up
     b["fake"].sub(sub)["test_clock"] = "clock_missing"
