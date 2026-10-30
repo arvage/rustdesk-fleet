@@ -44,8 +44,20 @@ def test_creation_pushes_the_real_counts_during_the_trial(tenant):
     p = b["prices"]
     assert b["fake"].sub(sub)["status"] == "trialing"
     assert dict(_item_quantities(b["fake"], sub)) == {p["flat"]: 1, p["technician"]: 1, p["device"]: 0}
-    update = b["fake"].requests("POST", f"/v1/subscriptions/{sub}")
-    assert any(u.get("proration_behavior") == "create_prorations" for u in update)
+    # No prorations during the trial: Stripe would issue a $0 invoice per change.
+    update = [u for u in b["fake"].requests("POST", f"/v1/subscriptions/{sub}") if "items" in u]
+    assert update and all(u["proration_behavior"] == "none" for u in update)
+
+
+def test_after_the_trial_changes_are_prorated_per_the_setting(tenant):
+    b, tid, sub = tenant
+    b["fake"].sub(sub).update(status="active", trial_end=None)
+    from app import billing as billing_mod
+    billing_mod.sync_subscription(sub)
+    create_user("tech@abc.example", "tech", tenant_id=tid)
+    billing_usage.push_quantities(tid, force=True)
+    last = [u for u in b["fake"].requests("POST", f"/v1/subscriptions/{sub}") if "items" in u][-1]
+    assert last["proration_behavior"] == "create_prorations"
 
 
 def test_changes_are_pushed_at_most_once_an_hour(tenant, monkeypatch):

@@ -8,7 +8,8 @@ Licensed quantities (a plan's technician price, and its device price unless
 metered) are pushed to the subscription's items when they change, at most
 once an hour per tenant (the hourly maintenance pass), and by the daily
 reconciliation whatever the debounce says. Trials included, so the first
-invoice is right. Proration follows STRIPE_PRORATION.
+invoice is right. Proration follows STRIPE_PRORATION, except during a trial
+(none: nothing is charged yet, and Stripe would issue a $0 invoice per change).
 
 Metered devices (a device price backed by a Billing Meter): the hourly pass
 keeps each day's peak device count in billing_device_peaks, and once the
@@ -49,6 +50,12 @@ SCHEMA = """
 
 def ensure_table(conn) -> None:
     conn.executescript(SCHEMA)
+
+
+def proration_for(sub: dict) -> str:
+    """STRIPE_PRORATION, except during a trial: nothing is charged yet, and
+    prorating there only makes Stripe issue a $0 invoice for every change."""
+    return "none" if sub.get("status") == "trialing" else settings.stripe_proration()
 
 
 def counts(conn, tenant_id: int) -> dict[str, int]:
@@ -117,7 +124,7 @@ def push_quantities(tenant_id: int, force: bool = False, at: datetime | None = N
             items.append({"id": item["id"], "quantity": want[unit]})
     if items:
         client.v1.subscriptions.update(bs["stripe_subscription_id"],
-                                       {"items": items, "proration_behavior": settings.stripe_proration()})
+                                       {"items": items, "proration_behavior": proration_for(sub)})
     conn = get_db()
     conn.execute("UPDATE billing_subscriptions SET quantities = ?, quantities_pushed_at = ? WHERE tenant_id = ?",
                  (json.dumps(want, sort_keys=True), now.strftime("%Y-%m-%d %H:%M:%S"), tenant_id))

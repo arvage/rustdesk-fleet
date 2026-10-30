@@ -722,7 +722,7 @@ def change_plan(tenant_id: int, plan_id: int, by: str) -> None:
             item["quantity"] = 1 if pr["unit_type"] == "flat" else n[pr["unit_type"]]
         items.append(item)
     client.v1.subscriptions.update(bs["stripe_subscription_id"],
-                                   {"items": items, "proration_behavior": settings.stripe_proration(),
+                                   {"items": items, "proration_behavior": billing_usage.proration_for(sub),
                                     "metadata": {"plan_id": str(plan["id"])}})
     conn = get_db()
     conn.execute("UPDATE billing_subscriptions SET plan_id = ?, quantities = NULL WHERE tenant_id = ?",
