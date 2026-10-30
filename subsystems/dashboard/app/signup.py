@@ -92,6 +92,10 @@ class SignupError(Exception):
 
 def ensure_tables(conn) -> None:
     conn.executescript(SCHEMA)
+    # A created account's admin user holds the password hash; the sign-up
+    # record doesn't need its copy (cleared on creation since 2026-10).
+    conn.execute("UPDATE signups SET password_hash = '' WHERE status = 'created' AND password_hash <> ''")
+    conn.commit()
 
 
 def now() -> datetime:

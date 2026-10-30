@@ -58,6 +58,25 @@ def home(request: Request):
     return _page(request, "index.html", ctx)
 
 
+_LEGAL_TITLES = {"terms": "Terms of Service", "privacy": "Privacy Policy"}
+
+
+@public_app.get("/terms", response_class=HTMLResponse)
+@public_app.get("/privacy", response_class=HTMLResponse)
+def legal(request: Request):
+    """The provider's own text from <data dir>/legal/ (trusted HTML, edited on
+    the server); 404 until it exists."""
+    from datetime import datetime, timezone
+    name = request.url.path.strip("/")
+    path = settings.legal_page(name)
+    if path is None:
+        return _message(request, "Not found", "That page doesn't exist.", 404)
+    updated = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).strftime("%B %-d, %Y")
+    return _page(request, "legal.html", {"title": _LEGAL_TITLES[name], "content": path.read_text(),
+                                         "updated": updated, "terms_url": settings.terms_url(),
+                                         "privacy_url": settings.privacy_url()})
+
+
 @public_app.get("/signin", response_class=HTMLResponse)
 def signin(request: Request, account: str = ""):
     """Each account signs in on its own address; this finds it."""

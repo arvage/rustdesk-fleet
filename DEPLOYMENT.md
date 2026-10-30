@@ -1218,7 +1218,7 @@ later):
 | `STRIPE_TAX` | off | `on`: Stripe Tax. |
 | `STRIPE_PRORATION` | `create_prorations` | How quantity and plan changes are prorated (`none`, `always_invoice`). |
 | `PUBLIC_SITE_HOST` | `www.<PROVIDER_DOMAIN>` | The public site. |
-| `TERMS_URL`, `PRIVACY_URL` | none | Linked from sign-up (acceptance is stored with the URLs, time and IP) and the portal. |
+| `TERMS_URL`, `PRIVACY_URL` | `https://<PUBLIC_SITE_HOST>/terms` and `/privacy` once the pages below exist | Linked from sign-up (acceptance is stored with the URLs, time and IP), the product page and the portal. |
 | `SIGNUP_IP_LIMIT` | 5 | Sign-up form submissions per IP per hour. |
 | `SIGNUP_EMAIL_LIMIT` | 3 | Per email address per day. |
 | `SIGNUPS_PER_DAY` | 20 | Self-service tenants created per day in all. |
@@ -1261,8 +1261,8 @@ Steps:
 3. Stripe (test mode): steps 1 to 6 above; the webhook endpoint is
    `https://www.<PROVIDER_DOMAIN>/stripe/webhook`.
 4. Add to `/etc/rustdesk-fleet/dashboard.env`: `STRIPE_SECRET_KEY=rk_test_…`,
-   `STRIPE_WEBHOOK_SECRET=whsec_…`, and, when you have them, `TERMS_URL`,
-   `PRIVACY_URL`.
+   `STRIPE_WEBHOOK_SECRET=whsec_…`, and, if your legal pages live elsewhere,
+   `TERMS_URL`, `PRIVACY_URL`.
 5. Merge the branch in `~/rustdesk-fleet`, then
    `./install.sh --provider-only --provider-domain rds.example.com --yes`. It
    installs `stripe==16.0.1`, issues the public host's certificate, writes
@@ -1273,6 +1273,18 @@ Steps:
    unchanged; `https://www.<PROVIDER_DOMAIN>/` shows the product page;
    console → Billing says test mode and no errors; create a plan.
 7. Run the test-mode checklist below.
+
+### Terms and Privacy pages
+
+Your own Terms of Service and Privacy Policy go on the server, not in the
+repo: `/opt/rustdesk-fleet/legal/terms.html` and `privacy.html`, owned by the
+dashboard user. Each is an HTML fragment (`<h2>`, `<p>`, `<ul>`…, no
+`<html>` or scripts). The public site shows them at `/terms` and `/privacy`
+in its own layout, with the file's modification date as "Last updated", and
+`TERMS_URL` / `PRIVACY_URL` default to those addresses. After adding or
+moving them, save any plan in the console (Plans) so the Stripe Customer
+Portal links to them too. Have a lawyer review them; they are your contract
+with your customers.
 
 ### Stripe test-mode checklist
 

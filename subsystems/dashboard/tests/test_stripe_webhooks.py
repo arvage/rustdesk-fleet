@@ -71,6 +71,7 @@ def test_checkout_completed_creates_the_tenant_with_the_chosen_password(billing)
     sub = finish_checkout(billing, row)
     su = sql("SELECT * FROM signups WHERE id = ?", row["id"])[0]
     assert su["status"] == "created" and su["tenant_id"] and su["stripe_subscription_id"] == sub
+    assert su["password_hash"] == ""                    # the admin user has it now
     t = sql("SELECT * FROM tenants WHERE id = ?", su["tenant_id"])[0]
     assert t["slug"] == "abc" and t["billing_mode"] == "stripe"
     assert sql("SELECT stripe_customer_id FROM billing_customers WHERE tenant_id = ?", t["id"])[0][0] == row["stripe_customer_id"]

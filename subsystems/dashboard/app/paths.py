@@ -15,6 +15,9 @@ FLEET_DB = DATA_DIR / "fleet.sqlite3"
 # runtime every tenant's comes from its relays row.
 HBBS_DB = DATA_DIR / "data" / "db_v2.sqlite3"
 OS_LIFECYCLE_CACHE = DATA_DIR / "os-lifecycle.json"
+# The provider's own Terms of Service and Privacy Policy (terms.html,
+# privacy.html): HTML fragments the public site shows at /terms and /privacy.
+LEGAL_DIR = DATA_DIR / "legal"
 # Per-tenant files (installers, branding, email logo): app.tenancy.tenant_files_dir().
 
 # Tests set this so the background watcher threads (routes/api.py,

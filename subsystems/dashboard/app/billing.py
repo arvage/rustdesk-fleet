@@ -255,7 +255,8 @@ def creation_finished(signup_id: int, tenant_id: int) -> None:
     conn.execute("INSERT OR IGNORE INTO billing_subscriptions (tenant_id, stripe_subscription_id, status, plan_id)"
                  " VALUES (?, ?, 'incomplete', ?)", (tenant_id, row["stripe_subscription_id"], row["plan_id"]))
     conn.commit()
-    signup._set(conn, signup_id, status="created", tenant_id=tenant_id, failure_reason=None)
+    # The admin account has its own copy of the password hash now.
+    signup._set(conn, signup_id, status="created", tenant_id=tenant_id, failure_reason=None, password_hash="")
     conn.close()
     try:
         stripe_api.client().v1.subscriptions.update(row["stripe_subscription_id"],

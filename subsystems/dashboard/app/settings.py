@@ -215,12 +215,23 @@ def public_site_host() -> str:
     return f"www.{d}" if d else ""
 
 
+def legal_page(name: str):
+    """The provider's terms.html or privacy.html, or None if not written."""
+    from app.paths import LEGAL_DIR
+    path = LEGAL_DIR / f"{name}.html"
+    return path if path.is_file() else None
+
+
 def terms_url() -> str:
-    return _env("TERMS_URL")
+    """TERMS_URL, else the public site's /terms when terms.html exists."""
+    host = public_site_host()
+    return _env("TERMS_URL") or (f"https://{host}/terms" if host and legal_page("terms") else "")
 
 
 def privacy_url() -> str:
-    return _env("PRIVACY_URL")
+    """PRIVACY_URL, else the public site's /privacy when privacy.html exists."""
+    host = public_site_host()
+    return _env("PRIVACY_URL") or (f"https://{host}/privacy" if host and legal_page("privacy") else "")
 
 
 def _int_setting(name: str, default: int, minimum: int = 0) -> int:

@@ -6,11 +6,12 @@
   <title>{% block title %}RustDesk Fleet{% endblock %}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css?v=9">
+  {% block head %}{% endblock %}
   <script src="/static/app.js?v=2" defer></script>
 </head>
 <body>
 <div class="login-shell">
-  <div class="login-card" style="max-width:520px">
+  <div class="login-card" style="max-width:{% block card_width %}520px{% endblock %}">
     <div class="login-logo">
       <div class="brand-icon">R</div>
       <div>
